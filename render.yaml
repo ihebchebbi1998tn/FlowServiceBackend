@@ -3,11 +3,11 @@
 # Start Command: dotnet out/MyApi.dll
 
 # Environment Variables needed on Render:
-# MYSQL_HOST=your-mysql-host
-# MYSQL_PORT=3306
-# MYSQL_DATABASE=your-database-name
-# MYSQL_USER=your-mysql-user
-# MYSQL_PASSWORD=your-mysql-password
+# POSTGRES_HOST=dpg-d32qof3e5dus73b5rj3g-a
+# POSTGRES_PORT=5432
+# POSTGRES_DATABASE=flowsolution
+# POSTGRES_USER=flowsolution_user
+# POSTGRES_PASSWORD=yhGYoRBUSIxtPpFfEytp6nwyGKXKnUJW
 # PORT=10000 (Render will set this automatically)
 # ASPNETCORE_ENVIRONMENT=Production
 
