@@ -36,10 +36,10 @@ namespace FlowServiceBackend.Models
         [MaxLength(100)]
         public string Industry { get; set; } = string.Empty;
 
-        [MaxLength(500)]
+        [Column(TypeName = "text")]
         public string? AccessToken { get; set; }
 
-        [MaxLength(500)]
+        [Column(TypeName = "text")]
         public string? RefreshToken { get; set; }
 
         public DateTime? TokenExpiresAt { get; set; }
