@@ -10,7 +10,6 @@ namespace MyApi.Models
         public string Id { get; set; } = Guid.NewGuid().ToString();
 
         [Required]
-        [ForeignKey("MainAdminUser")]
         public required int UserId { get; set; }
 
         [Required]

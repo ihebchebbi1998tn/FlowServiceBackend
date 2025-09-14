@@ -21,6 +21,12 @@ RUN dotnet publish "./MyApi.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:U
 # Final stage/image
 FROM base AS final
 WORKDIR /app
+
+# Create directory for data protection keys
+USER root
+RUN mkdir -p /app/keys && chown app:app /app/keys
+USER app
+
 COPY --from=publish /app/publish .
 ENTRYPOINT ["dotnet", "MyApi.dll"]
 

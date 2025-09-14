@@ -62,10 +62,11 @@ namespace MyApi.Data
                 entity.Property(e => e.SoundEnabled).HasDefaultValue(true);
                 entity.Property(e => e.AutoSave).HasDefaultValue(true);
 
-                // Relationship
-                entity.HasOne<MainAdminUser>()
+                // Explicit relationship configuration
+                entity.HasOne(e => e.User)
                     .WithMany()
                     .HasForeignKey(e => e.UserId)
+                    .HasPrincipalKey(u => u.Id)
                     .OnDelete(DeleteBehavior.Cascade);
             });
         }
