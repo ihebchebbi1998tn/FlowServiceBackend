@@ -11,9 +11,8 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 
 // Configure Entity Framework with automatic migration
-var connectionString = builder.Environment.IsProduction() 
-    ? $"Host={Environment.GetEnvironmentVariable("POSTGRES_HOST")};Port={Environment.GetEnvironmentVariable("POSTGRES_PORT")};Database={Environment.GetEnvironmentVariable("POSTGRES_DATABASE")};Username={Environment.GetEnvironmentVariable("POSTGRES_USER")};Password={Environment.GetEnvironmentVariable("POSTGRES_PASSWORD")};SSL Mode=Require;Trust Server Certificate=true;"
-    : builder.Configuration.GetConnectionString("DefaultConnection") ?? "Server=(localdb)\\mssqllocaldb;Database=FlowServiceDb;Trusted_Connection=true;MultipleActiveResultSets=true";
+var connectionString = Environment.GetEnvironmentVariable("DATABASE_URL") ?? 
+    "postgresql://neondb_owner:npg_jObtF4Ke1lkz@ep-divine-glade-adk94w1g-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require";
 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
 {
