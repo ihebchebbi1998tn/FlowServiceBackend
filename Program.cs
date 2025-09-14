@@ -73,7 +73,7 @@ builder.Logging.AddDebug();
 var app = builder.Build();
 
 // Configure port for Render
-var port = Environment.GetEnvironmentVariable("PORT") ?? "10000";
+var port = Environment.GetEnvironmentVariable("PORT") ?? "80";
 app.Urls.Add($"http://0.0.0.0:{port}");
 
 // Auto-migrate database on startup

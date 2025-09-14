@@ -32,7 +32,7 @@
     "Production": {
       "commandName": "Project",
       "dotnetRunMessages": true,
-      "applicationUrl": "http://0.0.0.0:10000",
+      "applicationUrl": "http://0.0.0.0:80",
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Production"
       }
