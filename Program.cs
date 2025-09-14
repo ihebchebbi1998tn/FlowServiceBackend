@@ -43,7 +43,6 @@ if (!string.IsNullOrEmpty(rawConnection))
                 Database = database,
                 // Neon requires SSL
                 SslMode = SslMode.Require,
-                TrustServerCertificate = true
             };
 
             // Append query params if they exist (?sslmode=...&...)
