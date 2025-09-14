@@ -36,9 +36,28 @@ namespace MyApi.DTOs
         public string? QuickAccessItems { get; set; }
     }
 
-    public class UpdatePreferencesRequest : CreatePreferencesRequest
+    public class UpdatePreferencesRequest
     {
-        // Inherits all fields from CreatePreferencesRequest
+        public string? Theme { get; set; }
+        public string? Language { get; set; }
+        public string? PrimaryColor { get; set; }
+        public string? LayoutMode { get; set; }
+        public string? DataView { get; set; }
+        public string? Timezone { get; set; }
+        public string? DateFormat { get; set; }
+        public string? TimeFormat { get; set; }
+        public string? Currency { get; set; }
+        public string? NumberFormat { get; set; }
+        public string? Notifications { get; set; }
+        public bool? SidebarCollapsed { get; set; }
+        public bool? CompactMode { get; set; }
+        public bool? ShowTooltips { get; set; }
+        public bool? AnimationsEnabled { get; set; }
+        public bool? SoundEnabled { get; set; }
+        public bool? AutoSave { get; set; }
+        public string? WorkArea { get; set; }
+        public string? DashboardLayout { get; set; }
+        public string? QuickAccessItems { get; set; }
     }
 
     public class PreferencesResponse

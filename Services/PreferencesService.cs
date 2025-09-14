@@ -83,16 +83,16 @@ namespace MyApi.Services
                 var preferences = new UserPreferences
                 {
                     UserId = userIdInt,
-                    Theme = request.Theme,
-                    Language = request.Language,
-                    PrimaryColor = request.PrimaryColor,
-                    LayoutMode = request.LayoutMode,
-                    DataView = request.DataView,
+                    Theme = request.Theme ?? "system",
+                    Language = request.Language ?? "en",
+                    PrimaryColor = request.PrimaryColor ?? "blue",
+                    LayoutMode = request.LayoutMode ?? "sidebar",
+                    DataView = request.DataView ?? "table",
                     Timezone = request.Timezone,
-                    DateFormat = request.DateFormat,
-                    TimeFormat = request.TimeFormat,
-                    Currency = request.Currency,
-                    NumberFormat = request.NumberFormat,
+                    DateFormat = request.DateFormat ?? "MM/DD/YYYY",
+                    TimeFormat = request.TimeFormat ?? "12h",
+                    Currency = request.Currency ?? "USD",
+                    NumberFormat = request.NumberFormat ?? "comma",
                     Notifications = request.Notifications ?? "{}",
                     SidebarCollapsed = request.SidebarCollapsed ?? false,
                     CompactMode = request.CompactMode ?? false,
@@ -158,16 +158,16 @@ namespace MyApi.Services
                 if (preferences == null)
                     return null;
 
-                preferences.Theme = request.Theme;
-                preferences.Language = request.Language;
-                preferences.PrimaryColor = request.PrimaryColor;
-                preferences.LayoutMode = request.LayoutMode;
-                preferences.DataView = request.DataView;
-                preferences.Timezone = request.Timezone;
-                preferences.DateFormat = request.DateFormat;
-                preferences.TimeFormat = request.TimeFormat;
-                preferences.Currency = request.Currency;
-                preferences.NumberFormat = request.NumberFormat;
+                preferences.Theme = request.Theme ?? preferences.Theme;
+                preferences.Language = request.Language ?? preferences.Language;
+                preferences.PrimaryColor = request.PrimaryColor ?? preferences.PrimaryColor;
+                preferences.LayoutMode = request.LayoutMode ?? preferences.LayoutMode;
+                preferences.DataView = request.DataView ?? preferences.DataView;
+                preferences.Timezone = request.Timezone ?? preferences.Timezone;
+                preferences.DateFormat = request.DateFormat ?? preferences.DateFormat;
+                preferences.TimeFormat = request.TimeFormat ?? preferences.TimeFormat;
+                preferences.Currency = request.Currency ?? preferences.Currency;
+                preferences.NumberFormat = request.NumberFormat ?? preferences.NumberFormat;
                 preferences.Notifications = request.Notifications ?? preferences.Notifications;
                 preferences.SidebarCollapsed = request.SidebarCollapsed ?? preferences.SidebarCollapsed;
                 preferences.CompactMode = request.CompactMode ?? preferences.CompactMode;
