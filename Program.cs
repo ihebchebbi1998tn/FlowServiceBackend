@@ -3,6 +3,7 @@ using FlowServiceBackend.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Npgsql;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -11,8 +12,35 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 
 // Configure Entity Framework with automatic migration
-var connectionString = Environment.GetEnvironmentVariable("DATABASE_URL") ?? 
+var rawConnection = Environment.GetEnvironmentVariable("DATABASE_URL") ??
     "postgresql://neondb_owner:npg_jObtF4Ke1lkz@ep-divine-glade-adk94w1g-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require";
+
+string connectionString;
+if (!string.IsNullOrEmpty(rawConnection) && (rawConnection.StartsWith("postgres://") || rawConnection.StartsWith("postgresql://")))
+{
+    var uri = new Uri(rawConnection);
+    var userInfo = uri.UserInfo.Split(':', 2);
+    var username = Uri.UnescapeDataString(userInfo.ElementAtOrDefault(0) ?? "");
+    var password = Uri.UnescapeDataString(userInfo.ElementAtOrDefault(1) ?? "");
+
+    var npgBuilder = new NpgsqlConnectionStringBuilder
+    {
+        Host = uri.Host,
+        Port = uri.Port > 0 ? uri.Port : 5432,
+        Username = username,
+        Password = password,
+        Database = uri.AbsolutePath.TrimStart('/'),
+        SslMode = SslMode.Require,
+    };
+
+    // Optionally handle other query params if needed (sslmode is already enforced above)
+    connectionString = npgBuilder.ToString();
+}
+else
+{
+    // Already in key=value form or fallback
+    connectionString = rawConnection;
+}
 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
 {
