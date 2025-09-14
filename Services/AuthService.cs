@@ -51,7 +51,7 @@ namespace FlowServiceBackend.Services
                     };
                 }
 
-                var (accessToken, refreshToken, expiresAt) = await GenerateTokensAsync(user);
+                var (accessToken, refreshToken, expiresAt) = GenerateTokensAsync(user);
 
                 // Update user login info
                 user.LastLoginAt = DateTime.UtcNow;
@@ -121,7 +121,7 @@ namespace FlowServiceBackend.Services
                 _context.MainAdminUsers.Add(newUser);
                 await _context.SaveChangesAsync();
 
-                var (accessToken, refreshToken, expiresAt) = await GenerateTokensAsync(newUser);
+                var (accessToken, refreshToken, expiresAt) = GenerateTokensAsync(newUser);
 
                 // Update user with tokens
                 newUser.AccessToken = accessToken;
@@ -168,7 +168,7 @@ namespace FlowServiceBackend.Services
                     };
                 }
 
-                var (newAccessToken, newRefreshToken, expiresAt) = await GenerateTokensAsync(user);
+                var (newAccessToken, newRefreshToken, expiresAt) = GenerateTokensAsync(user);
 
                 user.AccessToken = newAccessToken;
                 user.RefreshToken = newRefreshToken;
@@ -295,7 +295,7 @@ namespace FlowServiceBackend.Services
             }
         }
 
-        private async Task<(string accessToken, string refreshToken, DateTime expiresAt)> GenerateTokensAsync(MainAdminUser user)
+        private (string accessToken, string refreshToken, DateTime expiresAt) GenerateTokensAsync(MainAdminUser user)
         {
             var jwtKey = _configuration["Jwt:Key"] ?? "YourSuperSecretKeyHere12345";
             var jwtIssuer = _configuration["Jwt:Issuer"] ?? "FlowServiceBackend";
@@ -386,7 +386,7 @@ namespace FlowServiceBackend.Services
                     };
                 }
 
-                var (accessToken, refreshToken, expiresAt) = await GenerateTokensAsync(user);
+                var (accessToken, refreshToken, expiresAt) = GenerateTokensAsync(user);
 
                 // Update user login info
                 user.LastLoginAt = DateTime.UtcNow;

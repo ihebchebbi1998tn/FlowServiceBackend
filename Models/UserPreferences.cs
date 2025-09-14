@@ -81,6 +81,6 @@ namespace FlowServiceBackend.Models
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
         // Navigation property
-        public required virtual MainAdminUser User { get; set; }
+        public virtual MainAdminUser? User { get; set; }
     }
 }
