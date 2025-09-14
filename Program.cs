@@ -81,7 +81,7 @@ using (var scope = app.Services.CreateScope())
 {
     var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
     var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-    
+
     try
     {
         // Ensure database is created and migrations are applied
@@ -96,12 +96,9 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
+
+app.UseSwagger();
+app.UseSwaggerUI();
 
 // Use CORS
 app.UseCors("AllowFrontend");
@@ -113,6 +110,8 @@ app.UseAuthorization();
 
 app.MapControllers();
 
+// Redirect root URL to Swagger
+app.MapGet("/", () => Results.Redirect("/swagger"));
 // Health check endpoint
 app.MapGet("/health", () => new { status = "healthy", timestamp = DateTime.UtcNow });
 
