@@ -20,8 +20,11 @@ namespace FlowServiceBackend.Services
         {
             try
             {
+                if (!int.TryParse(userId, out int userIdInt))
+                    return null;
+                    
                 var preferences = await _context.UserPreferences
-                    .FirstOrDefaultAsync(p => p.UserId == userId);
+                    .FirstOrDefaultAsync(p => p.UserId == userIdInt);
 
                 if (preferences == null)
                     return null;
@@ -65,9 +68,12 @@ namespace FlowServiceBackend.Services
         {
             try
             {
+                if (!int.TryParse(userId, out int userIdInt))
+                    throw new ArgumentException("Invalid user ID format");
+                    
                 // Check if preferences already exist
                 var existingPreferences = await _context.UserPreferences
-                    .FirstOrDefaultAsync(p => p.UserId == userId);
+                    .FirstOrDefaultAsync(p => p.UserId == userIdInt);
 
                 if (existingPreferences != null)
                 {
@@ -76,7 +82,7 @@ namespace FlowServiceBackend.Services
 
                 var preferences = new UserPreferences
                 {
-                    UserId = userId,
+                    UserId = userIdInt,
                     Theme = request.Theme,
                     Language = request.Language,
                     PrimaryColor = request.PrimaryColor,
@@ -143,8 +149,11 @@ namespace FlowServiceBackend.Services
         {
             try
             {
+                if (!int.TryParse(userId, out int userIdInt))
+                    return null;
+                    
                 var preferences = await _context.UserPreferences
-                    .FirstOrDefaultAsync(p => p.UserId == userId);
+                    .FirstOrDefaultAsync(p => p.UserId == userIdInt);
 
                 if (preferences == null)
                     return null;
@@ -212,8 +221,11 @@ namespace FlowServiceBackend.Services
         {
             try
             {
+                if (!int.TryParse(userId, out int userIdInt))
+                    return false;
+                    
                 var preferences = await _context.UserPreferences
-                    .FirstOrDefaultAsync(p => p.UserId == userId);
+                    .FirstOrDefaultAsync(p => p.UserId == userIdInt);
 
                 if (preferences == null)
                     return false;

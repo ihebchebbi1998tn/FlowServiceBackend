@@ -44,7 +44,7 @@ namespace FlowServiceBackend.DTOs
     public class PreferencesResponse
     {
         public required string Id { get; set; }
-        public required string UserId { get; set; }
+        public required int UserId { get; set; }
         public required string Theme { get; set; }
         public required string Language { get; set; }
         public required string PrimaryColor { get; set; }
