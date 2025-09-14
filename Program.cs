@@ -73,7 +73,7 @@ builder.Logging.AddDebug();
 var app = builder.Build();
 
 // Configure port for Render
-var port = Environment.GetEnvironmentVariable("PORT") ?? "80";
+var port = Environment.GetEnvironmentVariable("PORT") ?? "10000";
 app.Urls.Add($"http://0.0.0.0:{port}");
 
 // Auto-migrate database on startup
@@ -81,12 +81,24 @@ using (var scope = app.Services.CreateScope())
 {
     var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
     var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-
+    
     try
     {
         // Ensure database is created and migrations are applied
         logger.LogInformation("Applying database migrations...");
-        context.Database.Migrate();
+        
+        // Drop and recreate database to ensure clean state (only in development)
+        if (app.Environment.IsDevelopment())
+        {
+            logger.LogInformation("Development environment detected. Ensuring database exists...");
+            context.Database.EnsureCreated();
+        }
+        else
+        {
+            // In production, use migrations
+            context.Database.Migrate();
+        }
+        
         logger.LogInformation("Database migrations completed successfully.");
     }
     catch (Exception ex)
@@ -96,7 +108,8 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
-
+// Configure the HTTP request pipeline.
+// Enable Swagger in all environments
 app.UseSwagger();
 app.UseSwaggerUI();
 
@@ -112,6 +125,7 @@ app.MapControllers();
 
 // Redirect root URL to Swagger
 app.MapGet("/", () => Results.Redirect("/swagger"));
+
 // Health check endpoint
 app.MapGet("/health", () => new { status = "healthy", timestamp = DateTime.UtcNow });
 

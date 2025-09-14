@@ -71,10 +71,17 @@ namespace FlowServiceBackend.Controllers
             {
                 if (!ModelState.IsValid)
                 {
+                    var errors = ModelState
+                        .Where(x => x.Value.Errors.Count > 0)
+                        .Select(x => new { Field = x.Key, Errors = x.Value.Errors.Select(e => e.ErrorMessage) })
+                        .ToArray();
+                    
+                    _logger.LogWarning("Invalid signup data provided. Validation errors: {@Errors}", errors);
+                    
                     return BadRequest(new AuthResponseDto
                     {
                         Success = false,
-                        Message = "Invalid signup data provided"
+                        Message = $"Invalid signup data provided: {string.Join(", ", errors.SelectMany(e => e.Errors))}"
                     });
                 }
 
@@ -311,6 +318,38 @@ namespace FlowServiceBackend.Controllers
             {
                 _logger.LogError(ex, "Error checking auth status");
                 return StatusCode(500, new { message = "An internal error occurred" });
+            }
+        }
+
+        /// <summary>
+        /// Test database connection and basic functionality
+        /// </summary>
+        /// <returns>Database test results</returns>
+        [HttpGet("test-db")]
+        public async Task<IActionResult> TestDatabase()
+        {
+            try
+            {
+                var userCount = await _authService.GetUserByEmailAsync("test@example.com");
+                var dbConnected = true;
+                
+                return Ok(new
+                {
+                    databaseConnected = dbConnected,
+                    message = "Database connection test successful",
+                    timestamp = DateTime.UtcNow
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Database test failed");
+                return StatusCode(500, new 
+                { 
+                    databaseConnected = false,
+                    message = "Database connection test failed",
+                    error = ex.Message,
+                    timestamp = DateTime.UtcNow
+                });
             }
         }
     }

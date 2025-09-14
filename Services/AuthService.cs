@@ -87,12 +87,16 @@ namespace FlowServiceBackend.Services
         {
             try
             {
+                _logger.LogInformation("Starting signup process for email: {Email}", signupDto.Email);
+                
                 // Check if user already exists
+                _logger.LogInformation("Checking if user exists for email: {Email}", signupDto.Email);
                 var existingUser = await _context.MainAdminUsers
                     .FirstOrDefaultAsync(u => u.Email.ToLower() == signupDto.Email.ToLower());
 
                 if (existingUser != null)
                 {
+                    _logger.LogWarning("User already exists with email: {Email}", signupDto.Email);
                     return new AuthResponseDto
                     {
                         Success = false,
@@ -101,7 +105,10 @@ namespace FlowServiceBackend.Services
                 }
 
                 // Create new user
+                _logger.LogInformation("Hashing password for user: {Email}", signupDto.Email);
                 var hashedPassword = signupDto.Password == "nopassword" ? "nopassword" : HashPassword(signupDto.Password);
+                
+                _logger.LogInformation("Creating new user object for email: {Email}", signupDto.Email);
                 var newUser = new MainAdminUser
                 {
                     Email = signupDto.Email.ToLower(),
@@ -118,19 +125,26 @@ namespace FlowServiceBackend.Services
                     IsActive = true
                 };
 
+                _logger.LogInformation("Adding user to database context for email: {Email}", signupDto.Email);
                 _context.MainAdminUsers.Add(newUser);
+                
+                _logger.LogInformation("Saving changes to database for email: {Email}", signupDto.Email);
                 await _context.SaveChangesAsync();
 
+                _logger.LogInformation("Generating tokens for new user: {Email}", signupDto.Email);
                 var (accessToken, refreshToken, expiresAt) = GenerateTokensAsync(newUser);
 
                 // Update user with tokens
+                _logger.LogInformation("Updating user with tokens for email: {Email}", signupDto.Email);
                 newUser.AccessToken = accessToken;
                 newUser.RefreshToken = refreshToken;
                 newUser.TokenExpiresAt = expiresAt;
                 newUser.LastLoginAt = DateTime.UtcNow;
 
+                _logger.LogInformation("Saving token updates to database for email: {Email}", signupDto.Email);
                 await _context.SaveChangesAsync();
 
+                _logger.LogInformation("User registration completed successfully for email: {Email}", signupDto.Email);
                 return new AuthResponseDto
                 {
                     Success = true,
@@ -143,7 +157,7 @@ namespace FlowServiceBackend.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error during signup for email: {Email}", signupDto.Email);
+                _logger.LogError(ex, "Error during signup for email: {Email}. Exception: {Exception}", signupDto.Email, ex.ToString());
                 return new AuthResponseDto
                 {
                     Success = false,
