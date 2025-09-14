@@ -187,6 +187,36 @@ namespace MyApi.Controllers
         }
 
         /// <summary>
+        /// Get user information by user ID (no authorization required)
+        /// </summary>
+        /// <param name="userId">User ID</param>
+        /// <returns>User data</returns>
+        [HttpGet("user/{userId}")]
+        public async Task<ActionResult<UserDto>> GetUser(string userId)
+        {
+            try
+            {
+                if (!int.TryParse(userId, out var userIdInt))
+                {
+                    return BadRequest(new { message = "Invalid user ID format" });
+                }
+
+                var user = await _authService.GetUserByIdAsync(userIdInt);
+                if (user == null)
+                {
+                    return NotFound(new { message = "User not found" });
+                }
+
+                return Ok(user);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting user {UserId}", userId);
+                return StatusCode(500, new { message = "An internal error occurred" });
+            }
+        }
+
+        /// <summary>
         /// Get current user information
         /// </summary>
         /// <returns>Current user data</returns>
@@ -214,6 +244,47 @@ namespace MyApi.Controllers
             {
                 _logger.LogError(ex, "Error getting current user");
                 return StatusCode(500, new { message = "An internal error occurred" });
+            }
+        }
+
+        /// <summary>
+        /// Update user information by user ID (no authorization required)
+        /// </summary>
+        /// <param name="userId">User ID</param>
+        /// <param name="updateRequest">User update data</param>
+        /// <returns>Updated user data</returns>
+        [HttpPut("user/{userId}")]
+        public async Task<ActionResult<AuthResponseDto>> UpdateUser(string userId, [FromBody] UpdateUserRequestDto updateRequest)
+        {
+            try
+            {
+                if (!int.TryParse(userId, out var userIdInt))
+                {
+                    return BadRequest(new AuthResponseDto
+                    {
+                        Success = false,
+                        Message = "Invalid user ID format"
+                    });
+                }
+
+                var response = await _authService.UpdateUserAsync(userIdInt, updateRequest);
+
+                if (!response.Success)
+                {
+                    return BadRequest(response);
+                }
+
+                _logger.LogInformation("User updated successfully: {UserId}", userIdInt);
+                return Ok(response);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error updating user {UserId}", userId);
+                return StatusCode(500, new AuthResponseDto
+                {
+                    Success = false,
+                    Message = "An internal error occurred during user update"
+                });
             }
         }
 
