@@ -1,6 +1,7 @@
 using MyApi.Data;
 using MyApi.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Npgsql;
@@ -104,14 +105,6 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
 builder.Services.AddAuthorization();
 
-// Configure Data Protection for production environment
-if (!builder.Environment.IsDevelopment())
-{
-    builder.Services.AddDataProtection()
-        .PersistKeysToFileSystem(new DirectoryInfo("/app/keys"))
-        .SetApplicationName("FlowServiceBackend")
-        .SetDefaultKeyLifetime(TimeSpan.FromDays(90));
-}
 
 // Register custom services
 builder.Services.AddScoped<IAuthService, AuthService>();
