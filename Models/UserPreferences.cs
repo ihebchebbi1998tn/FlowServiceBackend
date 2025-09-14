@@ -11,7 +11,7 @@ namespace FlowServiceBackend.Models
 
         [Required]
         [ForeignKey("MainAdminUser")]
-        public string UserId { get; set; }
+        public required string UserId { get; set; }
 
         [Required]
         [MaxLength(20)]
@@ -81,6 +81,6 @@ namespace FlowServiceBackend.Models
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
         // Navigation property
-        public virtual MainAdminUser User { get; set; }
+        public required virtual MainAdminUser User { get; set; }
     }
 }

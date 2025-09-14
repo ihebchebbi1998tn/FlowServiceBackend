@@ -43,18 +43,18 @@ namespace FlowServiceBackend.DTOs
 
     public class PreferencesResponse
     {
-        public string Id { get; set; }
-        public string UserId { get; set; }
-        public string Theme { get; set; }
-        public string Language { get; set; }
-        public string PrimaryColor { get; set; }
-        public string LayoutMode { get; set; }
-        public string DataView { get; set; }
+        public required string Id { get; set; }
+        public required string UserId { get; set; }
+        public required string Theme { get; set; }
+        public required string Language { get; set; }
+        public required string PrimaryColor { get; set; }
+        public required string LayoutMode { get; set; }
+        public required string DataView { get; set; }
         public string? Timezone { get; set; }
-        public string DateFormat { get; set; }
-        public string TimeFormat { get; set; }
-        public string Currency { get; set; }
-        public string NumberFormat { get; set; }
+        public required string DateFormat { get; set; }
+        public required string TimeFormat { get; set; }
+        public required string Currency { get; set; }
+        public required string NumberFormat { get; set; }
         public string? Notifications { get; set; }
         public bool SidebarCollapsed { get; set; }
         public bool CompactMode { get; set; }
