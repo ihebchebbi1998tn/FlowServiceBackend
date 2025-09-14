@@ -6,9 +6,8 @@ using System.Security.Claims;
 
 namespace MyApi.Controllers
 {
-    [ApiController]
+[ApiController]
     [Route("api/[controller]")]
-    [Authorize]
     public class PreferencesController : ControllerBase
     {
         private readonly IPreferencesService _preferencesService;
@@ -20,15 +19,14 @@ namespace MyApi.Controllers
             _logger = logger;
         }
 
-        [HttpGet]
-        public async Task<IActionResult> GetUserPreferences()
+        [HttpGet("{userId}")]
+        public async Task<IActionResult> GetUserPreferences(string userId)
         {
             try
             {
-                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 if (string.IsNullOrEmpty(userId))
                 {
-                    return Unauthorized("User ID not found in token");
+                    return BadRequest("User ID is required");
                 }
 
                 var preferences = await _preferencesService.GetUserPreferencesAsync(userId);
@@ -56,15 +54,14 @@ namespace MyApi.Controllers
             }
         }
 
-        [HttpPost]
-        public async Task<IActionResult> CreateUserPreferences([FromBody] CreatePreferencesRequest request)
+        [HttpPost("{userId}")]
+        public async Task<IActionResult> CreateUserPreferences(string userId, [FromBody] CreatePreferencesRequest request)
         {
             try
             {
-                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 if (string.IsNullOrEmpty(userId))
                 {
-                    return Unauthorized("User ID not found in token");
+                    return BadRequest("User ID is required");
                 }
 
                 var preferences = await _preferencesService.CreateUserPreferencesAsync(userId, request);
@@ -95,15 +92,14 @@ namespace MyApi.Controllers
             }
         }
 
-        [HttpPut]
-        public async Task<IActionResult> UpdateUserPreferences([FromBody] UpdatePreferencesRequest request)
+        [HttpPut("{userId}")]
+        public async Task<IActionResult> UpdateUserPreferences(string userId, [FromBody] UpdatePreferencesRequest request)
         {
             try
             {
-                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 if (string.IsNullOrEmpty(userId))
                 {
-                    return Unauthorized("User ID not found in token");
+                    return BadRequest("User ID is required");
                 }
 
                 var preferences = await _preferencesService.UpdateUserPreferencesAsync(userId, request);
@@ -131,15 +127,14 @@ namespace MyApi.Controllers
             }
         }
 
-        [HttpDelete]
-        public async Task<IActionResult> DeleteUserPreferences()
+        [HttpDelete("{userId}")]
+        public async Task<IActionResult> DeleteUserPreferences(string userId)
         {
             try
             {
-                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 if (string.IsNullOrEmpty(userId))
                 {
-                    return Unauthorized("User ID not found in token");
+                    return BadRequest("User ID is required");
                 }
 
                 var success = await _preferencesService.DeleteUserPreferencesAsync(userId);
