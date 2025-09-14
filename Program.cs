@@ -11,29 +11,23 @@ var builder = WebApplication.CreateBuilder(args);
 // Add services to the container.
 builder.Services.AddControllers();
 
-// Configure Entity Framework with PostgreSQL for Neon
-var rawConnection = Environment.GetEnvironmentVariable("DATABASE_URL") ?? 
+// Read DATABASE_URL from environment or fallback
+var rawConnection = Environment.GetEnvironmentVariable("DATABASE_URL") ??
     builder.Configuration.GetConnectionString("DefaultConnection");
 
 string connectionString;
 
-// Log the connection info for debugging
+// Logging setup
 var logger = LoggerFactory.Create(builder => builder.AddConsole()).CreateLogger("Startup");
-logger.LogInformation($"Raw connection: {rawConnection?.Substring(0, Math.Min(50, rawConnection?.Length ?? 0))}...");
+logger.LogInformation($"Raw connection: {rawConnection?.Substring(0, Math.Min(80, rawConnection?.Length ?? 0))}...");
 
 if (!string.IsNullOrEmpty(rawConnection))
 {
     if (rawConnection.StartsWith("postgres://") || rawConnection.StartsWith("postgresql://"))
     {
-        try 
+        try
         {
             var uri = new Uri(rawConnection);
-            logger.LogInformation($"Parsed URI - Host: {uri.Host}, Port: {uri.Port}, Database: {uri.AbsolutePath}");
-            
-            if (string.IsNullOrEmpty(uri.Host))
-            {
-                throw new ArgumentException("Host cannot be null or empty in connection string");
-            }
 
             var userInfo = uri.UserInfo?.Split(':', 2) ?? new string[0];
             var username = userInfo.Length > 0 ? Uri.UnescapeDataString(userInfo[0]) : "";
@@ -47,15 +41,24 @@ if (!string.IsNullOrEmpty(rawConnection))
                 Username = username,
                 Password = password,
                 Database = database,
-                SslMode = SslMode.Require
+                // Neon requires SSL
+                SslMode = SslMode.Require,
+                TrustServerCertificate = true
             };
 
+            // Append query params if they exist (?sslmode=...&...)
+            var queryParams = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(uri.Query);
+            foreach (var kv in queryParams)
+            {
+                try { npgBuilder[kv.Key] = kv.Value.ToString(); } catch { }
+            }
+
             connectionString = npgBuilder.ToString();
-            logger.LogInformation("Successfully built connection string from URI");
+            logger.LogInformation("✅ Successfully built connection string from DATABASE_URL");
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to parse DATABASE_URL, falling back to raw connection");
+            logger.LogError(ex, "❌ Failed to parse DATABASE_URL, falling back to raw connection");
             connectionString = rawConnection;
         }
     }
@@ -67,15 +70,15 @@ if (!string.IsNullOrEmpty(rawConnection))
 }
 else
 {
-    // Fallback connection string for development
+    // Fallback for local dev only
     connectionString = "Host=localhost;Port=5432;Database=myapi_dev;Username=postgres;Password=dev_password;SSL Mode=Disable";
-    logger.LogWarning("Using fallback development connection string");
+    logger.LogWarning("⚠️ Using fallback development connection string");
 }
 
+// Register DbContext
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
 {
     options.UseNpgsql(connectionString);
-    // Enable sensitive data logging in development
     if (builder.Environment.IsDevelopment())
     {
         options.EnableSensitiveDataLogging();
@@ -83,7 +86,7 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
     }
 });
 
-// Add Authentication services
+// JWT Authentication
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
@@ -100,14 +103,13 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
     });
 
-// Add Authorization
 builder.Services.AddAuthorization();
 
-// Register services
+// Register custom services
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IPreferencesService, PreferencesService>();
 
-// Add CORS
+// CORS
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
@@ -118,48 +120,43 @@ builder.Services.AddCors(options =>
     });
 });
 
-// Add Swagger/OpenAPI
+// Swagger
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-// Add logging
+// Logging
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
 builder.Logging.AddDebug();
 
 var app = builder.Build();
 
-// Configure port for Render
+// Render port
 var port = Environment.GetEnvironmentVariable("PORT") ?? "10000";
 app.Urls.Add($"http://0.0.0.0:{port}");
 
-// Auto-migrate database on startup
+// Auto-migrate DB
 using (var scope = app.Services.CreateScope())
 {
     var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
     var migrationLogger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-    
+
     try
     {
-        // Always use migrations for PostgreSQL/Neon
-        migrationLogger.LogInformation("Applying database migrations...");
+        migrationLogger.LogInformation("📦 Applying database migrations...");
         context.Database.Migrate();
-        
-        migrationLogger.LogInformation("Database migrations completed successfully.");
+        migrationLogger.LogInformation("✅ Database migrations completed successfully.");
     }
     catch (Exception ex)
     {
-        migrationLogger.LogError(ex, "An error occurred while migrating the database.");
-        // Don't throw - let the app continue to run
+        migrationLogger.LogError(ex, "❌ Error while migrating the database.");
     }
 }
 
-// Configure the HTTP request pipeline.
-// Enable Swagger in all environments
+// Middleware pipeline
 app.UseSwagger();
 app.UseSwaggerUI();
 
-// Use CORS
 app.UseCors("AllowFrontend");
 
 app.UseHttpsRedirection();
@@ -169,10 +166,10 @@ app.UseAuthorization();
 
 app.MapControllers();
 
-// Redirect root URL to Swagger
+// Root redirect → Swagger
 app.MapGet("/", () => Results.Redirect("/swagger"));
 
-// Health check endpoint
+// Health endpoint
 app.MapGet("/health", () => new { status = "healthy", timestamp = DateTime.UtcNow });
 
 app.Run();
