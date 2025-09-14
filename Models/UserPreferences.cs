@@ -11,7 +11,7 @@ namespace FlowServiceBackend.Models
 
         [Required]
         [ForeignKey("MainAdminUser")]
-        public required string UserId { get; set; }
+        public required int UserId { get; set; }
 
         [Required]
         [MaxLength(20)]
