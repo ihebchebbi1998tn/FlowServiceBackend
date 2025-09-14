@@ -13,34 +13,64 @@ builder.Services.AddControllers();
 
 // Configure Entity Framework with PostgreSQL for Neon
 var rawConnection = Environment.GetEnvironmentVariable("DATABASE_URL") ?? 
-    builder.Configuration.GetConnectionString("DefaultConnection") ?? 
-    "postgresql://neondb_owner:npg_jObtF4Ke1lkz@ep-divine-glade-adk94w1g-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require";
+    builder.Configuration.GetConnectionString("DefaultConnection");
 
 string connectionString;
-if (!string.IsNullOrEmpty(rawConnection) && (rawConnection.StartsWith("postgres://") || rawConnection.StartsWith("postgresql://")))
+
+// Log the connection info for debugging
+var logger = LoggerFactory.Create(builder => builder.AddConsole()).CreateLogger("Startup");
+logger.LogInformation($"Raw connection: {rawConnection?.Substring(0, Math.Min(50, rawConnection?.Length ?? 0))}...");
+
+if (!string.IsNullOrEmpty(rawConnection))
 {
-    var uri = new Uri(rawConnection);
-    var userInfo = uri.UserInfo.Split(':', 2);
-    var username = Uri.UnescapeDataString(userInfo.ElementAtOrDefault(0) ?? "");
-    var password = Uri.UnescapeDataString(userInfo.ElementAtOrDefault(1) ?? "");
-
-    var npgBuilder = new NpgsqlConnectionStringBuilder
+    if (rawConnection.StartsWith("postgres://") || rawConnection.StartsWith("postgresql://"))
     {
-        Host = uri.Host,
-        Port = uri.Port > 0 ? uri.Port : 5432,
-        Username = username,
-        Password = password,
-        Database = uri.AbsolutePath.TrimStart('/'),
-        SslMode = SslMode.Require,
-    };
+        try 
+        {
+            var uri = new Uri(rawConnection);
+            logger.LogInformation($"Parsed URI - Host: {uri.Host}, Port: {uri.Port}, Database: {uri.AbsolutePath}");
+            
+            if (string.IsNullOrEmpty(uri.Host))
+            {
+                throw new ArgumentException("Host cannot be null or empty in connection string");
+            }
 
-    // Optionally handle other query params if needed (sslmode is already enforced above)
-    connectionString = npgBuilder.ToString();
+            var userInfo = uri.UserInfo?.Split(':', 2) ?? new string[0];
+            var username = userInfo.Length > 0 ? Uri.UnescapeDataString(userInfo[0]) : "";
+            var password = userInfo.Length > 1 ? Uri.UnescapeDataString(userInfo[1]) : "";
+            var database = uri.AbsolutePath?.TrimStart('/') ?? "";
+
+            var npgBuilder = new NpgsqlConnectionStringBuilder
+            {
+                Host = uri.Host,
+                Port = uri.Port > 0 ? uri.Port : 5432,
+                Username = username,
+                Password = password,
+                Database = database,
+                SslMode = SslMode.Require,
+                TrustServerCertificate = true
+            };
+
+            connectionString = npgBuilder.ToString();
+            logger.LogInformation("Successfully built connection string from URI");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to parse DATABASE_URL, falling back to raw connection");
+            connectionString = rawConnection;
+        }
+    }
+    else
+    {
+        // Already in key=value form
+        connectionString = rawConnection;
+    }
 }
 else
 {
-    // Already in key=value form or fallback
-    connectionString = rawConnection;
+    // Fallback connection string for development
+    connectionString = "Host=localhost;Port=5432;Database=myapi_dev;Username=postgres;Password=dev_password;SSL Mode=Disable";
+    logger.LogWarning("Using fallback development connection string");
 }
 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
