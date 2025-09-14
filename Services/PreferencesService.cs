@@ -83,16 +83,16 @@ namespace MyApi.Services
                 var preferences = new UserPreferences
                 {
                     UserId = userIdInt,
-                    Theme = request.Theme ?? "system",
-                    Language = request.Language ?? "en",
-                    PrimaryColor = request.PrimaryColor ?? "blue",
-                    LayoutMode = request.LayoutMode ?? "sidebar",
-                    DataView = request.DataView ?? "table",
-                    Timezone = request.Timezone,
-                    DateFormat = request.DateFormat ?? "MM/DD/YYYY",
-                    TimeFormat = request.TimeFormat ?? "12h",
-                    Currency = request.Currency ?? "USD",
-                    NumberFormat = request.NumberFormat ?? "comma",
+                    Theme = ValidateAndDefault(request.Theme, "system", 20),
+                    Language = ValidateAndDefault(request.Language, "en", 5),
+                    PrimaryColor = ValidateAndDefault(request.PrimaryColor, "blue", 20),
+                    LayoutMode = ValidateAndDefault(request.LayoutMode, "sidebar", 20),
+                    DataView = ValidateAndDefault(request.DataView, "table", 10),
+                    Timezone = ValidateString(request.Timezone, 100),
+                    DateFormat = ValidateAndDefault(request.DateFormat, "MM/DD/YYYY", 20),
+                    TimeFormat = ValidateAndDefault(request.TimeFormat, "12h", 5),
+                    Currency = ValidateAndDefault(request.Currency, "USD", 5),
+                    NumberFormat = ValidateAndDefault(request.NumberFormat, "comma", 10),
                     Notifications = request.Notifications ?? "{}",
                     SidebarCollapsed = request.SidebarCollapsed ?? false,
                     CompactMode = request.CompactMode ?? false,
@@ -100,7 +100,7 @@ namespace MyApi.Services
                     AnimationsEnabled = request.AnimationsEnabled ?? true,
                     SoundEnabled = request.SoundEnabled ?? true,
                     AutoSave = request.AutoSave ?? true,
-                    WorkArea = request.WorkArea,
+                    WorkArea = ValidateString(request.WorkArea, 100),
                     DashboardLayout = request.DashboardLayout,
                     QuickAccessItems = request.QuickAccessItems ?? "[]",
                     CreatedAt = DateTime.UtcNow,
@@ -158,16 +158,16 @@ namespace MyApi.Services
                 if (preferences == null)
                     return null;
 
-                preferences.Theme = request.Theme ?? preferences.Theme;
-                preferences.Language = request.Language ?? preferences.Language;
-                preferences.PrimaryColor = request.PrimaryColor ?? preferences.PrimaryColor;
-                preferences.LayoutMode = request.LayoutMode ?? preferences.LayoutMode;
-                preferences.DataView = request.DataView ?? preferences.DataView;
-                preferences.Timezone = request.Timezone ?? preferences.Timezone;
-                preferences.DateFormat = request.DateFormat ?? preferences.DateFormat;
-                preferences.TimeFormat = request.TimeFormat ?? preferences.TimeFormat;
-                preferences.Currency = request.Currency ?? preferences.Currency;
-                preferences.NumberFormat = request.NumberFormat ?? preferences.NumberFormat;
+                preferences.Theme = ValidateAndDefault(request.Theme, preferences.Theme, 20);
+                preferences.Language = ValidateAndDefault(request.Language, preferences.Language, 5);
+                preferences.PrimaryColor = ValidateAndDefault(request.PrimaryColor, preferences.PrimaryColor, 20);
+                preferences.LayoutMode = ValidateAndDefault(request.LayoutMode, preferences.LayoutMode, 20);
+                preferences.DataView = ValidateAndDefault(request.DataView, preferences.DataView, 10);
+                preferences.Timezone = ValidateString(request.Timezone, 100) ?? preferences.Timezone;
+                preferences.DateFormat = ValidateAndDefault(request.DateFormat, preferences.DateFormat, 20);
+                preferences.TimeFormat = ValidateAndDefault(request.TimeFormat, preferences.TimeFormat, 5);
+                preferences.Currency = ValidateAndDefault(request.Currency, preferences.Currency, 5);
+                preferences.NumberFormat = ValidateAndDefault(request.NumberFormat, preferences.NumberFormat, 10);
                 preferences.Notifications = request.Notifications ?? preferences.Notifications;
                 preferences.SidebarCollapsed = request.SidebarCollapsed ?? preferences.SidebarCollapsed;
                 preferences.CompactMode = request.CompactMode ?? preferences.CompactMode;
@@ -239,6 +239,22 @@ namespace MyApi.Services
                 _logger.LogError(ex, "Error deleting user preferences for user {UserId}", userId);
                 throw;
             }
+        }
+
+        private static string ValidateAndDefault(string? value, string defaultValue, int maxLength)
+        {
+            if (string.IsNullOrEmpty(value))
+                return defaultValue;
+            
+            return value.Length > maxLength ? defaultValue : value;
+        }
+
+        private static string? ValidateString(string? value, int maxLength)
+        {
+            if (string.IsNullOrEmpty(value))
+                return value;
+            
+            return value.Length > maxLength ? value.Substring(0, maxLength) : value;
         }
     }
 }
