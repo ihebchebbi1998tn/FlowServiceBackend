@@ -31,8 +31,8 @@ namespace FlowServiceBackend.Data
                 entity.Property(e => e.PhoneNumber).HasMaxLength(20);
                 entity.Property(e => e.Country).IsRequired().HasMaxLength(2);
                 entity.Property(e => e.Industry).IsRequired().HasMaxLength(100);
-                entity.Property(e => e.AccessToken).HasMaxLength(500);
-                entity.Property(e => e.RefreshToken).HasMaxLength(500);
+                entity.Property(e => e.AccessToken).HasColumnType("text");
+                entity.Property(e => e.RefreshToken).HasColumnType("text");
                 entity.Property(e => e.CompanyName).HasMaxLength(255);
                 entity.Property(e => e.CompanyWebsite).HasMaxLength(500);
                 entity.Property(e => e.Preferences).HasColumnType("text");
