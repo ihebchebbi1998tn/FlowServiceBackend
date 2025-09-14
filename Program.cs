@@ -47,8 +47,7 @@ if (!string.IsNullOrEmpty(rawConnection))
                 Username = username,
                 Password = password,
                 Database = database,
-                SslMode = SslMode.Require,
-                TrustServerCertificate = true
+                SslMode = SslMode.Require
             };
 
             connectionString = npgBuilder.ToString();
@@ -138,19 +137,19 @@ app.Urls.Add($"http://0.0.0.0:{port}");
 using (var scope = app.Services.CreateScope())
 {
     var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-    var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+    var migrationLogger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
     
     try
     {
         // Always use migrations for PostgreSQL/Neon
-        logger.LogInformation("Applying database migrations...");
+        migrationLogger.LogInformation("Applying database migrations...");
         context.Database.Migrate();
         
-        logger.LogInformation("Database migrations completed successfully.");
+        migrationLogger.LogInformation("Database migrations completed successfully.");
     }
     catch (Exception ex)
     {
-        logger.LogError(ex, "An error occurred while migrating the database.");
+        migrationLogger.LogError(ex, "An error occurred while migrating the database.");
         // Don't throw - let the app continue to run
     }
 }
