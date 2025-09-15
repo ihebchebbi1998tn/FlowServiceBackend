@@ -1,3 +1,4 @@
+
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
@@ -32,7 +33,7 @@ namespace MyApi.Models
         [MaxLength(2)]
         public string Country { get; set; } = string.Empty;
 
-        [Required]
+        [Required(AllowEmptyStrings = true)]
         [MaxLength(100)]
         public string Industry { get; set; } = string.Empty;
 
