@@ -39,7 +39,7 @@ namespace MyApi.DTOs
         public string? Attendees { get; set; }
         public string? RelatedType { get; set; }
         public Guid? RelatedId { get; set; }
-        public Guid? ContactId { get; set; }
+        public int? ContactId { get; set; }
         public string? Reminders { get; set; }
         public string? Recurring { get; set; }
         public bool IsPrivate { get; set; } = false;
@@ -77,7 +77,7 @@ namespace MyApi.DTOs
         public string? Attendees { get; set; }
         public string? RelatedType { get; set; }
         public Guid? RelatedId { get; set; }
-        public Guid? ContactId { get; set; }
+        public int? ContactId { get; set; }
         public string? Reminders { get; set; }
         public string? Recurring { get; set; }
         public bool? IsPrivate { get; set; }
@@ -102,7 +102,7 @@ namespace MyApi.DTOs
         public string? Attendees { get; set; }
         public string? RelatedType { get; set; }
         public Guid? RelatedId { get; set; }
-        public Guid? ContactId { get; set; }
+        public int? ContactId { get; set; }
         public string? Reminders { get; set; }
         public string? Recurring { get; set; }
         public bool IsPrivate { get; set; }

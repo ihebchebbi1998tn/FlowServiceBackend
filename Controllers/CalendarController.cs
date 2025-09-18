@@ -43,7 +43,7 @@ namespace MyApi.Controllers
         }
 
         [HttpGet("events/contact/{contactId}")]
-        public async Task<ActionResult<IEnumerable<CalendarEventDto>>> GetEventsByContact(Guid contactId)
+        public async Task<ActionResult<IEnumerable<CalendarEventDto>>> GetEventsByContact(int contactId)
         {
             var events = await _calendarService.GetEventsByContactAsync(contactId);
             return Ok(events);

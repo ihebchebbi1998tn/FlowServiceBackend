@@ -54,7 +54,7 @@ namespace MyApi.Services
             return events.Select(MapToDto);
         }
 
-        public async Task<IEnumerable<CalendarEventDto>> GetEventsByContactAsync(Guid contactId)
+        public async Task<IEnumerable<CalendarEventDto>> GetEventsByContactAsync(int contactId)
         {
             var events = await _context.CalendarEvents
                 .Include(e => e.Contact)

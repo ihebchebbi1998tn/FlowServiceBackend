@@ -9,7 +9,7 @@ namespace MyApi.Services
         Task<IEnumerable<CalendarEventDto>> GetAllEventsAsync();
         Task<CalendarEventDto?> GetEventByIdAsync(Guid id);
         Task<IEnumerable<CalendarEventDto>> GetEventsByDateRangeAsync(DateTime start, DateTime end);
-        Task<IEnumerable<CalendarEventDto>> GetEventsByContactAsync(Guid contactId);
+        Task<IEnumerable<CalendarEventDto>> GetEventsByContactAsync(int contactId);
         Task<CalendarEventDto> CreateEventAsync(CreateCalendarEventDto createDto);
         Task<CalendarEventDto?> UpdateEventAsync(Guid id, UpdateCalendarEventDto updateDto);
         Task<bool> DeleteEventAsync(Guid id);
