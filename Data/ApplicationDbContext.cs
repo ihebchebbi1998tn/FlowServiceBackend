@@ -91,9 +91,9 @@ namespace MyApi.Data
 
                 // Explicit relationship configuration
                 entity.HasOne(e => e.User)
-                    .WithMany()
-                    .HasForeignKey(e => e.UserId)
-                    .HasPrincipalKey(u => u.Id)
+                    .WithOne()
+                    .HasForeignKey<UserPreferences>(e => e.UserId)
+                    .HasPrincipalKey<MainAdminUser>(u => u.Id)
                     .OnDelete(DeleteBehavior.Cascade);
             });
 
