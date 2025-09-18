@@ -190,8 +190,8 @@ app.UseAuthorization();
 
 app.MapControllers();
 
-// Root redirect → API Documentation
-app.MapGet("/", () => Results.Redirect("/api-docs"));
+// Root redirect → Swagger UI
+app.MapGet("/", () => Results.Redirect("/swagger"));
 
 // Health endpoint
 app.MapGet("/health", () => new { status = "healthy", timestamp = DateTime.UtcNow });
