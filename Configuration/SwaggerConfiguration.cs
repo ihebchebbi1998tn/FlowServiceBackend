@@ -70,9 +70,9 @@ namespace MyApi.Configuration
                 options.TagActionsBy(api => new[] { api.GroupName ?? api.ActionDescriptor.RouteValues["controller"] });
                 options.DocInclusionPredicate((name, api) => true);
 
-                // Add response examples
-                options.OperationFilter<SwaggerResponseExamplesFilter>();
-                options.SchemaFilter<SwaggerSchemaExamplesFilter>();
+                // Add response examples (temporarily disabled for troubleshooting)
+                // options.OperationFilter<SwaggerResponseExamplesFilter>();
+                // options.SchemaFilter<SwaggerSchemaExamplesFilter>();
 
                 // Custom ordering
                 options.OrderActionsBy(apiDesc => 
