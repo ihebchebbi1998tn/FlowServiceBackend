@@ -295,7 +295,10 @@ namespace MyApi.Data
             // Configure Article entity
             modelBuilder.Entity<Article>(entity =>
             {
-                entity.ToTable("Articles");
+                entity.ToTable("Articles", t => 
+                {
+                    t.HasCheckConstraint("CK_Articles_Type", "\"Type\" IN ('material','service')");
+                });
                 entity.HasKey(e => e.Id);
 
                 entity.HasIndex(e => e.Type);
@@ -327,8 +330,6 @@ namespace MyApi.Data
                 entity.Property(e => e.CreatedBy).IsRequired().HasMaxLength(100);
                 entity.Property(e => e.ModifiedBy).HasMaxLength(100);
                 entity.Property(e => e.IsActive).HasDefaultValue(true);
-
-                entity.HasCheckConstraint("CK_Articles_Type", "\"Type\" IN ('material','service')");
             });
         }
 
@@ -337,7 +338,12 @@ namespace MyApi.Data
             // Calendar Event configuration
             modelBuilder.Entity<CalendarEvent>(entity =>
             {
-                entity.ToTable("calendar_events");
+                entity.ToTable("calendar_events", t => 
+                {
+                    t.HasCheckConstraint("CK_calendar_events_Status", "\"Status\" IN ('scheduled', 'confirmed', 'cancelled', 'completed')");
+                    t.HasCheckConstraint("CK_calendar_events_Priority", "\"Priority\" IN ('low', 'medium', 'high', 'urgent')");
+                    t.HasCheckConstraint("CK_calendar_events_RelatedType", "related_type IN ('contact', 'sale', 'offer', 'project', 'service_order')");
+                });
                 entity.HasKey(e => e.Id);
                 entity.Property(e => e.Id).ValueGeneratedOnAdd();
                 entity.Property(e => e.Title).IsRequired().HasMaxLength(200);
@@ -346,10 +352,6 @@ namespace MyApi.Data
                 entity.Property(e => e.Priority).IsRequired().HasMaxLength(10);
                 entity.Property(e => e.CreatedAt).HasDefaultValueSql("NOW()");
                 entity.Property(e => e.UpdatedAt).HasDefaultValueSql("NOW()");
-                
-                entity.HasCheckConstraint("CK_calendar_events_Status", "\"Status\" IN ('scheduled', 'confirmed', 'cancelled', 'completed')");
-                entity.HasCheckConstraint("CK_calendar_events_Priority", "\"Priority\" IN ('low', 'medium', 'high', 'urgent')");
-                entity.HasCheckConstraint("CK_calendar_events_RelatedType", "related_type IN ('contact', 'sale', 'offer', 'project', 'service_order')");
                 
                 entity.HasIndex(e => e.Start);
                 entity.HasIndex(e => e.End);
@@ -394,13 +396,14 @@ namespace MyApi.Data
             // Event Attendee configuration
             modelBuilder.Entity<EventAttendee>(entity =>
             {
-                entity.ToTable("event_attendees");
+                entity.ToTable("event_attendees", t => 
+                {
+                    t.HasCheckConstraint("CK_event_attendees_Status", "\"Status\" IN ('pending', 'accepted', 'declined', 'tentative')");
+                });
                 entity.HasKey(e => e.Id);
                 entity.Property(e => e.Id).ValueGeneratedOnAdd();
                 entity.Property(e => e.Status).HasDefaultValue("pending").HasMaxLength(20);
                 entity.Property(e => e.CreatedAt).HasDefaultValueSql("NOW()");
-                
-                entity.HasCheckConstraint("CK_event_attendees_Status", "\"Status\" IN ('pending', 'accepted', 'declined', 'tentative')");
                 entity.HasIndex(e => e.EventId);
 
                 entity.HasOne(e => e.CalendarEvent)
@@ -417,7 +420,7 @@ namespace MyApi.Data
                 entity.Property(e => e.Id).ValueGeneratedOnAdd();
                 entity.Property(e => e.CreatedAt).HasDefaultValueSql("NOW()");
                 entity.HasIndex(e => e.EventId);
-                entity.HasIndex(e => e.RemindAt);
+                entity.HasIndex(e => e.MinutesBefore);
 
                 entity.HasOne(e => e.CalendarEvent)
                     .WithMany(ce => ce.EventReminders)

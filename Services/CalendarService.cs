@@ -357,7 +357,7 @@ namespace MyApi.Services
                 UpdatedAt = calendarEvent.UpdatedAt,
                 CreatedBy = calendarEvent.CreatedBy,
                 ModifiedBy = calendarEvent.ModifiedBy,
-                ContactName = calendarEvent.Contact?.FirstName != null ? $"{calendarEvent.Contact.FirstName} {calendarEvent.Contact.LastName}" : null,
+                ContactName = calendarEvent.Contact?.Name,
                 TypeName = calendarEvent.EventTypeNavigation?.Name,
                 EventAttendees = calendarEvent.EventAttendees.Select(ea => new EventAttendeeDto
                 {
