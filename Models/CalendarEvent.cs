@@ -58,7 +58,7 @@ namespace MyApi.Models
         public Guid? RelatedId { get; set; }
 
         [Column("contact_id")]
-        public Guid? ContactId { get; set; }
+        public int? ContactId { get; set; }
 
         // Reminders and recurrence
         [Column(TypeName = "jsonb")]
