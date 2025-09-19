@@ -27,8 +27,8 @@ namespace MyApi.DTOs
 
     public class LookupListResponseDto
     {
-        public List<LookupItemDto> Items { get; set; } = new List<LookupItemDto>();
-        public int TotalCount { get; set; }
+        public List<LookupItemDto> items { get; set; } = new List<LookupItemDto>();
+        public int totalCount { get; set; }
     }
 
     public class CurrencyDto
@@ -48,8 +48,8 @@ namespace MyApi.DTOs
 
     public class CurrencyListResponseDto
     {
-        public List<CurrencyDto> Items { get; set; } = new List<CurrencyDto>();
-        public int TotalCount { get; set; }
+        public List<CurrencyDto> currencies { get; set; } = new List<CurrencyDto>();
+        public int totalCount { get; set; }
     }
 
     // Request DTOs
