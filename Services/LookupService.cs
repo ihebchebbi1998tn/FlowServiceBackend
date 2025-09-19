@@ -25,8 +25,8 @@ namespace MyApi.Services
 
             return new LookupListResponseDto
             {
-                Items = items.Select(MapToDto).ToList(),
-                TotalCount = items.Count
+                items = items.Select(MapToDto).ToList(),
+                totalCount = items.Count
             };
         }
 
@@ -417,8 +417,8 @@ namespace MyApi.Services
 
             return new CurrencyListResponseDto
             {
-                Items = currencies.Select(MapCurrencyToDto).ToList(),
-                TotalCount = currencies.Count
+                currencies = currencies.Select(MapCurrencyToDto).ToList(),
+                totalCount = currencies.Count
             };
         }
 
@@ -498,8 +498,8 @@ namespace MyApi.Services
 
             return new LookupListResponseDto
             {
-                Items = items.Select(MapToDto).ToList(),
-                TotalCount = items.Count
+                items = items.Select(MapToDto).ToList(),
+                totalCount = items.Count
             };
         }
 
