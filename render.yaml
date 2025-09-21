@@ -1,0 +1,14 @@
+# Render deployment configuration for MyApi Backend
+# Build Command: dotnet publish -c Release -o out
+# Start Command: dotnet out/MyApi.dll
+
+# Environment Variables needed on Render:
+# DATABASE_URL=postgresql://username:password@host:port/database?sslmode=require
+# PORT=10000 (Render will set this automatically)
+# ASPNETCORE_ENVIRONMENT=Production
+# JWT_KEY=your-secret-jwt-key
+# JWT_ISSUER=MyApi
+# JWT_AUDIENCE=MyApiClients
+
+# Health Check URL: /health
+# API Documentation: /api-docs
