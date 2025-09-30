@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using MyApi.Data;
+using MyApi.Modules.Roles.Models;
 using MyApi.Modules.Skills.DTOs;
 using MyApi.Modules.Skills.Models;
 using MyApi.Modules.Users.Models;

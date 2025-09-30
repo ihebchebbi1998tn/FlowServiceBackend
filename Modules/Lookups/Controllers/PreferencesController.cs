@@ -1,5 +1,6 @@
 using MyApi.Modules.Lookups.DTOs;
 using MyApi.Modules.Lookups.Services;
+using MyApi.Modules.Shared.DTOs;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;

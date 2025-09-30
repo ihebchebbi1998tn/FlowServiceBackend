@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using MyApi.Modules.Shared.DTOs;
 using MyApi.Modules.Users.DTOs;
 using MyApi.Modules.Users.Services;
 using System.Security.Claims;
