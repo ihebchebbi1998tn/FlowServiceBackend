@@ -127,7 +127,7 @@ namespace MyApi.Modules.Offers.Data
                 entity.HasIndex(i => i.Type)
                     .HasDatabaseName("idx_offer_items_type");
 
-                entity.HasIndex(i => i.ItemId)
+                entity.HasIndex(i => i.ArticleId)
                     .HasDatabaseName("idx_offer_items_item_id");
             });
         }
