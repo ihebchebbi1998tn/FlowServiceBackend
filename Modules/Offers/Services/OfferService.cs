@@ -41,8 +41,8 @@ namespace MyApi.Modules.Offers.Services
             if (!string.IsNullOrEmpty(source))
                 query = query.Where(o => o.Source == source);
 
-            if (!string.IsNullOrEmpty(contactId))
-                query = query.Where(o => o.ContactId == contactId);
+            if (!string.IsNullOrEmpty(contactId) && int.TryParse(contactId, out int contactIdInt))
+                query = query.Where(o => o.ContactId == contactIdInt);
 
             if (dateFrom.HasValue)
                 query = query.Where(o => o.CreatedAt >= dateFrom.Value);
