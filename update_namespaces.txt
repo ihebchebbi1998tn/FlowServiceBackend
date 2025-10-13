@@ -1,0 +1,68 @@
+# Namespace Update Map for Module Restructuring
+# Format: FilePattern | Old Namespace | New Namespace
+
+## Auth Module
+Modules/Auth/**/*.cs | namespace MyApi.Services | namespace MyApi.Modules.Auth.Services
+Modules/Auth/**/*.cs | namespace MyApi.Controllers | namespace MyApi.Modules.Auth.Controllers
+Modules/Auth/**/*.cs | namespace MyApi.Models | namespace MyApi.Modules.Auth.Models
+Modules/Auth/**/*.cs | namespace MyApi.DTOs | namespace MyApi.Modules.Auth.DTOs
+Modules/Auth/**/*.cs | namespace MyApi.Data.Configurations | namespace MyApi.Modules.Auth.Data.Configurations
+
+## Users Module
+Modules/Users/**/*.cs | namespace MyApi.Services | namespace MyApi.Modules.Users.Services
+Modules/Users/**/*.cs | namespace MyApi.Controllers | namespace MyApi.Modules.Users.Controllers
+Modules/Users/**/*.cs | namespace MyApi.Models | namespace MyApi.Modules.Users.Models
+Modules/Users/**/*.cs | namespace MyApi.DTOs | namespace MyApi.Modules.Users.DTOs
+Modules/Users/**/*.cs | namespace MyApi.Data.Configurations | namespace MyApi.Modules.Users.Data.Configurations
+
+## Roles Module  
+Modules/Roles/**/*.cs | namespace MyApi.Services | namespace MyApi.Modules.Roles.Services
+Modules/Roles/**/*.cs | namespace MyApi.Controllers | namespace MyApi.Modules.Roles.Controllers
+Modules/Roles/**/*.cs | namespace MyApi.Models | namespace MyApi.Modules.Roles.Models
+Modules/Roles/**/*.cs | namespace MyApi.DTOs | namespace MyApi.Modules.Roles.DTOs
+Modules/Roles/**/*.cs | namespace MyApi.Data.Configurations | namespace MyApi.Modules.Roles.Data.Configurations
+
+## Skills Module
+Modules/Skills/**/*.cs | namespace MyApi.Services | namespace MyApi.Modules.Skills.Services
+Modules/Skills/**/*.cs | namespace MyApi.Controllers | namespace MyApi.Modules.Skills.Controllers
+Modules/Skills/**/*.cs | namespace MyApi.Models | namespace MyApi.Modules.Skills.Models
+Modules/Skills/**/*.cs | namespace MyApi.DTOs | namespace MyApi.Modules.Skills.DTOs
+Modules/Skills/**/*.cs | namespace MyApi.Data.Configurations | namespace MyApi.Modules.Skills.Data.Configurations
+
+## Contacts Module
+Modules/Contacts/**/*.cs | namespace MyApi.Services | namespace MyApi.Modules.Contacts.Services
+Modules/Contacts/**/*.cs | namespace MyApi.Controllers | namespace MyApi.Modules.Contacts.Controllers
+Modules/Contacts/**/*.cs | namespace MyApi.Models | namespace MyApi.Modules.Contacts.Models
+Modules/Contacts/**/*.cs | namespace MyApi.DTOs | namespace MyApi.Modules.Contacts.DTOs
+Modules/Contacts/**/*.cs | namespace MyApi.Data.Configurations | namespace MyApi.Modules.Contacts.Data.Configurations
+
+## Articles Module
+Modules/Articles/**/*.cs | namespace MyApi.Services | namespace MyApi.Modules.Articles.Services
+Modules/Articles/**/*.cs | namespace MyApi.Controllers | namespace MyApi.Modules.Articles.Controllers
+Modules/Articles/**/*.cs | namespace MyApi.Models | namespace MyApi.Modules.Articles.Models
+Modules/Articles/**/*.cs | namespace MyApi.DTOs | namespace MyApi.Modules.Articles.DTOs
+
+## Calendar Module
+Modules/Calendar/**/*.cs | namespace MyApi.Services | namespace MyApi.Modules.Calendar.Services
+Modules/Calendar/**/*.cs | namespace MyApi.Controllers | namespace MyApi.Modules.Calendar.Controllers
+Modules/Calendar/**/*.cs | namespace MyApi.Models | namespace MyApi.Modules.Calendar.Models
+Modules/Calendar/**/*.cs | namespace MyApi.DTOs | namespace MyApi.Modules.Calendar.DTOs
+
+## Projects Module
+Modules/Projects/**/*.cs | namespace MyApi.Services | namespace MyApi.Modules.Projects.Services
+Modules/Projects/**/*.cs | namespace MyApi.Controllers | namespace MyApi.Modules.Projects.Controllers
+Modules/Projects/**/*.cs | namespace MyApi.Models | namespace MyApi.Modules.Projects.Models
+Modules/Projects/**/*.cs | namespace MyApi.DTOs | namespace MyApi.Modules.Projects.DTOs
+
+## Lookups Module
+Modules/Lookups/**/*.cs | namespace MyApi.Services | namespace MyApi.Modules.Lookups.Services
+Modules/Lookups/**/*.cs | namespace MyApi.Controllers | namespace MyApi.Modules.Lookups.Controllers
+Modules/Lookups/**/*.cs | namespace MyApi.Models | namespace MyApi.Modules.Lookups.Models
+Modules/Lookups/**/*.cs | namespace MyApi.DTOs | namespace MyApi.Modules.Lookups.DTOs
+
+## Shared Module
+Modules/Shared/**/*.cs | namespace MyApi.Services | namespace MyApi.Modules.Shared.Services
+Modules/Shared/**/*.cs | namespace MyApi.Controllers | namespace MyApi.Modules.Shared.Controllers
+Modules/Shared/**/*.cs | namespace MyApi.Models | namespace MyApi.Modules.Shared.Models
+Modules/Shared/**/*.cs | namespace MyApi.DTOs | namespace MyApi.Modules.Shared.DTOs
+Modules/Shared/**/*.cs | namespace MyApi.Data.Configurations | namespace MyApi.Modules.Shared.Data.Configurations
