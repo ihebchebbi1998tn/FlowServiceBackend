@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using System;
 
 namespace MyApi.Modules.Auth.Models
 {
@@ -62,7 +63,7 @@ namespace MyApi.Modules.Auth.Models
         public string? CompanyWebsite { get; set; }
         
         [Column(TypeName = "text")]
-        public string? Preferences { get; set; } // JSON string for user preferences
+        public string? PreferencesJson { get; set; } // JSON string for user preferences
         
         public bool OnboardingCompleted { get; set; } = false;
     }
