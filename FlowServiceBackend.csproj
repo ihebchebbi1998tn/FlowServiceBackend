@@ -8,7 +8,7 @@
     <AssemblyName>MyApi</AssemblyName>
     <RootNamespace>MyApi</RootNamespace>
     
-    <!-- Generate XML documentation -->
+     Generate XML documentation 
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <DocumentationFile>bin\$(Configuration)\$(TargetFramework)\$(AssemblyName).xml</DocumentationFile>
     <NoWarn>$(NoWarn);1591</NoWarn>
@@ -22,6 +22,8 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeInPackageReference>false</IncludeInPackageReference>
     </PackageReference>
+     Added EF Core Relational package for Precision attribute support 
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="8.0.8" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="8.0.8">
       <PrivateAssets>all</PrivateAssets>
       <IncludeInPackageReference>false</IncludeInPackageReference>
