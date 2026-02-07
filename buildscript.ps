@@ -1,35 +1,59 @@
 #!/bin/bash
+# deploy.sh - Auto deploy FlowServiceBackend
 
-# Set variables
-APP_DIR="/home/backend"
-PUBLISH_DIR="$APP_DIR/publish"
-REPO_URL="https://github.com/ihebchebbi1998tn/FlowServiceBackend.git"
-SERVICE_NAME="backend"
+# ------------------------
+# Configuration
+# ------------------------
+REPO_DIR="/home/backend/FlowServiceBackend"   # Git repo folder
+PUBLISH_DIR="/home/backend/publish"          # Dotnet publish output
+SERVICE_NAME="backend"                        # systemd service name
+BRANCH="main"                                 # Git branch to track
+ENV_FILE="/home/backend/.env"                 # Optional environment file
 
-# Move to app directory
-cd $APP_DIR || exit
+# ------------------------
+# Load environment variables
+# ------------------------
+if [ -f "$ENV_FILE" ]; then
+    export $(grep -v '^#' $ENV_FILE | xargs)
+fi
 
-# Fetch latest changes
-git fetch origin main
+# ------------------------
+# Go to repo folder
+# ------------------------
+cd $REPO_DIR || { echo "❌ Cannot enter $REPO_DIR"; exit 1; }
 
-# Check if there are new commits
+# ------------------------
+# Ensure correct branch
+# ------------------------
+git checkout $BRANCH
+
+# ------------------------
+# Fetch latest commits
+# ------------------------
+git fetch origin $BRANCH
+
+# ------------------------
+# Compare local HEAD with remote
+# ------------------------
 LOCAL=$(git rev-parse HEAD)
-REMOTE=$(git rev-parse origin/main)
+REMOTE=$(git rev-parse origin/$BRANCH)
 
 if [ "$LOCAL" != "$REMOTE" ]; then
-    echo "New changes detected. Pulling and deploying..."
-    
-    # Pull latest code
-    git reset --hard origin/main
-    
-    # Restore dependencies and publish
+    echo "🚀 New changes detected. Deploying..."
+
+    # Pull latest code and reset
+    git reset --hard origin/$BRANCH
+
+    # Restore dependencies
     dotnet restore
+
+    # Publish production build
     dotnet publish -c Release -o $PUBLISH_DIR
-    
-    # Restart the systemd service
+
+    # Restart the backend service
     sudo systemctl restart $SERVICE_NAME
-    
-    echo "Deployment completed successfully."
+
+    echo "✅ Deployment finished successfully."
 else
-    echo "No changes detected. Nothing to do."
+    echo "ℹ️ No changes detected."
 fi
