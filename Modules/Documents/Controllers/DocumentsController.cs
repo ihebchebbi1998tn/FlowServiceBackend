@@ -3,9 +3,157 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using MyApi.Data;
 using MyApi.Modules.Documents.Models;
+using System.IO.Compression;
 
 namespace MyApi.Modules.Documents.Controllers
 {
+    /// <summary>
+    /// Service for document compression using GZip
+    /// Reduces file size on disk without affecting quality
+    /// </summary>
+    public class DocumentCompressionService
+    {
+        private readonly ILogger<DocumentCompressionService> _logger;
+        private const int CompressionBufferSize = 81920; // 80 KB buffer
+
+        // File types to compress (text-based, documents, etc.)
+        private static readonly HashSet<string> CompressibleExtensions = new(StringComparer.OrdinalIgnoreCase)
+        {
+            // Office documents
+            ".pdf", ".docx", ".xlsx", ".pptx", ".odt", ".ods", ".odp",
+            // Text files
+            ".txt", ".csv", ".json", ".xml", ".html", ".css", ".js", ".ts",
+            // Source code
+            ".cs", ".java", ".py", ".php", ".rb", ".go", ".rs", ".cpp", ".c",
+            // Archives
+            ".sql", ".sql", ".log",
+            // Documents
+            ".md", ".yml", ".yaml", ".ini", ".conf", ".config"
+        };
+
+        public DocumentCompressionService(ILogger<DocumentCompressionService> logger)
+        {
+            _logger = logger;
+        }
+
+        /// <summary>
+        /// Check if a file should be compressed based on extension
+        /// </summary>
+        public bool ShouldCompress(string fileName)
+        {
+            var ext = Path.GetExtension(fileName);
+            return CompressibleExtensions.Contains(ext);
+        }
+
+        /// <summary>
+        /// Compress a file using GZip
+        /// Returns: (compressedPath, originalSize, compressionRatio)
+        /// </summary>
+        public async Task<(string compressedPath, long originalSize, decimal compressionRatio)> CompressFileAsync(
+            string sourceFilePath)
+        {
+            if (!File.Exists(sourceFilePath))
+                throw new FileNotFoundException($"Source file not found: {sourceFilePath}");
+
+            var fileInfo = new FileInfo(sourceFilePath);
+            var originalSize = fileInfo.Length;
+
+            // Add .gz extension to indicate compressed file
+            var compressedPath = sourceFilePath + ".gz";
+
+            try
+            {
+                // Compress file using GZip with buffering
+                using (var sourceStream = new FileStream(sourceFilePath, FileMode.Open, FileAccess.Read, FileShare.Read, CompressionBufferSize, true))
+                using (var targetStream = new FileStream(compressedPath, FileMode.Create, FileAccess.Write, FileShare.None, CompressionBufferSize, true))
+                using (var gzipStream = new GZipStream(targetStream, CompressionMode.Compress, leaveOpen: true))
+                {
+                    await sourceStream.CopyToAsync(gzipStream, CompressionBufferSize);
+                }
+
+                // Calculate compression ratio
+                var compressedFileInfo = new FileInfo(compressedPath);
+                var compressedSize = compressedFileInfo.Length;
+                var compressionRatio = ((decimal)(originalSize - compressedSize) / originalSize) * 100;
+
+                _logger.LogInformation(
+                    "Compressed file: {FileName} | Original: {Original}KB | Compressed: {Compressed}KB | Ratio: {Ratio}%",
+                    Path.GetFileName(sourceFilePath),
+                    originalSize / 1024,
+                    compressedSize / 1024,
+                    Math.Round(compressionRatio, 2)
+                );
+
+                // Delete original file after successful compression
+                File.Delete(sourceFilePath);
+
+                return (compressedPath, originalSize, compressionRatio);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error compressing file: {FilePath}", sourceFilePath);
+                // Delete compressed file if compression failed
+                if (File.Exists(compressedPath))
+                    File.Delete(compressedPath);
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Decompress a file on-the-fly for download
+        /// Returns decompressed stream
+        /// </summary>
+        public Stream DecompressFileForDownload(string compressedFilePath)
+        {
+            if (!File.Exists(compressedFilePath))
+                throw new FileNotFoundException($"Compressed file not found: {compressedFilePath}");
+
+            try
+            {
+                // Open the compressed file and return a GZipStream wrapper
+                var fileStream = new FileStream(compressedFilePath, FileMode.Open, FileAccess.Read, FileShare.Read, CompressionBufferSize, true);
+                var gzipStream = new GZipStream(fileStream, CompressionMode.Decompress, leaveOpen: true);
+
+                _logger.LogInformation("Decompressing file for download: {FilePath}", Path.GetFileName(compressedFilePath));
+
+                return gzipStream;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error decompressing file: {FilePath}", compressedFilePath);
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Get decompressed file size without decompressing entire file
+        /// </summary>
+        public long GetDecompressedSize(string compressedFilePath)
+        {
+            try
+            {
+                using (var fileStream = new FileStream(compressedFilePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+                using (var gzipStream = new GZipStream(fileStream, CompressionMode.Decompress))
+                {
+                    // GZip stores original size in the last 4 bytes (for files < 4GB)
+                    fileStream.Seek(-4, SeekOrigin.End);
+                    byte[] sizeBytes = new byte[4];
+                    fileStream.Read(sizeBytes, 0, 4);
+                    
+                    if (BitConverter.IsLittleEndian)
+                        Array.Reverse(sizeBytes);
+
+                    return BitConverter.ToInt32(sizeBytes, 0);
+                }
+            }
+            catch
+            {
+                // Fallback: return file size if we can't read from gzip header
+                return new FileInfo(compressedFilePath).Length;
+            }
+        }
+    }
+
     [ApiController]
     [Route("api/[controller]")]
     [Authorize]
@@ -14,15 +162,18 @@ namespace MyApi.Modules.Documents.Controllers
         private readonly ApplicationDbContext _db;
         private readonly ILogger<DocumentsController> _logger;
         private readonly IWebHostEnvironment _env;
+        private readonly DocumentCompressionService _compressionService;
 
         public DocumentsController(
             ApplicationDbContext db,
             ILogger<DocumentsController> logger,
-            IWebHostEnvironment env)
+            IWebHostEnvironment env,
+            ILogger<DocumentCompressionService> compressionLogger)
         {
             _db = db;
             _logger = logger;
             _env = env;
+            _compressionService = new DocumentCompressionService(compressionLogger);
         }
 
         /// <summary>
@@ -117,7 +268,7 @@ namespace MyApi.Modules.Documents.Controllers
         }
 
         /// <summary>
-        /// GET /api/Documents/stats — Get document statistics
+        /// GET /api/Documents/stats — Get document statistics including compression metrics
         /// </summary>
         [HttpGet("stats")]
         public async Task<ActionResult> GetStats()
@@ -126,6 +277,11 @@ namespace MyApi.Modules.Documents.Controllers
             {
                 var totalFiles = await _db.Documents.CountAsync();
                 var totalSize = await _db.Documents.SumAsync(d => d.FileSize);
+                var totalOriginalSize = await _db.Documents.SumAsync(d => d.OriginalFileSize ?? d.FileSize);
+                var compressedFiles = await _db.Documents.CountAsync(d => d.IsCompressed);
+                var totalCompressionSaved = totalOriginalSize - totalSize;
+                var overallCompressionRatio = totalOriginalSize > 0 ? ((decimal)totalCompressionSaved / totalOriginalSize) * 100 : 0;
+
                 var crmFiles = await _db.Documents.CountAsync(d => d.Category == "crm");
                 var fieldFiles = await _db.Documents.CountAsync(d => d.Category == "field");
 
@@ -143,7 +299,25 @@ namespace MyApi.Modules.Documents.Controllers
                 var sevenDaysAgo = DateTime.UtcNow.AddDays(-7);
                 var recentActivity = await _db.Documents.CountAsync(d => d.UploadedAt >= sevenDaysAgo);
 
-                return Ok(new { totalFiles, totalSize, crmFiles, fieldFiles, byModule, recentActivity });
+                return Ok(new 
+                { 
+                    totalFiles, 
+                    totalSize, 
+                    crmFiles, 
+                    fieldFiles, 
+                    byModule, 
+                    recentActivity,
+                    // ✅ NEW: Compression statistics
+                    compression = new
+                    {
+                        compressedFiles,
+                        uncompressedFiles = totalFiles - compressedFiles,
+                        totalOriginalSize,
+                        totalStorageSaved = totalCompressionSaved,
+                        overallCompressionRatio = Math.Round(overallCompressionRatio, 2),
+                        storageSavedMB = Math.Round((decimal)totalCompressionSaved / (1024 * 1024), 2)
+                    }
+                });
             }
             catch (Exception ex)
             {
@@ -219,13 +393,44 @@ namespace MyApi.Modules.Documents.Controllers
                     }
 
                     var relativePath = $"/uploads/{subFolder}/{uniqueFileName}";
+                    var originalFileSize = file.Length;
+                    var isCompressed = false;
+                    var compressionRatio = 0m;
+                    var compressionMethod = "none";
+
+                    // Compress file if it's a compressible type
+                    try
+                    {
+                        if (_compressionService.ShouldCompress(safeFileName))
+                        {
+                            var (compressedPath, origSize, ratio) = await _compressionService.CompressFileAsync(diskPath);
+                            
+                            // Update to use the compressed file path
+                            diskPath = compressedPath;
+                            relativePath = $"/uploads/{subFolder}/{uniqueFileName}.gz";
+                            isCompressed = true;
+                            compressionRatio = ratio;
+                            compressionMethod = "gzip";
+
+                            _logger.LogInformation(
+                                "Compressed document: {FileName} | Saved {SavingsPercent}% space",
+                                safeFileName,
+                                Math.Round(ratio, 2)
+                            );
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to compress file {FileName}, storing uncompressed", safeFileName);
+                    }
 
                     var doc = new Document
                     {
                         FileName = safeFileName,
                         OriginalName = file.FileName,
                         FilePath = relativePath,
-                        FileSize = file.Length,
+                        FileSize = new FileInfo(diskPath).Length, // Actual size on disk
+                        OriginalFileSize = originalFileSize,
                         ContentType = file.ContentType ?? "application/octet-stream",
                         ModuleType = string.IsNullOrEmpty(moduleType) ? "general" : moduleType,
                         ModuleId = string.IsNullOrEmpty(moduleId) ? null : moduleId,
@@ -234,6 +439,9 @@ namespace MyApi.Modules.Documents.Controllers
                         Description = string.IsNullOrEmpty(description) ? null : description,
                         Tags = string.IsNullOrEmpty(tags) ? null : tags,
                         IsPublic = isPublic,
+                        IsCompressed = isCompressed,
+                        CompressionRatio = compressionRatio,
+                        CompressionMethod = compressionMethod,
                         UploadedBy = userId,
                         UploadedByName = userName,
                         UploadedAt = DateTime.UtcNow,
@@ -262,7 +470,7 @@ namespace MyApi.Modules.Documents.Controllers
         }
 
         /// <summary>
-        /// GET /api/Documents/download/{id} — Stream file download
+        /// GET /api/Documents/download/{id} — Stream file download (auto-decompresses if needed)
         /// </summary>
         [HttpGet("download/{id}")]
         public async Task<ActionResult> DownloadDocument(int id)
@@ -281,9 +489,27 @@ namespace MyApi.Modules.Documents.Controllers
                     return NotFound(new { error = "File not found on server" });
                 }
 
-                // Stream the file instead of loading into memory
-                var stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
-                return File(stream, doc.ContentType ?? "application/octet-stream", doc.OriginalName ?? doc.FileName);
+                // If file is compressed, decompress on-the-fly
+                if (doc.IsCompressed)
+                {
+                    try
+                    {
+                        var decompressedStream = _compressionService.DecompressFileForDownload(fullPath);
+                        _logger.LogInformation("Serving decompressed file: {FileName} (saved {Ratio}% storage)", doc.FileName, Math.Round(doc.CompressionRatio ?? 0, 2));
+                        return File(decompressedStream, doc.ContentType ?? "application/octet-stream", doc.OriginalName ?? doc.FileName);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Error decompressing file {Id}, falling back to compressed download", id);
+                        // Fallback to compressed file if decompression fails
+                        var stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
+                        return File(stream, doc.ContentType ?? "application/octet-stream", doc.OriginalName ?? doc.FileName);
+                    }
+                }
+
+                // Stream uncompressed file
+                var fileStream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
+                return File(fileStream, doc.ContentType ?? "application/octet-stream", doc.OriginalName ?? doc.FileName);
             }
             catch (Exception ex)
             {

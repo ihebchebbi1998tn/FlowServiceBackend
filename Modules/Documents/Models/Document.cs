@@ -78,5 +78,30 @@ namespace MyApi.Modules.Documents.Models
 
         [Column("UpdatedAt")]
         public DateTime? UpdatedAt { get; set; }
+
+        /// <summary>
+        /// Original file size before compression (bytes)
+        /// </summary>
+        [Column("OriginalFileSize")]
+        public long? OriginalFileSize { get; set; }
+
+        /// <summary>
+        /// Whether the file is compressed on disk
+        /// </summary>
+        [Column("IsCompressed")]
+        public bool IsCompressed { get; set; } = false;
+
+        /// <summary>
+        /// Compression ratio: (OriginalFileSize - FileSize) / OriginalFileSize * 100
+        /// </summary>
+        [Column("CompressionRatio")]
+        public decimal? CompressionRatio { get; set; }
+
+        /// <summary>
+        /// Compression method used (e.g., "gzip", "deflate", "none")
+        /// </summary>
+        [Column("CompressionMethod")]
+        [MaxLength(50)]
+        public string CompressionMethod { get; set; } = "none";
     }
 }
