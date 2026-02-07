@@ -33,6 +33,7 @@ using MyApi.Modules.Preferences.Models;
 using MyApi.Modules.DynamicForms.Models;
 using MyApi.Modules.AiChat.Models;
 using MyApi.Modules.WorkflowEngine.Models;
+using MyApi.Modules.Documents.Models;
 
 namespace MyApi.Data
 {
@@ -156,6 +157,9 @@ namespace MyApi.Data
         public DbSet<WorkflowExecutionLog> WorkflowExecutionLogs { get; set; }
         public DbSet<WorkflowApproval> WorkflowApprovals { get; set; }
         public DbSet<WorkflowProcessedEntity> WorkflowProcessedEntities { get; set; }
+
+        // Documents Module
+        public DbSet<Document> Documents { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

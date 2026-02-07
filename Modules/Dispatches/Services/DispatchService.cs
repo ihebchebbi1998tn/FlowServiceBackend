@@ -612,12 +612,168 @@ namespace MyApi.Modules.Dispatches.Services
 
         public async Task DeleteAsync(int dispatchId, string userId)
         {
-            var d = await _db.Dispatches.FirstOrDefaultAsync(x => x.Id == dispatchId && !x.IsDeleted);
-            if (d == null) return;
-            d.IsDeleted = true;
-            d.ModifiedDate = DateTime.UtcNow;
-            d.ModifiedBy = userId;
+            var dispatch = await _db.Dispatches
+                .Include(d => d.AssignedTechnicians)
+                .Include(d => d.TimeEntries)
+                .Include(d => d.Expenses)
+                .Include(d => d.MaterialsUsed)
+                .Include(d => d.Attachments)
+                .Include(d => d.Notes)
+                .FirstOrDefaultAsync(x => x.Id == dispatchId);
+
+            if (dispatch == null) return;
+
+            // Capture references before deletion
+            var jobIdStr = dispatch.JobId;
+            var serviceOrderId = dispatch.ServiceOrderId;
+
+            // Hard delete all child records first
+            if (dispatch.AssignedTechnicians.Any())
+                _db.Set<DispatchTechnician>().RemoveRange(dispatch.AssignedTechnicians);
+            if (dispatch.TimeEntries.Any())
+                _db.TimeEntries.RemoveRange(dispatch.TimeEntries);
+            if (dispatch.Expenses.Any())
+                _db.DispatchExpenses.RemoveRange(dispatch.Expenses);
+            if (dispatch.MaterialsUsed.Any())
+                _db.DispatchMaterials.RemoveRange(dispatch.MaterialsUsed);
+            if (dispatch.Attachments.Any())
+                _db.DispatchAttachments.RemoveRange(dispatch.Attachments);
+            if (dispatch.Notes.Any())
+                _db.DispatchNotes.RemoveRange(dispatch.Notes);
+
+            // Hard delete the dispatch itself
+            _db.Dispatches.Remove(dispatch);
             await _db.SaveChangesAsync();
+
+            _logger.LogInformation(
+                "[DISPATCH-DELETE] Hard deleted dispatch {DispatchId} (JobId: {JobId}, SO: {ServiceOrderId}) by user {UserId}",
+                dispatchId, jobIdStr, serviceOrderId, userId);
+
+            // Reset the associated job back to 'unscheduled' (unplanned)
+            if (!string.IsNullOrEmpty(jobIdStr) && int.TryParse(jobIdStr, out int jobId))
+            {
+                var job = await _db.ServiceOrderJobs.FindAsync(jobId);
+                if (job != null)
+                {
+                    job.Status = "unscheduled";
+                    job.CompletionPercentage = 0;
+                    job.ActualDuration = null;
+                    job.ActualCost = 0;
+                    job.CompletedDate = null;
+                    job.UpdatedAt = DateTime.UtcNow;
+                    await _db.SaveChangesAsync();
+
+                    _logger.LogInformation(
+                        "[DISPATCH-DELETE] Reset job {JobId} to 'unscheduled' after dispatch deletion", jobId);
+                }
+            }
+
+            // Recalculate the Service Order status based on remaining dispatches
+            if (serviceOrderId.HasValue)
+            {
+                await RecalculateServiceOrderStatusAsync(serviceOrderId.Value, userId);
+            }
+        }
+
+        /// <summary>
+        /// Recalculate the parent Service Order status based on remaining active dispatches.
+        /// - No dispatches left → 'ready_for_planning'
+        /// - All completed → 'technically_completed'
+        /// - Any in_progress → 'in_progress'
+        /// - Otherwise → 'scheduled'
+        /// </summary>
+        private async Task RecalculateServiceOrderStatusAsync(int serviceOrderId, string userId)
+        {
+            var serviceOrder = await _db.ServiceOrders.FindAsync(serviceOrderId);
+            if (serviceOrder == null) return;
+
+            // Don't recalculate if SO is in a final state
+            var finalStatuses = new[] { "closed", "invoiced", "cancelled", "completed" };
+            if (finalStatuses.Contains(serviceOrder.Status))
+            {
+                _logger.LogInformation(
+                    "[DISPATCH-DELETE] SO {ServiceOrderId} is in final status '{Status}', skipping recalculation",
+                    serviceOrderId, serviceOrder.Status);
+                return;
+            }
+
+            // Get remaining active (non-deleted) dispatches for this SO
+            var remainingDispatches = await _db.Dispatches
+                .Where(d => d.ServiceOrderId == serviceOrderId && !d.IsDeleted)
+                .ToListAsync();
+
+            var oldStatus = serviceOrder.Status;
+            string newStatus;
+
+            if (remainingDispatches.Count == 0)
+            {
+                // No dispatches left → back to ready_for_planning
+                newStatus = "ready_for_planning";
+            }
+            else
+            {
+                var allCompleted = remainingDispatches.All(d => d.Status == "completed" || d.Status == "technically_completed");
+                var anyInProgress = remainingDispatches.Any(d => d.Status == "in_progress");
+                var someCompleted = remainingDispatches.Any(d => d.Status == "completed" || d.Status == "technically_completed");
+
+                if (allCompleted)
+                {
+                    newStatus = "technically_completed";
+                }
+                else if (anyInProgress)
+                {
+                    newStatus = "in_progress";
+                }
+                else if (someCompleted)
+                {
+                    // Some completed, some not → partially in progress
+                    newStatus = "in_progress";
+                }
+                else
+                {
+                    // All dispatches are pending/assigned/scheduled
+                    newStatus = "scheduled";
+                }
+            }
+
+            if (oldStatus != newStatus)
+            {
+                serviceOrder.Status = newStatus;
+                serviceOrder.ModifiedDate = DateTime.UtcNow;
+                serviceOrder.ModifiedBy = userId;
+
+                // Update CompletedDispatchCount
+                serviceOrder.CompletedDispatchCount = remainingDispatches
+                    .Count(d => d.Status == "completed" || d.Status == "technically_completed");
+
+                await _db.SaveChangesAsync();
+
+                _logger.LogInformation(
+                    "[DISPATCH-DELETE] SO {ServiceOrderId} status recalculated: '{OldStatus}' → '{NewStatus}' (remaining dispatches: {Count})",
+                    serviceOrderId, oldStatus, newStatus, remainingDispatches.Count);
+
+                // Trigger workflow for SO status change
+                if (_workflowTriggerService != null)
+                {
+                    try
+                    {
+                        await _workflowTriggerService.TriggerStatusChangeAsync(
+                            "serviceOrder",
+                            serviceOrderId,
+                            oldStatus,
+                            newStatus,
+                            userId,
+                            new { serviceOrderId, orderNumber = serviceOrder.OrderNumber }
+                        );
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex,
+                            "[DISPATCH-DELETE] Failed to trigger workflow for SO {ServiceOrderId} status change",
+                            serviceOrderId);
+                    }
+                }
+            }
         }
 
         public async Task<TimeEntryDto> AddTimeEntryAsync(int dispatchId, CreateTimeEntryDto dto, string userId)
