@@ -1,0 +1,35 @@
+#!/bin/bash
+
+# Set variables
+APP_DIR="/home/backend"
+PUBLISH_DIR="$APP_DIR/publish"
+REPO_URL="https://github.com/ihebchebbi1998tn/FlowServiceBackend.git"
+SERVICE_NAME="backend"
+
+# Move to app directory
+cd $APP_DIR || exit
+
+# Fetch latest changes
+git fetch origin main
+
+# Check if there are new commits
+LOCAL=$(git rev-parse HEAD)
+REMOTE=$(git rev-parse origin/main)
+
+if [ "$LOCAL" != "$REMOTE" ]; then
+    echo "New changes detected. Pulling and deploying..."
+    
+    # Pull latest code
+    git reset --hard origin/main
+    
+    # Restore dependencies and publish
+    dotnet restore
+    dotnet publish -c Release -o $PUBLISH_DIR
+    
+    # Restart the systemd service
+    sudo systemctl restart $SERVICE_NAME
+    
+    echo "Deployment completed successfully."
+else
+    echo "No changes detected. Nothing to do."
+fi
