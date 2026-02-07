@@ -58,7 +58,7 @@ namespace MyApi.Modules.ServiceOrders.Services
                     OfferId = sale.OfferId,
                     ContactId = sale.ContactId,
                     ServiceType = serviceItems.FirstOrDefault()?.ItemName ?? "maintenance",
-                    Status = "ready_for_planning",
+                    Status = "pending",  // Initial status after creation - workflow: pending → ready_for_planning → scheduled → in_progress...
                     Priority = createDto.Priority ?? "medium",
                     Description = sale.Description,
                     Notes = createDto.Notes ?? sale.Description,
@@ -325,12 +325,29 @@ namespace MyApi.Modules.ServiceOrders.Services
 
             var contact = await _context.Contacts.FindAsync(serviceOrder.ContactId);
             
-            // Fetch sale number if service order has a saleId
+            // Fetch sale number and backfill estimated cost if needed
             string? saleNumber = null;
             if (!string.IsNullOrEmpty(serviceOrder.SaleId) && int.TryParse(serviceOrder.SaleId, out int parsedSaleId))
             {
                 var sale = await _context.Sales.FindAsync(parsedSaleId);
                 saleNumber = sale?.SaleNumber;
+                
+                // Backfill estimated cost from sale if it's 0 (legacy data)
+                if ((serviceOrder.EstimatedCost == null || serviceOrder.EstimatedCost == 0) && sale != null)
+                {
+                    var saleCost = sale.GrandTotal > 0 ? sale.GrandTotal : sale.TotalAmount;
+                    if (saleCost > 0)
+                    {
+                        serviceOrder.EstimatedCost = saleCost;
+                        // Also persist the fix so it doesn't need to be recalculated
+                        var tracked = await _context.ServiceOrders.FindAsync(serviceOrder.Id);
+                        if (tracked != null)
+                        {
+                            tracked.EstimatedCost = saleCost;
+                            await _context.SaveChangesAsync();
+                        }
+                    }
+                }
             }
             
             // Resolve createdByName - check MainAdminUsers first (ID 1), then Users table
@@ -798,17 +815,19 @@ namespace MyApi.Modules.ServiceOrders.Services
         {
             return currentStatus switch
             {
-                "draft" => new List<string> { "pending", "ready_for_planning", "scheduled", "cancelled" },
-                "pending" => new List<string> { "ready_for_planning", "scheduled", "in_progress", "on_hold", "cancelled" },
-                "ready_for_planning" => new List<string> { "pending", "scheduled", "in_progress", "on_hold", "cancelled" },
-                "scheduled" => new List<string> { "pending", "ready_for_planning", "in_progress", "on_hold", "cancelled" },
+                "draft" => new List<string> { "pending", "planned", "ready_for_planning", "scheduled", "cancelled" },
+                "pending" => new List<string> { "planned", "ready_for_planning", "scheduled", "in_progress", "on_hold", "cancelled" },
+                "planned" => new List<string> { "pending", "scheduled", "in_progress", "on_hold", "cancelled" },
+                "ready_for_planning" => new List<string> { "pending", "planned", "scheduled", "in_progress", "on_hold", "cancelled" },
+                "scheduled" => new List<string> { "pending", "planned", "ready_for_planning", "in_progress", "on_hold", "cancelled" },
                 "in_progress" => new List<string> { "on_hold", "technically_completed", "completed", "cancelled" },
-                "on_hold" => new List<string> { "pending", "ready_for_planning", "in_progress", "cancelled" },
-                "technically_completed" => new List<string> { "in_progress", "completed", "invoiced", "closed" },
-                "completed" => new List<string> { "invoiced", "closed" },
+                "on_hold" => new List<string> { "pending", "planned", "ready_for_planning", "in_progress", "cancelled" },
+                "technically_completed" => new List<string> { "in_progress", "ready_for_invoice", "completed", "cancelled" },
+                "ready_for_invoice" => new List<string> { "technically_completed", "invoiced", "cancelled" },
+                "completed" => new List<string> { "ready_for_invoice", "invoiced", "closed" },
                 "invoiced" => new List<string> { "closed" },
                 "closed" => new List<string>(),
-                "cancelled" => new List<string> { "pending", "ready_for_planning" },
+                "cancelled" => new List<string> { "pending", "planned", "ready_for_planning" },
                 _ => new List<string>()
             };
         }

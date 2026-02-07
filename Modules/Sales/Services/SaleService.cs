@@ -248,7 +248,6 @@ namespace MyApi.Modules.Sales.Services
                 Tags = offer.Tags != null ? offer.Tags.Concat(new[] { "Converted" }).ToArray() : new[] { "Converted" },
                 OfferId = offerId.ToString(),
                 ConvertedFromOfferAt = DateTime.UtcNow,
-                ActualCloseDate = DateTime.UtcNow,
                 CreatedBy = userId,
                 CreatedByName = createdByName,
                 CreatedDate = DateTime.UtcNow,
@@ -351,6 +350,16 @@ namespace MyApi.Modules.Sales.Services
             if (updateDto.MaterialsFulfillment != null) sale.MaterialsFulfillment = updateDto.MaterialsFulfillment;
             if (updateDto.ServiceOrdersStatus != null) sale.ServiceOrdersStatus = updateDto.ServiceOrdersStatus;
             if (updateDto.Tags != null) sale.Tags = updateDto.Tags;
+
+            // Auto-set ActualCloseDate when closing, clear when reopening
+            if (isClosing && !sale.ActualCloseDate.HasValue)
+            {
+                sale.ActualCloseDate = DateTime.UtcNow;
+            }
+            if (isReopening)
+            {
+                sale.ActualCloseDate = null;
+            }
 
             sale.UpdatedAt = DateTime.UtcNow;
             sale.ModifiedBy = userId;

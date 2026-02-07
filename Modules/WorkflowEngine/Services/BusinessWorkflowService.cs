@@ -60,6 +60,25 @@ namespace MyApi.Modules.WorkflowEngine.Services
                 // Get contact for geolocation data
                 var contact = await _db.Contacts.FindAsync(offer.ContactId);
 
+                // Resolve user name for CreatedByName
+                string createdByName = userId ?? "system";
+                if (!string.IsNullOrEmpty(userId) && userId != "system")
+                {
+                    var adminUser = await _db.MainAdminUsers.FirstOrDefaultAsync(u => u.Id.ToString() == userId);
+                    if (adminUser != null)
+                    {
+                        createdByName = $"{adminUser.FirstName} {adminUser.LastName}".Trim();
+                    }
+                    else
+                    {
+                        var regularUser = await _db.Users.FirstOrDefaultAsync(u => u.Id.ToString() == userId);
+                        if (regularUser != null)
+                        {
+                            createdByName = $"{regularUser.FirstName} {regularUser.LastName}".Trim();
+                        }
+                    }
+                }
+
                 // Create the sale with ALL offer fields (matching ConvertOfferAsync/CreateSaleFromOfferAsync)
                 var sale = new Sale
                 {
@@ -92,6 +111,7 @@ namespace MyApi.Modules.WorkflowEngine.Services
                     SaleDate = DateTime.UtcNow,
                     CreatedDate = DateTime.UtcNow,
                     CreatedBy = userId ?? "system",
+                    CreatedByName = createdByName,
                     UpdatedAt = DateTime.UtcNow,
                     // Copy contact geolocation
                     ContactLatitude = contact?.Latitude ?? offer.ContactLatitude,
@@ -273,7 +293,7 @@ namespace MyApi.Modules.WorkflowEngine.Services
                     SaleId = saleId.ToString(),
                     OfferId = sale.OfferId,  // Propagate OfferId from Sale
                     ContactId = sale.ContactId,
-                    Status = "pending",
+                    Status = "pending",  // Initial status after creation - workflow: pending → ready_for_planning → scheduled → in_progress...
                     OrderNumber = $"SO-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..6].ToUpper()}",
                     OrderDate = DateTime.UtcNow,
                     CreatedDate = DateTime.UtcNow,
@@ -285,6 +305,7 @@ namespace MyApi.Modules.WorkflowEngine.Services
                     ScheduledDate = startDate,
                     TargetCompletionDate = targetDate,
                     TotalAmount = serviceItems.Sum(si => si.LineTotal),
+                    EstimatedCost = sale.GrandTotal > 0 ? sale.GrandTotal : sale.TotalAmount,
                     // Helper columns
                     ServiceCount = serviceItems.Count,
                     CompletedDispatchCount = 0,
@@ -322,7 +343,37 @@ namespace MyApi.Modules.WorkflowEngine.Services
                 }
                 await _db.SaveChangesAsync();
 
-                // Create SaleActivity for service order creation (upward propagation)
+                // Copy article/material items from sale to service order materials
+                var materialItems = sale.Items?.Where(i => i.Type == "article").ToList() ?? new List<SaleItem>();
+                if (materialItems.Any())
+                {
+                    foreach (var materialItem in materialItems)
+                    {
+                        var soMaterial = new ServiceOrderMaterial
+                        {
+                            ServiceOrderId = serviceOrder.Id,
+                            SaleItemId = materialItem.Id,
+                            ArticleId = materialItem.ArticleId,
+                            Name = materialItem.ItemName ?? "Material",
+                            Sku = materialItem.ItemCode,
+                            Description = materialItem.Description,
+                            Quantity = materialItem.Quantity,
+                            UnitPrice = materialItem.UnitPrice,
+                            TotalPrice = materialItem.LineTotal,
+                            Status = "pending",
+                            Source = "sale_conversion",
+                            InstallationId = materialItem.InstallationId,
+                            InstallationName = materialItem.InstallationName,
+                            CreatedBy = userId ?? "system",
+                            CreatedAt = DateTime.UtcNow
+                        };
+                        _db.ServiceOrderMaterials.Add(soMaterial);
+                    }
+                    await _db.SaveChangesAsync();
+                    _logger.LogInformation("HandleSaleInProgress: Copied {Count} material(s) to service order {ServiceOrderId}", 
+                        materialItems.Count, serviceOrder.Id);
+                }
+
                 var saleActivity = new SaleActivity
                 {
                     SaleId = saleId,

@@ -80,7 +80,7 @@ namespace MyApi.Modules.Dispatches.Services
             
             // Determine status based on whether technicians are assigned
             var hasTechnicians = dto.AssignedTechnicianIds != null && dto.AssignedTechnicianIds.Count > 0;
-            var status = hasTechnicians ? "assigned" : "pending";
+            var status = hasTechnicians ? "assigned" : "planned";
 
             // Prevent duplicate dispatches for the same job: if a non-deleted dispatch
             // already exists for this job, return it instead of creating a new one.
@@ -707,7 +707,7 @@ namespace MyApi.Modules.Dispatches.Services
 
             if (remainingDispatches.Count == 0)
             {
-                // No dispatches left → back to ready_for_planning
+                // No dispatches left → back to ready for planning
                 newStatus = "ready_for_planning";
             }
             else

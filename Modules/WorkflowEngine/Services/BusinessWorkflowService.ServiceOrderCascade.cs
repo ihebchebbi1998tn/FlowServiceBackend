@@ -12,7 +12,7 @@
 // 1. If at least one dispatch is in_progress → Service Order = in_progress
 // 2. If at least one dispatch is completed AND there are more than one dispatch → Service Order = partially_completed
 // 3. If service order has ONE dispatch that is completed → Service Order = technically_completed
-// 4. If dispatch is rejected → Service Order = ready_for_planning
+// 4. If dispatch is rejected → Service Order = planned
 // ============================================================================
 
 namespace MyApi.Modules.WorkflowEngine.Services

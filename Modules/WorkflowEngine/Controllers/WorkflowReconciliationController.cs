@@ -947,9 +947,9 @@ namespace MyApi.Modules.WorkflowEngine.Controllers
             {
                 "service_order" => status switch
                 {
-                    "draft" => 0, "pending" => 1, "ready_for_planning" => 2, "scheduled" => 3,
+                    "draft" => 0, "pending" => 1, "planned" => 2, "ready_for_planning" => 2, "scheduled" => 3,
                     "in_progress" => 4, "on_hold" => 4, "partially_completed" => 5,
-                    "technically_completed" => 6, "completed" => 7, "invoiced" => 8, "closed" => 9,
+                    "technically_completed" => 6, "ready_for_invoice" => 7, "completed" => 8, "invoiced" => 9, "closed" => 10,
                     "cancelled" => -1, _ => 0
                 },
                 "sale" => status switch { "created" => 0, "in_progress" => 1, "partially_invoiced" => 2, "invoiced" => 3, "closed" => 4, "cancelled" => -1, _ => 0 },
