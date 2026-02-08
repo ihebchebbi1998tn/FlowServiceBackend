@@ -253,7 +253,8 @@ namespace MyApi.Modules.Auth.Services
                     AdminExists = true,
                     SignupAllowed = false,
                     Message = "An administrator account exists. Please login.",
-                    AdminPreferences = adminPreferences
+                    AdminPreferences = adminPreferences,
+                    CompanyLogoUrl = admin.CompanyLogoUrl
                 };
             }
             catch (Exception ex)
@@ -520,6 +521,9 @@ namespace MyApi.Modules.Auth.Services
                     user.CompanyName = updateDto.CompanyName;
                 if (!string.IsNullOrEmpty(updateDto.CompanyWebsite))
                     user.CompanyWebsite = updateDto.CompanyWebsite;
+                // CompanyLogoUrl: update if provided (empty string = remove, URL = set)
+                if (updateDto.CompanyLogoUrl != null)
+                    user.CompanyLogoUrl = string.IsNullOrEmpty(updateDto.CompanyLogoUrl) ? null : updateDto.CompanyLogoUrl;
                 if (!string.IsNullOrEmpty(updateDto.Preferences))
                     user.PreferencesJson = updateDto.Preferences;
                 if (updateDto.OnboardingCompleted.HasValue)
@@ -760,6 +764,7 @@ namespace MyApi.Modules.Auth.Services
                 Industry = user.Industry ?? "",
                 CompanyName = user.CompanyName,
                 CompanyWebsite = user.CompanyWebsite,
+                CompanyLogoUrl = user.CompanyLogoUrl,
                 Preferences = user.PreferencesJson,
                 CreatedAt = user.CreatedAt,
                 LastLoginAt = user.LastLoginAt ?? user.LastLoginDate,
