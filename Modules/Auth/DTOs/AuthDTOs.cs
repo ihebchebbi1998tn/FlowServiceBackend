@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 
 namespace MyApi.Modules.Auth.DTOs
 {
@@ -72,6 +73,7 @@ namespace MyApi.Modules.Auth.DTOs
         public string Industry { get; set; } = string.Empty;
         public string? CompanyName { get; set; }
         public string? CompanyWebsite { get; set; }
+        [JsonPropertyName("companyLogoUrl")]
         public string? CompanyLogoUrl { get; set; }
         public string? Preferences { get; set; }
         public DateTime CreatedAt { get; set; }
@@ -109,6 +111,7 @@ namespace MyApi.Modules.Auth.DTOs
         public string? CompanyWebsite { get; set; }
 
         [MaxLength(500)]
+        [JsonPropertyName("companyLogoUrl")]
         public string? CompanyLogoUrl { get; set; }
 
         public string? Preferences { get; set; }
@@ -132,6 +135,7 @@ namespace MyApi.Modules.Auth.DTOs
         public bool SignupAllowed { get; set; }
         public string Message { get; set; } = string.Empty;
         public AdminPreferencesDto? AdminPreferences { get; set; }
+        [JsonPropertyName("companyLogoUrl")]
         public string? CompanyLogoUrl { get; set; }
     }
 
