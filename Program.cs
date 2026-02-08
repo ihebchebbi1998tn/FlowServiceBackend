@@ -19,6 +19,7 @@ using MyApi.Modules.Preferences.Services;
 using MyApi.Modules.Notifications.Services;
 using MyApi.Modules.AiChat.Services;
 using MyApi.Modules.WorkflowEngine.Services;
+using MyApi.Modules.Signatures.Services;
 using MyApi.Modules.WorkflowEngine.Hubs;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.DataProtection;
@@ -214,6 +215,9 @@ builder.Services.AddScoped<MyApi.Modules.Shared.Services.IEntityFormDocumentServ
 
 // PDF Settings Service (Global settings for all modules)
 builder.Services.AddScoped<IPdfSettingsService, PdfSettingsService>();
+
+// Signatures Module Services
+builder.Services.AddScoped<ISignatureService, SignatureService>();
 
 // Workflow Engine Services
 builder.Services.AddScoped<IWorkflowEngineService, WorkflowEngineService>();

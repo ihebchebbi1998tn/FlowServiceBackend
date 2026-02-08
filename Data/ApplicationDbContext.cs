@@ -34,6 +34,7 @@ using MyApi.Modules.DynamicForms.Models;
 using MyApi.Modules.AiChat.Models;
 using MyApi.Modules.WorkflowEngine.Models;
 using MyApi.Modules.Documents.Models;
+using MyApi.Modules.Signatures.Models;
 
 namespace MyApi.Data
 {
@@ -160,6 +161,9 @@ namespace MyApi.Data
 
         // Documents Module
         public DbSet<Document> Documents { get; set; }
+
+        // Signatures Module
+        public DbSet<UserSignature> UserSignatures { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
