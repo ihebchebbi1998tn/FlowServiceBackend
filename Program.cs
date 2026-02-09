@@ -117,7 +117,7 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseNpgsql(connectionString, npgsqlOptions =>
     {
         // ✅ OPTIMIZATION 5: Optimize connection pooling (5-10% improvement)
-        npgsqlOptions.EnableRetryOnFailure(3, TimeSpan.FromSeconds(10));
+        npgsqlOptions.EnableRetryOnFailure(3, TimeSpan.FromSeconds(10), null);
     });
     if (builder.Environment.IsDevelopment())
     {
