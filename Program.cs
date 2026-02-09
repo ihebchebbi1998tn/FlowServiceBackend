@@ -44,7 +44,7 @@ builder.Services.AddControllers()
 var rawConnection = Environment.GetEnvironmentVariable("DATABASE_URL") ??
     builder.Configuration.GetConnectionString("DefaultConnection");
 
-string connectionString = rawConnection ?? "";
+string? connectionString = null;
 
 // Logging setup
 var logger = LoggerFactory.Create(builder => builder.AddConsole()).CreateLogger("Startup");
@@ -96,9 +96,14 @@ if (!string.IsNullOrEmpty(rawConnection))
         connectionString = rawConnection;
     }
 }
+else
+{
+    connectionString = "";
+}
 
 // ✅ OPTIMIZATION 5: Add connection pool sizing for better concurrency
 // Default pool size (25) often exhausts under load - increase for better performance
+connectionString ??= "";
 var connStringBuilder = new NpgsqlConnectionStringBuilder(connectionString)
 {
     MaxPoolSize = 50,  // Increased from default 25 to handle more concurrent requests
@@ -112,7 +117,7 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseNpgsql(connectionString, npgsqlOptions =>
     {
         // ✅ OPTIMIZATION 5: Optimize connection pooling (5-10% improvement)
-        npgsqlOptions.EnableRetryOnFailure(maxRetryCount: 3, maxRetryDelay: TimeSpan.FromSeconds(10), errorCodesToAdd: null);
+        npgsqlOptions.EnableRetryOnFailure(3, TimeSpan.FromSeconds(10));
     });
     if (builder.Environment.IsDevelopment())
     {

@@ -13,7 +13,7 @@ namespace MyApi.Infrastructure.Caching
         private readonly ApplicationDbContext _context;
         private readonly ICacheService _cacheService;
         private readonly CacheInvalidationHelper _cacheInvalidationHelper;
-        private readonly ILogger<ContactTagServiceWithCaching> _logger;
+        private readonly ILogger<CacheInvalidationHelper> _logger;
 
         private const string CachePrefix = "contact_tags";
 
@@ -21,7 +21,7 @@ namespace MyApi.Infrastructure.Caching
             ApplicationDbContext context,
             ICacheService cacheService,
             CacheInvalidationHelper cacheInvalidationHelper,
-            ILogger<ContactTagServiceWithCaching> logger)
+            ILogger<CacheInvalidationHelper> logger)
         {
             _context = context;
             _cacheService = cacheService;
@@ -116,7 +116,7 @@ namespace MyApi.Infrastructure.Caching
             _context.ContactTagAssignments.Add(assignment);
             await _context.SaveChangesAsync();
 
-            _cacheInvalidationHelper.InvalidateContact(contactId);
+            _cacheInvalidationHelper.InvalidateContactCaches();
             _logger.LogInformation("Assigned tag {TagId} to contact {ContactId}", tagId, contactId);
 
             return assignment;
@@ -132,7 +132,7 @@ namespace MyApi.Infrastructure.Caching
             {
                 return await _context.ContactTags
                     .Where(t => !t.IsDeleted &&
-                        EF.Functions.ILike(t.Name ?? "", $"%{searchTerm}%"))
+                        EF.Functions.ILike(t.Name, $"%{searchTerm}%"))
                     .OrderBy(t => t.Name)
                     .ToListAsync();
             }, TimeSpan.FromMinutes(5));
