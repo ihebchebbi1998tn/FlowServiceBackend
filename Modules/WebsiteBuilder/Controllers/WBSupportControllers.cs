@@ -248,13 +248,11 @@ namespace MyApi.Modules.WebsiteBuilder.Controllers
             catch (Exception ex) { _logger.LogError(ex, "Error creating media record"); return StatusCode(500, "Error creating media"); }
         }
 
-        /// <summary>
-        /// Soft-delete media metadata only. For full cleanup (disk + DB),
-        /// use DELETE /api/WBUpload/{mediaId} instead.
-        /// This endpoint is intentionally removed to prevent orphaned files.
-        /// All media deletion should go through WBUploadController.DeleteMedia.
-        /// </summary>
         // [HttpDelete("{id}")]  — REMOVED: use DELETE /api/WBUpload/{mediaId} to also clean up disk files
+        // Soft-delete media metadata only. For full cleanup (disk + DB),
+        // use DELETE /api/WBUpload/{mediaId} instead.
+        // This endpoint is intentionally removed to prevent orphaned files.
+        // All media deletion should go through WBUploadController.DeleteMedia.
     }
 
     // ══════════════════════════════════════════════════════════════
