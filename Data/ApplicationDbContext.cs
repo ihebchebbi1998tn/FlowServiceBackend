@@ -35,6 +35,8 @@ using MyApi.Modules.AiChat.Models;
 using MyApi.Modules.WorkflowEngine.Models;
 using MyApi.Modules.Documents.Models;
 using MyApi.Modules.Signatures.Models;
+using MyApi.Modules.WebsiteBuilder.Models;
+using MyApi.Modules.WebsiteBuilder.Data.Configurations;
 
 namespace MyApi.Data
 {
@@ -165,6 +167,18 @@ namespace MyApi.Data
         // Signatures Module
         public DbSet<UserSignature> UserSignatures { get; set; }
 
+        // Website Builder Module
+        public DbSet<WBSite> WBSites { get; set; }
+        public DbSet<WBPage> WBPages { get; set; }
+        public DbSet<WBPageVersion> WBPageVersions { get; set; }
+        public DbSet<WBGlobalBlock> WBGlobalBlocks { get; set; }
+        public DbSet<WBGlobalBlockUsage> WBGlobalBlockUsages { get; set; }
+        public DbSet<WBBrandProfile> WBBrandProfiles { get; set; }
+        public DbSet<WBFormSubmission> WBFormSubmissions { get; set; }
+        public DbSet<WBMedia> WBMedia { get; set; }
+        public DbSet<WBTemplate> WBTemplates { get; set; }
+        public DbSet<WBActivityLog> WBActivityLogs { get; set; }
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
@@ -240,6 +254,18 @@ namespace MyApi.Data
             ConfigureLookupEntities(modelBuilder);
             ConfigureTasksEntities(modelBuilder);
             ConfigurePlanningEntities(modelBuilder);
+
+            // Website Builder Module configurations
+            new WBSiteConfiguration().Configure(modelBuilder);
+            new WBPageConfiguration().Configure(modelBuilder);
+            new WBPageVersionConfiguration().Configure(modelBuilder);
+            new WBGlobalBlockConfiguration().Configure(modelBuilder);
+            new WBGlobalBlockUsageConfiguration().Configure(modelBuilder);
+            new WBBrandProfileConfiguration().Configure(modelBuilder);
+            new WBFormSubmissionConfiguration().Configure(modelBuilder);
+            new WBMediaConfiguration().Configure(modelBuilder);
+            new WBTemplateConfiguration().Configure(modelBuilder);
+            new WBActivityLogConfiguration().Configure(modelBuilder);
         }
 
         private void ConfigureArticleEntities(ModelBuilder modelBuilder)
