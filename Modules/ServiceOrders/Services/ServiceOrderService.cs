@@ -1541,41 +1541,24 @@ namespace MyApi.Modules.ServiceOrders.Services
                 }
             }
 
-            // Process selected expenses — allow retry
+            // Process selected expenses — check BOTH ServiceOrderExpenses and DispatchExpenses tables
             if (dto.ExpenseIds != null && dto.ExpenseIds.Any())
             {
-                // First, check ALL expenses with these IDs regardless of filters
-                var allRequestedExpenses = await _context.ServiceOrderExpenses
-                    .Where(e => dto.ExpenseIds.Contains(e.Id))
+                var remainingExpenseIds = new List<int>(dto.ExpenseIds);
+
+                // 1. Check ServiceOrderExpenses table first
+                var soExpenses = await _context.ServiceOrderExpenses
+                    .Where(e => dto.ExpenseIds.Contains(e.Id) && e.ServiceOrderId == id
+                        && (e.InvoiceStatus == null || e.InvoiceStatus == "selected_for_invoice"))
                     .ToListAsync();
-                
-                _logger.LogInformation("PrepareForInvoice: Raw expense lookup for IDs [{Ids}]: found {Count} records. Details: {Data}", 
-                    string.Join(",", dto.ExpenseIds), 
-                    allRequestedExpenses.Count,
-                    System.Text.Json.JsonSerializer.Serialize(allRequestedExpenses.Select(e => new { e.Id, e.ServiceOrderId, e.InvoiceStatus, e.Type, e.Amount })));
 
-                if (allRequestedExpenses.Count == 0)
+                _logger.LogInformation("PrepareForInvoice: Found {Count} SO expenses for IDs [{Ids}]", soExpenses.Count, string.Join(",", dto.ExpenseIds));
+
+                foreach (var exp in soExpenses)
                 {
-                    throw new InvalidOperationException($"No expenses found with IDs [{string.Join(",", dto.ExpenseIds)}]. They may not exist in the database.");
-                }
-
-                // Filter for matching SO and valid invoice status
-                var expenses = allRequestedExpenses
-                    .Where(e => e.ServiceOrderId == id && (e.InvoiceStatus == null || e.InvoiceStatus == "selected_for_invoice"))
-                    .ToList();
-
-                if (expenses.Count == 0)
-                {
-                    var mismatchInfo = allRequestedExpenses.Select(e => $"ID={e.Id} SO={e.ServiceOrderId}(expected {id}) Status={e.InvoiceStatus ?? "null"}").ToList();
-                    throw new InvalidOperationException($"Expenses found but none match filters. Details: [{string.Join("; ", mismatchInfo)}]");
-                }
-
-                _logger.LogInformation("PrepareForInvoice: {Count} expenses passed filter for transfer", expenses.Count);
-
-                foreach (var exp in expenses)
-                {
+                    remainingExpenseIds.Remove(exp.Id);
                     currentDisplayOrder++;
-                    var saleItem = new Sales.Models.SaleItem
+                    newSaleItems.Add(new Sales.Models.SaleItem
                     {
                         SaleId = saleId,
                         Type = "service",
@@ -1586,9 +1569,53 @@ namespace MyApi.Modules.ServiceOrders.Services
                         LineTotal = exp.Amount,
                         ServiceOrderId = id.ToString(),
                         DisplayOrder = currentDisplayOrder
-                    };
-                    newSaleItems.Add(saleItem);
+                    });
                     expensesToMark.Add(exp);
+                }
+
+                // 2. For remaining IDs, check DispatchExpenses table (expenses from dispatches linked to this SO)
+                if (remainingExpenseIds.Any())
+                {
+                    // Get dispatch IDs linked to this service order
+                    var serviceOrderWithJobs = await _context.ServiceOrders
+                        .Include(so => so.Jobs)
+                        .FirstOrDefaultAsync(so => so.Id == id);
+                    var jobIdStrings = serviceOrderWithJobs?.Jobs?.Select(j => j.Id.ToString()).ToList() ?? new List<string>();
+                    var linkedDispatchIds = await _context.Dispatches
+                        .Where(d => d.JobId != null && jobIdStrings.Contains(d.JobId))
+                        .Select(d => d.Id)
+                        .ToListAsync();
+
+                    var dispatchExpenses = await _context.DispatchExpenses
+                        .Where(e => remainingExpenseIds.Contains(e.Id) && linkedDispatchIds.Contains(e.DispatchId))
+                        .ToListAsync();
+
+                    _logger.LogInformation("PrepareForInvoice: Found {Count} dispatch expenses for remaining IDs [{Ids}]", 
+                        dispatchExpenses.Count, string.Join(",", remainingExpenseIds));
+
+                    foreach (var dExp in dispatchExpenses)
+                    {
+                        remainingExpenseIds.Remove(dExp.Id);
+                        currentDisplayOrder++;
+                        newSaleItems.Add(new Sales.Models.SaleItem
+                        {
+                            SaleId = saleId,
+                            Type = "service",
+                            ItemName = $"Expense: {dExp.ExpenseType}",
+                            Description = dExp.Description ?? $"Expense - {dExp.ExpenseType}",
+                            Quantity = 1,
+                            UnitPrice = dExp.Amount,
+                            LineTotal = dExp.Amount,
+                            ServiceOrderId = id.ToString(),
+                            DisplayOrder = currentDisplayOrder
+                        });
+                    }
+                }
+
+                // If we still couldn't find some IDs, warn but don't fail
+                if (remainingExpenseIds.Any())
+                {
+                    _logger.LogWarning("PrepareForInvoice: Could not find expenses with IDs [{Ids}] in either table", string.Join(",", remainingExpenseIds));
                 }
             }
 
