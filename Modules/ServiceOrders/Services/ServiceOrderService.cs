@@ -1,4 +1,3 @@
-
 using Microsoft.EntityFrameworkCore;
 using MyApi.Data;
 using MyApi.Modules.ServiceOrders.DTOs;
@@ -1545,24 +1544,33 @@ namespace MyApi.Modules.ServiceOrders.Services
             // Process selected expenses — allow retry
             if (dto.ExpenseIds != null && dto.ExpenseIds.Any())
             {
-                var expenses = await _context.ServiceOrderExpenses
-                    .Where(e => dto.ExpenseIds.Contains(e.Id) && e.ServiceOrderId == id 
-                        && (e.InvoiceStatus == null || e.InvoiceStatus == "selected_for_invoice"))
+                // First, check ALL expenses with these IDs regardless of filters
+                var allRequestedExpenses = await _context.ServiceOrderExpenses
+                    .Where(e => dto.ExpenseIds.Contains(e.Id))
                     .ToListAsync();
+                
+                _logger.LogInformation("PrepareForInvoice: Raw expense lookup for IDs [{Ids}]: found {Count} records. Details: {Data}", 
+                    string.Join(",", dto.ExpenseIds), 
+                    allRequestedExpenses.Count,
+                    System.Text.Json.JsonSerializer.Serialize(allRequestedExpenses.Select(e => new { e.Id, e.ServiceOrderId, e.InvoiceStatus, e.Type, e.Amount })));
 
-                _logger.LogInformation("PrepareForInvoice: Found {Count} expenses to transfer (requested: {Requested}). IDs found: [{Ids}]", 
-                    expenses.Count, dto.ExpenseIds.Count, string.Join(",", expenses.Select(e => e.Id)));
+                if (allRequestedExpenses.Count == 0)
+                {
+                    throw new InvalidOperationException($"No expenses found with IDs [{string.Join(",", dto.ExpenseIds)}]. They may not exist in the database.");
+                }
 
-                // If no expenses found at all, log the actual state of requested expenses
+                // Filter for matching SO and valid invoice status
+                var expenses = allRequestedExpenses
+                    .Where(e => e.ServiceOrderId == id && (e.InvoiceStatus == null || e.InvoiceStatus == "selected_for_invoice"))
+                    .ToList();
+
                 if (expenses.Count == 0)
                 {
-                    var allRequestedExpenses = await _context.ServiceOrderExpenses
-                        .Where(e => dto.ExpenseIds.Contains(e.Id))
-                        .Select(e => new { e.Id, e.ServiceOrderId, e.InvoiceStatus, e.Type, e.Amount })
-                        .ToListAsync();
-                    _logger.LogWarning("PrepareForInvoice: No expenses matched filter. Raw state of requested IDs: {Data}", 
-                        System.Text.Json.JsonSerializer.Serialize(allRequestedExpenses));
+                    var mismatchInfo = allRequestedExpenses.Select(e => $"ID={e.Id} SO={e.ServiceOrderId}(expected {id}) Status={e.InvoiceStatus ?? "null"}").ToList();
+                    throw new InvalidOperationException($"Expenses found but none match filters. Details: [{string.Join("; ", mismatchInfo)}]");
                 }
+
+                _logger.LogInformation("PrepareForInvoice: {Count} expenses passed filter for transfer", expenses.Count);
 
                 foreach (var exp in expenses)
                 {
@@ -1645,17 +1653,12 @@ namespace MyApi.Modules.ServiceOrders.Services
                     }
                     else
                     {
-                        _logger.LogWarning("PrepareForInvoice: No NEW items to transfer for SO {Id}. MaterialIds: [{MatIds}], ExpenseIds: [{ExpIds}], TimeEntryIds: [{TeIds}]", 
-                            id, 
-                            dto.MaterialIds != null ? string.Join(",", dto.MaterialIds) : "none",
-                            dto.ExpenseIds != null ? string.Join(",", dto.ExpenseIds) : "none",
-                            dto.TimeEntryIds != null ? string.Join(",", dto.TimeEntryIds) : "none");
-                        
-                        foreach (var mat in materialsToMark) mat.InvoiceStatus = "selected_for_invoice";
-                        foreach (var exp in expensesToMark) exp.InvoiceStatus = "selected_for_invoice";
-                        foreach (var te in timeEntriesToMark) te.InvoiceStatus = "selected_for_invoice";
-                        if (materialsToMark.Any() || expensesToMark.Any() || timeEntriesToMark.Any())
-                            await _context.SaveChangesAsync();
+                        // If IDs were provided but nothing to transfer, this is an error
+                        var hasRequestedIds = (dto.MaterialIds?.Any() == true) || (dto.ExpenseIds?.Any() == true) || (dto.TimeEntryIds?.Any() == true);
+                        if (hasRequestedIds)
+                        {
+                            throw new InvalidOperationException($"Items were requested for transfer but none were created as SaleItems. Materials: {materialsToMark.Count}, Expenses: {expensesToMark.Count}, TimeEntries: {timeEntriesToMark.Count}");
+                        }
                     }
 
                     // Update service order status
