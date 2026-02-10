@@ -1,3 +1,4 @@
+
 using Microsoft.EntityFrameworkCore;
 using MyApi.Data;
 using MyApi.Modules.ServiceOrders.DTOs;
@@ -1618,71 +1619,74 @@ namespace MyApi.Modules.ServiceOrders.Services
                 }
             }
 
-            // Use a transaction to ensure atomicity
-            using var transaction = await _context.Database.BeginTransactionAsync();
-            try
+            // Use execution strategy to support retrying transactions with Npgsql
+            var strategy = _context.Database.CreateExecutionStrategy();
+            await strategy.ExecuteAsync(async () =>
             {
-                if (newSaleItems.Any())
+                using var transaction = await _context.Database.BeginTransactionAsync();
+                try
                 {
-                    _logger.LogInformation("PrepareForInvoice: Adding {Count} new sale items to sale {SaleId}. Items: [{Items}]", 
-                        newSaleItems.Count, saleId, 
-                        string.Join(", ", newSaleItems.Select(i => $"{i.ItemName}({i.UnitPrice})")));
+                    if (newSaleItems.Any())
+                    {
+                        _logger.LogInformation("PrepareForInvoice: Adding {Count} new sale items to sale {SaleId}. Items: [{Items}]", 
+                            newSaleItems.Count, saleId, 
+                            string.Join(", ", newSaleItems.Select(i => $"{i.ItemName}({i.UnitPrice})")));
 
-                    _context.SaleItems.AddRange(newSaleItems);
-                    await _context.SaveChangesAsync();
-                    
-                    _logger.LogInformation("PrepareForInvoice: Successfully saved {Count} new sale items", newSaleItems.Count);
-
-                    // NOW mark source entities as transferred (only after SaleItems are confirmed saved)
-                    foreach (var mat in materialsToMark) mat.InvoiceStatus = "selected_for_invoice";
-                    foreach (var exp in expensesToMark) exp.InvoiceStatus = "selected_for_invoice";
-                    foreach (var te in timeEntriesToMark) te.InvoiceStatus = "selected_for_invoice";
-                    await _context.SaveChangesAsync();
-                }
-                else
-                {
-                    _logger.LogWarning("PrepareForInvoice: No NEW items to transfer for SO {Id}. MaterialIds: [{MatIds}], ExpenseIds: [{ExpIds}], TimeEntryIds: [{TeIds}]", 
-                        id, 
-                        dto.MaterialIds != null ? string.Join(",", dto.MaterialIds) : "none",
-                        dto.ExpenseIds != null ? string.Join(",", dto.ExpenseIds) : "none",
-                        dto.TimeEntryIds != null ? string.Join(",", dto.TimeEntryIds) : "none");
-                    
-                    // Still mark as selected_for_invoice if they exist
-                    foreach (var mat in materialsToMark) mat.InvoiceStatus = "selected_for_invoice";
-                    foreach (var exp in expensesToMark) exp.InvoiceStatus = "selected_for_invoice";
-                    foreach (var te in timeEntriesToMark) te.InvoiceStatus = "selected_for_invoice";
-                    if (materialsToMark.Any() || expensesToMark.Any() || timeEntriesToMark.Any())
+                        _context.SaleItems.AddRange(newSaleItems);
                         await _context.SaveChangesAsync();
-                }
+                        
+                        _logger.LogInformation("PrepareForInvoice: Successfully saved {Count} new sale items", newSaleItems.Count);
 
-                // Update service order status
-                serviceOrder.Status = "ready_for_invoice";
-                serviceOrder.ModifiedDate = DateTime.UtcNow;
-                await _context.SaveChangesAsync();
+                        // NOW mark source entities as transferred
+                        foreach (var mat in materialsToMark) mat.InvoiceStatus = "selected_for_invoice";
+                        foreach (var exp in expensesToMark) exp.InvoiceStatus = "selected_for_invoice";
+                        foreach (var te in timeEntriesToMark) te.InvoiceStatus = "selected_for_invoice";
+                        await _context.SaveChangesAsync();
+                    }
+                    else
+                    {
+                        _logger.LogWarning("PrepareForInvoice: No NEW items to transfer for SO {Id}. MaterialIds: [{MatIds}], ExpenseIds: [{ExpIds}], TimeEntryIds: [{TeIds}]", 
+                            id, 
+                            dto.MaterialIds != null ? string.Join(",", dto.MaterialIds) : "none",
+                            dto.ExpenseIds != null ? string.Join(",", dto.ExpenseIds) : "none",
+                            dto.TimeEntryIds != null ? string.Join(",", dto.TimeEntryIds) : "none");
+                        
+                        foreach (var mat in materialsToMark) mat.InvoiceStatus = "selected_for_invoice";
+                        foreach (var exp in expensesToMark) exp.InvoiceStatus = "selected_for_invoice";
+                        foreach (var te in timeEntriesToMark) te.InvoiceStatus = "selected_for_invoice";
+                        if (materialsToMark.Any() || expensesToMark.Any() || timeEntriesToMark.Any())
+                            await _context.SaveChangesAsync();
+                    }
 
-                // Recalculate sale totals
-                var updatedSale = await _context.Sales.Include(s => s.Items).FirstOrDefaultAsync(s => s.Id == saleId);
-                if (updatedSale != null)
-                {
-                    updatedSale.TotalAmount = updatedSale.Items?.Sum(i => i.LineTotal) ?? 0;
-                    updatedSale.GrandTotal = updatedSale.TotalAmount;
-                    updatedSale.LastActivity = DateTime.UtcNow;
+                    // Update service order status
+                    serviceOrder.Status = "ready_for_invoice";
+                    serviceOrder.ModifiedDate = DateTime.UtcNow;
                     await _context.SaveChangesAsync();
-                    
-                    _logger.LogInformation("PrepareForInvoice: Sale {SaleId} now has {ItemCount} items, total: {Total}", 
-                        saleId, updatedSale.Items?.Count ?? 0, updatedSale.TotalAmount);
-                }
 
-                await transaction.CommitAsync();
-                _logger.LogInformation("PrepareForInvoice: Transaction committed. Transferred {ItemCount} items to sale {SaleId}", newSaleItems.Count, saleId);
-            }
-            catch (Exception ex)
-            {
-                await transaction.RollbackAsync();
-                _logger.LogError(ex, "PrepareForInvoice: Transaction ROLLED BACK for SO {Id}. Error: {Error}. InnerException: {Inner}", 
-                    id, ex.Message, ex.InnerException?.Message ?? "none");
-                throw new InvalidOperationException($"Failed to transfer items to sale: {ex.InnerException?.Message ?? ex.Message}");
-            }
+                    // Recalculate sale totals
+                    var updatedSale = await _context.Sales.Include(s => s.Items).FirstOrDefaultAsync(s => s.Id == saleId);
+                    if (updatedSale != null)
+                    {
+                        updatedSale.TotalAmount = updatedSale.Items?.Sum(i => i.LineTotal) ?? 0;
+                        updatedSale.GrandTotal = updatedSale.TotalAmount;
+                        updatedSale.LastActivity = DateTime.UtcNow;
+                        await _context.SaveChangesAsync();
+                        
+                        _logger.LogInformation("PrepareForInvoice: Sale {SaleId} now has {ItemCount} items, total: {Total}", 
+                            saleId, updatedSale.Items?.Count ?? 0, updatedSale.TotalAmount);
+                    }
+
+                    await transaction.CommitAsync();
+                    _logger.LogInformation("PrepareForInvoice: Transaction committed. Transferred {ItemCount} items to sale {SaleId}", newSaleItems.Count, saleId);
+                }
+                catch (Exception ex)
+                {
+                    await transaction.RollbackAsync();
+                    _logger.LogError(ex, "PrepareForInvoice: Transaction ROLLED BACK for SO {Id}. Error: {Error}. InnerException: {Inner}", 
+                        id, ex.Message, ex.InnerException?.Message ?? "none");
+                    throw new InvalidOperationException($"Failed to transfer items to sale: {ex.InnerException?.Message ?? ex.Message}");
+                }
+            });
 
             return (await GetServiceOrderByIdAsync(id))!;
         }
