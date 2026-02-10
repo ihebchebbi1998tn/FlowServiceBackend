@@ -1462,5 +1462,130 @@ namespace MyApi.Modules.ServiceOrders.Services
 
             return true;
         }
+
+        // ========== INVOICE PREPARATION ==========
+
+        public async Task<ServiceOrderDto> PrepareForInvoiceAsync(int id, PrepareInvoiceDto dto, string userId)
+        {
+            var serviceOrder = await _context.ServiceOrders.FindAsync(id);
+            if (serviceOrder == null)
+                throw new KeyNotFoundException($"Service order with ID {id} not found");
+
+            if (serviceOrder.Status != "technically_completed")
+                throw new InvalidOperationException("Service order must be in 'technically_completed' status to prepare for invoice");
+
+            if (string.IsNullOrEmpty(serviceOrder.SaleId) || !int.TryParse(serviceOrder.SaleId, out int saleId))
+                throw new InvalidOperationException("Service order must be linked to a sale to prepare for invoice");
+
+            var sale = await _context.Sales.Include(s => s.Items).FirstOrDefaultAsync(s => s.Id == saleId);
+            if (sale == null)
+                throw new KeyNotFoundException($"Linked sale with ID {saleId} not found");
+
+            // Process selected materials
+            if (dto.MaterialIds != null && dto.MaterialIds.Any())
+            {
+                var materials = await _context.ServiceOrderMaterials
+                    .Where(m => dto.MaterialIds.Contains(m.Id) && m.ServiceOrderId == id && m.InvoiceStatus == null)
+                    .ToListAsync();
+
+                foreach (var mat in materials)
+                {
+                    var saleItem = new Sales.Models.SaleItem
+                    {
+                        SaleId = saleId,
+                        Type = "article",
+                        ItemName = mat.Name,
+                        ItemCode = mat.Sku,
+                        Description = mat.Description ?? mat.Name,
+                        Quantity = mat.Quantity,
+                        UnitPrice = mat.UnitPrice,
+                        LineTotal = mat.TotalPrice,
+                        ArticleId = mat.ArticleId,
+                        InstallationId = mat.InstallationId,
+                        InstallationName = mat.InstallationName,
+                        ServiceOrderId = id.ToString(),
+                        DisplayOrder = (sale.Items?.Count ?? 0) + 1
+                    };
+                    _context.Set<Sales.Models.SaleItem>().Add(saleItem);
+                    mat.InvoiceStatus = "selected_for_invoice";
+                }
+            }
+
+            // Process selected expenses
+            if (dto.ExpenseIds != null && dto.ExpenseIds.Any())
+            {
+                var expenses = await _context.ServiceOrderExpenses
+                    .Where(e => dto.ExpenseIds.Contains(e.Id) && e.ServiceOrderId == id && e.InvoiceStatus == null)
+                    .ToListAsync();
+
+                foreach (var exp in expenses)
+                {
+                    var saleItem = new Sales.Models.SaleItem
+                    {
+                        SaleId = saleId,
+                        Type = "service",
+                        ItemName = $"Expense: {exp.Type}",
+                        Description = exp.Description ?? $"Expense - {exp.Type}",
+                        Quantity = 1,
+                        UnitPrice = exp.Amount,
+                        LineTotal = exp.Amount,
+                        ServiceOrderId = id.ToString(),
+                        DisplayOrder = (sale.Items?.Count ?? 0) + 1
+                    };
+                    _context.Set<Sales.Models.SaleItem>().Add(saleItem);
+                    exp.InvoiceStatus = "selected_for_invoice";
+                }
+            }
+
+            // Process selected time entries
+            if (dto.TimeEntryIds != null && dto.TimeEntryIds.Any())
+            {
+                var timeEntries = await _context.ServiceOrderTimeEntries
+                    .Where(t => dto.TimeEntryIds.Contains(t.Id) && t.ServiceOrderId == id && t.Billable && t.InvoiceStatus == null)
+                    .ToListAsync();
+
+                foreach (var te in timeEntries)
+                {
+                    var hours = te.Duration / 60.0m;
+                    var rate = te.HourlyRate ?? 0;
+                    var total = te.TotalCost ?? (hours * rate);
+
+                    var saleItem = new Sales.Models.SaleItem
+                    {
+                        SaleId = saleId,
+                        Type = "service",
+                        ItemName = $"Labor: {te.WorkType}",
+                        Description = te.Description ?? $"Time entry - {te.WorkType} ({te.Duration} min)",
+                        Quantity = 1,
+                        UnitPrice = total,
+                        LineTotal = total,
+                        ServiceOrderId = id.ToString(),
+                        DisplayOrder = (sale.Items?.Count ?? 0) + 1
+                    };
+                    _context.Set<Sales.Models.SaleItem>().Add(saleItem);
+                    te.InvoiceStatus = "selected_for_invoice";
+                }
+            }
+
+            // Update service order status
+            serviceOrder.Status = "ready_for_invoice";
+            serviceOrder.ModifiedDate = DateTime.UtcNow;
+
+            await _context.SaveChangesAsync();
+
+            // Recalculate sale totals
+            var updatedSale = await _context.Sales.Include(s => s.Items).FirstOrDefaultAsync(s => s.Id == saleId);
+            if (updatedSale != null)
+            {
+                updatedSale.TotalAmount = updatedSale.Items?.Sum(i => i.LineTotal) ?? 0;
+                updatedSale.GrandTotal = updatedSale.TotalAmount;
+                updatedSale.LastActivity = DateTime.UtcNow;
+                await _context.SaveChangesAsync();
+            }
+
+            _logger.LogInformation("Prepared invoice for service order {Id}, transferred items to sale {SaleId}", id, saleId);
+
+            return (await GetServiceOrderByIdAsync(id))!;
+        }
     }
 }

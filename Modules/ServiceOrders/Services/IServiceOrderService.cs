@@ -50,5 +50,8 @@ namespace MyApi.Modules.ServiceOrders.Services
         // Expense management (direct on service order)
         Task<ServiceOrderExpenseDto> AddExpenseAsync(int serviceOrderId, CreateServiceOrderExpenseDto dto, string userId);
         Task<bool> DeleteExpenseAsync(int serviceOrderId, int expenseId, string userId);
+        
+        // Invoice preparation
+        Task<ServiceOrderDto> PrepareForInvoiceAsync(int id, PrepareInvoiceDto dto, string userId);
     }
 }

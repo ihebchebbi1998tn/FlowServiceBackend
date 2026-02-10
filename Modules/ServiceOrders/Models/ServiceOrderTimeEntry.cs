@@ -60,6 +60,10 @@ namespace MyApi.Modules.ServiceOrders.Models
         [Column("CreatedAt")]
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
+        [Column("InvoiceStatus")]
+        [MaxLength(50)]
+        public string? InvoiceStatus { get; set; } // null, "selected_for_invoice", "invoiced"
+
         // Navigation property
         [ForeignKey("ServiceOrderId")]
         public virtual ServiceOrder? ServiceOrder { get; set; }

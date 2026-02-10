@@ -465,6 +465,45 @@ namespace MyApi.Modules.Auth.Controllers
         }
 
         /// <summary>
+        /// Get the company logo for the login page (no authentication required).
+        /// Returns the logo document as a file stream, or the CompanyLogoUrl as JSON.
+        /// </summary>
+        [HttpGet("company-logo")]
+        [AllowAnonymous]
+        public async Task<ActionResult> GetCompanyLogo()
+        {
+            try
+            {
+                var logoUrl = await _authService.GetCompanyLogoUrlAsync();
+                if (string.IsNullOrEmpty(logoUrl))
+                {
+                    return NotFound(new { message = "No company logo configured" });
+                }
+
+                // If it's a doc:{id} reference, try to serve the file directly
+                var docMatch = System.Text.RegularExpressions.Regex.Match(logoUrl, @"^doc:(\d+)$");
+                if (docMatch.Success && int.TryParse(docMatch.Groups[1].Value, out var docId))
+                {
+                    // Resolve and stream the document file
+                    var result = await _authService.GetCompanyLogoFileAsync(docId);
+                    if (result != null)
+                    {
+                        return File(result.Value.Stream, result.Value.ContentType, result.Value.FileName);
+                    }
+                    return NotFound(new { message = "Logo file not found" });
+                }
+
+                // Otherwise return the URL as JSON
+                return Ok(new { logoUrl });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting company logo");
+                return StatusCode(500, new { message = "Error retrieving company logo" });
+            }
+        }
+
+        /// <summary>
         /// Change user password
         /// </summary>
         /// <param name="changePasswordRequest">Password change data</param>
