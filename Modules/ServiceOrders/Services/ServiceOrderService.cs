@@ -1481,6 +1481,9 @@ namespace MyApi.Modules.ServiceOrders.Services
             if (sale == null)
                 throw new KeyNotFoundException($"Linked sale with ID {saleId} not found");
 
+            var newSaleItems = new List<Sales.Models.SaleItem>();
+            var currentDisplayOrder = (sale.Items?.Count ?? 0);
+
             // Process selected materials
             if (dto.MaterialIds != null && dto.MaterialIds.Any())
             {
@@ -1488,8 +1491,12 @@ namespace MyApi.Modules.ServiceOrders.Services
                     .Where(m => dto.MaterialIds.Contains(m.Id) && m.ServiceOrderId == id && m.InvoiceStatus == null)
                     .ToListAsync();
 
+                _logger.LogInformation("PrepareForInvoice: Found {Count} materials to transfer (requested: {Requested})", 
+                    materials.Count, dto.MaterialIds.Count);
+
                 foreach (var mat in materials)
                 {
+                    currentDisplayOrder++;
                     var saleItem = new Sales.Models.SaleItem
                     {
                         SaleId = saleId,
@@ -1504,9 +1511,9 @@ namespace MyApi.Modules.ServiceOrders.Services
                         InstallationId = mat.InstallationId,
                         InstallationName = mat.InstallationName,
                         ServiceOrderId = id.ToString(),
-                        DisplayOrder = (sale.Items?.Count ?? 0) + 1
+                        DisplayOrder = currentDisplayOrder
                     };
-                    _context.Set<Sales.Models.SaleItem>().Add(saleItem);
+                    newSaleItems.Add(saleItem);
                     mat.InvoiceStatus = "selected_for_invoice";
                 }
             }
@@ -1518,8 +1525,12 @@ namespace MyApi.Modules.ServiceOrders.Services
                     .Where(e => dto.ExpenseIds.Contains(e.Id) && e.ServiceOrderId == id && e.InvoiceStatus == null)
                     .ToListAsync();
 
+                _logger.LogInformation("PrepareForInvoice: Found {Count} expenses to transfer (requested: {Requested})", 
+                    expenses.Count, dto.ExpenseIds.Count);
+
                 foreach (var exp in expenses)
                 {
+                    currentDisplayOrder++;
                     var saleItem = new Sales.Models.SaleItem
                     {
                         SaleId = saleId,
@@ -1530,9 +1541,9 @@ namespace MyApi.Modules.ServiceOrders.Services
                         UnitPrice = exp.Amount,
                         LineTotal = exp.Amount,
                         ServiceOrderId = id.ToString(),
-                        DisplayOrder = (sale.Items?.Count ?? 0) + 1
+                        DisplayOrder = currentDisplayOrder
                     };
-                    _context.Set<Sales.Models.SaleItem>().Add(saleItem);
+                    newSaleItems.Add(saleItem);
                     exp.InvoiceStatus = "selected_for_invoice";
                 }
             }
@@ -1544,8 +1555,12 @@ namespace MyApi.Modules.ServiceOrders.Services
                     .Where(t => dto.TimeEntryIds.Contains(t.Id) && t.ServiceOrderId == id && t.Billable && t.InvoiceStatus == null)
                     .ToListAsync();
 
+                _logger.LogInformation("PrepareForInvoice: Found {Count} time entries to transfer (requested: {Requested})", 
+                    timeEntries.Count, dto.TimeEntryIds.Count);
+
                 foreach (var te in timeEntries)
                 {
+                    currentDisplayOrder++;
                     var hours = te.Duration / 60.0m;
                     var rate = te.HourlyRate ?? 0;
                     var total = te.TotalCost ?? (hours * rate);
@@ -1560,17 +1575,43 @@ namespace MyApi.Modules.ServiceOrders.Services
                         UnitPrice = total,
                         LineTotal = total,
                         ServiceOrderId = id.ToString(),
-                        DisplayOrder = (sale.Items?.Count ?? 0) + 1
+                        DisplayOrder = currentDisplayOrder
                     };
-                    _context.Set<Sales.Models.SaleItem>().Add(saleItem);
+                    newSaleItems.Add(saleItem);
                     te.InvoiceStatus = "selected_for_invoice";
                 }
+            }
+
+            // Add all new sale items explicitly via SaleItems DbSet
+            if (newSaleItems.Any())
+            {
+                _logger.LogInformation("PrepareForInvoice: Adding {Count} new sale items to sale {SaleId}", newSaleItems.Count, saleId);
+                _context.SaleItems.AddRange(newSaleItems);
+                
+                // Save the new items first
+                try
+                {
+                    await _context.SaveChangesAsync();
+                    _logger.LogInformation("PrepareForInvoice: Successfully saved {Count} new sale items", newSaleItems.Count);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "PrepareForInvoice: Failed to save new sale items to sale {SaleId}. Error: {Error}", saleId, ex.InnerException?.Message ?? ex.Message);
+                    throw new InvalidOperationException($"Failed to transfer items to sale: {ex.InnerException?.Message ?? ex.Message}");
+                }
+            }
+            else
+            {
+                _logger.LogWarning("PrepareForInvoice: No items to transfer for service order {Id}. MaterialIds: {MatIds}, ExpenseIds: {ExpIds}, TimeEntryIds: {TeIds}", 
+                    id, 
+                    dto.MaterialIds != null ? string.Join(",", dto.MaterialIds) : "none",
+                    dto.ExpenseIds != null ? string.Join(",", dto.ExpenseIds) : "none",
+                    dto.TimeEntryIds != null ? string.Join(",", dto.TimeEntryIds) : "none");
             }
 
             // Update service order status
             serviceOrder.Status = "ready_for_invoice";
             serviceOrder.ModifiedDate = DateTime.UtcNow;
-
             await _context.SaveChangesAsync();
 
             // Recalculate sale totals
@@ -1581,9 +1622,12 @@ namespace MyApi.Modules.ServiceOrders.Services
                 updatedSale.GrandTotal = updatedSale.TotalAmount;
                 updatedSale.LastActivity = DateTime.UtcNow;
                 await _context.SaveChangesAsync();
+                
+                _logger.LogInformation("PrepareForInvoice: Sale {SaleId} now has {ItemCount} items, total: {Total}", 
+                    saleId, updatedSale.Items?.Count ?? 0, updatedSale.TotalAmount);
             }
 
-            _logger.LogInformation("Prepared invoice for service order {Id}, transferred items to sale {SaleId}", id, saleId);
+            _logger.LogInformation("Prepared invoice for service order {Id}, transferred {ItemCount} items to sale {SaleId}", id, newSaleItems.Count, saleId);
 
             return (await GetServiceOrderByIdAsync(id))!;
         }
