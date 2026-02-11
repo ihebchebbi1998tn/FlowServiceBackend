@@ -11,7 +11,7 @@ namespace MyApi.Modules.EmailAccounts.Controllers
     [ApiController]
     [Route("api/email-accounts")]
     [Authorize]
-    public class EmailAccountsController : ControllerBase
+    public partial class EmailAccountsController : ControllerBase
     {
         private readonly IEmailAccountService _emailAccountService;
         private readonly ILogger<EmailAccountsController> _logger;

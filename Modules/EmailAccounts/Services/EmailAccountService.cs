@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace MyApi.Modules.EmailAccounts.Services
 {
-    public class EmailAccountService : IEmailAccountService
+    public partial class EmailAccountService : IEmailAccountService
     {
         private readonly ApplicationDbContext _context;
         private readonly IConfiguration _configuration;
