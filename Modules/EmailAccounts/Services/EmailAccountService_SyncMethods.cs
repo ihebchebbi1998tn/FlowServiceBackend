@@ -14,11 +14,22 @@ namespace MyApi.Modules.EmailAccounts.Services
 
 public async Task<SyncResultDto> SyncEmailsAsync(Guid accountId, int userId, int maxResults = 50)
 {
+    _logger.LogInformation("SyncEmailsAsync called with accountId={AccountId}, userId={UserId}", accountId, userId);
+
     var account = await _context.ConnectedEmailAccounts
         .FirstOrDefaultAsync(a => a.Id == accountId && a.UserId == userId);
 
     if (account == null)
+    {
+        // Debug: check if account exists at all (without userId filter)
+        var anyAccount = await _context.ConnectedEmailAccounts.FirstOrDefaultAsync(a => a.Id == accountId);
+        if (anyAccount != null)
+            _logger.LogWarning("Account {AccountId} exists but belongs to userId={OwnerUserId}, not {RequestUserId}", accountId, anyAccount.UserId, userId);
+        else
+            _logger.LogWarning("Account {AccountId} does not exist in the database at all", accountId);
+
         throw new InvalidOperationException("Account not found");
+    }
 
     if (!account.IsEmailSyncEnabled)
         throw new InvalidOperationException("Email sync is disabled for this account");
@@ -312,11 +323,21 @@ public async Task<SyncedEmailsPageDto> GetSyncedEmailsAsync(Guid accountId, int 
 
 public async Task<CalendarSyncResultDto> SyncCalendarAsync(Guid accountId, int userId, int maxResults = 50)
 {
+    _logger.LogInformation("SyncCalendarAsync called with accountId={AccountId}, userId={UserId}", accountId, userId);
+
     var account = await _context.ConnectedEmailAccounts
         .FirstOrDefaultAsync(a => a.Id == accountId && a.UserId == userId);
 
     if (account == null)
+    {
+        var anyAccount = await _context.ConnectedEmailAccounts.FirstOrDefaultAsync(a => a.Id == accountId);
+        if (anyAccount != null)
+            _logger.LogWarning("Calendar sync: Account {AccountId} exists but belongs to userId={OwnerUserId}, not {RequestUserId}", accountId, anyAccount.UserId, userId);
+        else
+            _logger.LogWarning("Calendar sync: Account {AccountId} does not exist in the database at all", accountId);
+
         throw new InvalidOperationException("Account not found");
+    }
 
     if (!account.IsCalendarSyncEnabled)
         throw new InvalidOperationException("Calendar sync is disabled for this account");

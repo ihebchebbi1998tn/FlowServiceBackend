@@ -82,6 +82,8 @@ namespace MyApi.Data
         // Email Accounts Module (Gmail/Outlook OAuth)
         public DbSet<ConnectedEmailAccount> ConnectedEmailAccounts { get; set; }
         public DbSet<EmailBlocklistItem> EmailBlocklistItems { get; set; }
+        public DbSet<SyncedEmail> SyncedEmails { get; set; }
+        public DbSet<SyncedCalendarEvent> SyncedCalendarEvents { get; set; }
 
         // Tasks Module
         public DbSet<Project> Projects { get; set; }
