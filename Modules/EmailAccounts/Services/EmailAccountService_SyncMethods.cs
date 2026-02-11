@@ -715,3 +715,4 @@ private static (string? name, string email) ParseEmailAddress(string raw)
     return (null, raw.Trim());
     }
 }
+}

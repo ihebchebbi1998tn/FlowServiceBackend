@@ -119,3 +119,4 @@ private async Task<SendEmailResultDto> SendOutlookEmailAsync(ConnectedEmailAccou
     return new SendEmailResultDto { Success = true };
     }
 }
+}

@@ -120,3 +120,4 @@ public async Task<ActionResult<SendEmailResultDto>> SendEmail(Guid id, [FromBody
     }
     }
 }
+}
