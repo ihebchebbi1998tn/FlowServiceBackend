@@ -415,7 +415,7 @@ using (var scope = app.Services.CreateScope())
             // Email Accounts
             "ConnectedEmailAccounts",
             "EmailBlocklistItems"
-		};
+        };
 
         var existingTables = context.Database.SqlQueryRaw<string>(
             @"SELECT table_name 
@@ -490,6 +490,18 @@ app.UseSwaggerDocumentation(builder.Configuration);
 
 // Serve static files for Swagger UI customizations
 app.UseStaticFiles();
+
+// Serve uploaded files (company logos, documents, etc.) from the uploads directory
+var uploadsPath = Path.Combine(Directory.GetParent(builder.Environment.ContentRootPath)?.FullName ?? builder.Environment.ContentRootPath, "uploads");
+if (!Directory.Exists(uploadsPath))
+{
+    Directory.CreateDirectory(uploadsPath);
+}
+app.UseStaticFiles(new StaticFileOptions
+{
+    FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(uploadsPath),
+    RequestPath = "/uploads"
+});
 
 // ✅ CORS MUST be here - before authentication
 app.UseCors("AllowFrontend");
