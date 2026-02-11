@@ -28,5 +28,18 @@ namespace MyApi.Modules.EmailAccounts.Services
         Task<BlocklistItemDto?> AddBlocklistItemAsync(Guid accountId, int userId, CreateBlocklistItemDto dto);
         Task<bool> RemoveBlocklistItemAsync(Guid accountId, Guid itemId, int userId);
         Task<IEnumerable<BlocklistItemDto>> GetBlocklistAsync(Guid accountId, int userId);
+
+        // ─── Email Sync & Fetch ───
+
+        /// <summary>
+        /// Trigger a sync of emails from the provider (Gmail/Outlook) for a connected account.
+        /// Fetches recent emails and stores them in SyncedEmails table.
+        /// </summary>
+        Task<SyncResultDto> SyncEmailsAsync(Guid accountId, int userId, int maxResults = 50);
+
+        /// <summary>
+        /// Get synced emails for a connected account with pagination.
+        /// </summary>
+        Task<SyncedEmailsPageDto> GetSyncedEmailsAsync(Guid accountId, int userId, int page = 1, int pageSize = 25, string? search = null);
     }
 }
