@@ -41,5 +41,10 @@ namespace MyApi.Modules.EmailAccounts.Services
 
         // ─── Send Email ───
         Task<SendEmailResultDto> SendEmailAsync(Guid accountId, int userId, SendEmailDto dto);
+
+        // ─── Star / Delete Email ───
+        Task<bool> ToggleStarEmailAsync(Guid accountId, int userId, Guid emailId);
+        Task<bool> ToggleReadEmailAsync(Guid accountId, int userId, Guid emailId);
+        Task<bool> DeleteEmailAsync(Guid accountId, int userId, Guid emailId);
     }
 }
