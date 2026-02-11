@@ -659,35 +659,5 @@ namespace MyApi.Modules.ServiceOrders.Controllers
                 return StatusCode(500, new { success = false, error = new { code = "INTERNAL_ERROR", message = "An error occurred" } });
             }
         }
-
-        // ========== INVOICE PREPARATION ==========
-
-        [HttpPost("{id:int}/prepare-invoice")]
-        public async Task<IActionResult> PrepareForInvoice(int id, [FromBody] PrepareInvoiceDto dto)
-        {
-            try
-            {
-                var userId = GetCurrentUserId();
-                var serviceOrder = await _serviceOrderService.PrepareForInvoiceAsync(id, dto, userId);
-
-                await _systemLogService.LogSuccessAsync($"Invoice prepared for service order {id}", "ServiceOrders", "update", userId, GetCurrentUserName(), "ServiceOrder", id.ToString());
-
-                return Ok(new { success = true, data = serviceOrder });
-            }
-            catch (KeyNotFoundException)
-            {
-                return NotFound(new { success = false, error = new { code = "NOT_FOUND", message = "Service order not found" } });
-            }
-            catch (InvalidOperationException ex)
-            {
-                return BadRequest(new { success = false, error = new { code = "INVALID_REQUEST", message = ex.Message } });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error preparing invoice for service order {Id}", id);
-                await _systemLogService.LogErrorAsync($"Failed to prepare invoice for service order {id}", "ServiceOrders", "update", GetCurrentUserId(), GetCurrentUserName(), "ServiceOrder", id.ToString(), ex.Message);
-                return StatusCode(500, new { success = false, error = new { code = "INTERNAL_ERROR", message = "An error occurred" } });
-            }
-        }
     }
 }

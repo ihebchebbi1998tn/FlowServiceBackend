@@ -169,14 +169,14 @@ namespace MyApi.Modules.WorkflowEngine.Services
 
         #region Business Process Nodes
 
-        private Task<NodeExecutionResult> ExecuteCreateOfferAsync(WorkflowNode node, WorkflowExecutionContext context)
+        private async Task<NodeExecutionResult> ExecuteCreateOfferAsync(WorkflowNode node, WorkflowExecutionContext context)
         {
             // This would create an offer based on node configuration
             // For now, log and return success
             _logger.LogInformation("Create Offer node executed for context {EntityType}:{EntityId}", 
                 context.TriggerEntityType, context.TriggerEntityId);
 
-            return Task.FromResult(new NodeExecutionResult
+            return new NodeExecutionResult
             {
                 Success = true,
                 Status = "completed",
@@ -185,7 +185,7 @@ namespace MyApi.Modules.WorkflowEngine.Services
                     ["action"] = "create_offer",
                     ["status"] = "simulated"
                 }
-            });
+            };
         }
 
         private async Task<NodeExecutionResult> ExecuteCreateSaleAsync(WorkflowNode node, WorkflowExecutionContext context)
@@ -502,12 +502,9 @@ namespace MyApi.Modules.WorkflowEngine.Services
             bool result;
             object? actualValue;
             
-            // Check if this is a collection field like "sale.items", "serviceOrder.dispatches", "sale.serviceOrders", "offer.sales"
-            var fieldLower = field.ToLower();
+            // Check if this is a collection field like "sale.items", "serviceOrder.dispatches"
             var isCollectionField = field.Contains('.') && 
-                (fieldLower.EndsWith(".items") || fieldLower.EndsWith(".dispatches") || 
-                 fieldLower.EndsWith(".serviceorders") || fieldLower.EndsWith(".service_orders") ||
-                 fieldLower.EndsWith(".sales") || fieldLower.EndsWith(".jobs"));
+                (field.ToLower().EndsWith(".items") || field.ToLower().EndsWith(".dispatches"));
             var isCollectionOperator = operatorType.ToLower() == "all_match" || 
                                        operatorType.ToLower() == "any_match" ||
                                        operatorType.ToLower() == "contains";
@@ -570,11 +567,11 @@ namespace MyApi.Modules.WorkflowEngine.Services
                 
                 // Resolve the entity ID
                 int entityId;
-                // entityType tracked for future logging/extension
+                string entityType;
                 
                 if (entityPrefix == "serviceorder" || entityPrefix == "service_order")
                 {
-                    _ = "service_order"; // entityType for future use
+                    entityType = "service_order";
                     // If triggered by dispatch, get the parent service order
                     if (context.TriggerEntityType == "dispatch")
                     {
@@ -597,7 +594,7 @@ namespace MyApi.Modules.WorkflowEngine.Services
                 }
                 else if (entityPrefix == "sale")
                 {
-                    _ = "sale"; // entityType for future use
+                    entityType = "sale";
                     // If triggered by sale, use the trigger entity ID directly
                     if (context.TriggerEntityType == "sale")
                     {
@@ -696,12 +693,15 @@ namespace MyApi.Modules.WorkflowEngine.Services
                     // Handle sale.items contains <type> check (e.g., "service", "article", "material")
                     if (entityPrefix == "sale")
                     {
+                        // entityId is already resolved above for sale prefix
+                        // Check if we're looking for a specific item type
                         var expectedType = expectedValue?.ToLower() ?? "service";
                         
                         _logger.LogInformation(
                             "EvaluateCollectionCondition: Checking if sale {SaleId} contains items of type '{ExpectedType}'",
                             entityId, expectedType);
                         
+                        // Also check RequiresServiceOrder flag for service items
                         var hasItems = await _db.SaleItems.AnyAsync(si => 
                             si.SaleId == entityId && 
                             (
@@ -714,165 +714,6 @@ namespace MyApi.Modules.WorkflowEngine.Services
                             entityId, expectedType, hasItems);
                         
                         return hasItems;
-                    }
-                }
-                else if (collectionField == "serviceorders" || collectionField == "service_orders")
-                {
-                    // Handle sale.serviceOrders all_match/any_match <status> check
-                    if (entityPrefix == "sale")
-                    {
-                        var serviceOrders = await _db.ServiceOrders
-                            .Where(so => so.SaleId == entityId.ToString())
-                            .ToListAsync();
-                        
-                        if (!serviceOrders.Any())
-                        {
-                            _logger.LogInformation("EvaluateCollectionCondition: No service orders found for sale {SaleId}", entityId);
-                            return false;
-                        }
-                        
-                        var targetStatuses = !string.IsNullOrEmpty(expectedValue) 
-                            ? expectedValue.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                                           .Select(s => s.Trim().ToLower())
-                                           .ToArray()
-                            : Array.Empty<string>();
-                        
-                        if (targetStatuses.Length == 0) return false;
-                        
-                        var fieldToCheck = checkField?.ToLower() ?? "status";
-                        
-                        if (operatorType.ToLower() == "all_match")
-                        {
-                            if (fieldToCheck == "status")
-                            {
-                                var allMatch = serviceOrders.All(so => targetStatuses.Contains(so.Status?.ToLower() ?? ""));
-                                _logger.LogInformation(
-                                    "EvaluateCollectionCondition: all_match check - {MatchCount}/{Total} service orders match [{Statuses}]. Result: {Result}",
-                                    serviceOrders.Count(so => targetStatuses.Contains(so.Status?.ToLower() ?? "")),
-                                    serviceOrders.Count,
-                                    string.Join(", ", targetStatuses),
-                                    allMatch);
-                                return allMatch;
-                            }
-                        }
-                        else if (operatorType.ToLower() == "any_match" || operatorType.ToLower() == "contains")
-                        {
-                            if (fieldToCheck == "status")
-                            {
-                                var anyMatch = serviceOrders.Any(so => targetStatuses.Contains(so.Status?.ToLower() ?? ""));
-                                _logger.LogInformation(
-                                    "EvaluateCollectionCondition: any_match check - service orders match [{Statuses}]. Result: {Result}",
-                                    string.Join(", ", targetStatuses),
-                                    anyMatch);
-                                return anyMatch;
-                            }
-                        }
-                    }
-                }
-                else if (collectionField == "sales")
-                {
-                    // Handle offer.sales all_match/any_match <status> check
-                    if (entityPrefix == "offer")
-                    {
-                        var sales = await _db.Sales
-                            .Where(s => s.OfferId == entityId.ToString())
-                            .ToListAsync();
-                        
-                        if (!sales.Any())
-                        {
-                            _logger.LogInformation("EvaluateCollectionCondition: No sales found for offer {OfferId}", entityId);
-                            return false;
-                        }
-                        
-                        var targetStatuses = !string.IsNullOrEmpty(expectedValue) 
-                            ? expectedValue.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                                           .Select(s => s.Trim().ToLower())
-                                           .ToArray()
-                            : Array.Empty<string>();
-                        
-                        if (targetStatuses.Length == 0) return false;
-                        
-                        var fieldToCheck = checkField?.ToLower() ?? "status";
-                        
-                        if (operatorType.ToLower() == "all_match")
-                        {
-                            if (fieldToCheck == "status")
-                            {
-                                var allMatch = sales.All(s => targetStatuses.Contains(s.Status?.ToLower() ?? ""));
-                                _logger.LogInformation(
-                                    "EvaluateCollectionCondition: all_match check - {MatchCount}/{Total} sales match [{Statuses}]. Result: {Result}",
-                                    sales.Count(s => targetStatuses.Contains(s.Status?.ToLower() ?? "")),
-                                    sales.Count,
-                                    string.Join(", ", targetStatuses),
-                                    allMatch);
-                                return allMatch;
-                            }
-                        }
-                        else if (operatorType.ToLower() == "any_match" || operatorType.ToLower() == "contains")
-                        {
-                            if (fieldToCheck == "status")
-                            {
-                                var anyMatch = sales.Any(s => targetStatuses.Contains(s.Status?.ToLower() ?? ""));
-                                _logger.LogInformation(
-                                    "EvaluateCollectionCondition: any_match check - sales match [{Statuses}]. Result: {Result}",
-                                    string.Join(", ", targetStatuses),
-                                    anyMatch);
-                                return anyMatch;
-                            }
-                        }
-                    }
-                }
-                else if (collectionField == "jobs")
-                {
-                    // Handle serviceOrder.jobs all_match/any_match <status> check
-                    if (entityPrefix == "serviceorder" || entityPrefix == "service_order")
-                    {
-                        var jobs = await _db.ServiceOrderJobs
-                            .Where(j => j.ServiceOrderId == entityId)
-                            .ToListAsync();
-                        
-                        if (!jobs.Any())
-                        {
-                            _logger.LogInformation("EvaluateCollectionCondition: No jobs found for service order {ServiceOrderId}", entityId);
-                            return false;
-                        }
-                        
-                        var targetStatuses = !string.IsNullOrEmpty(expectedValue) 
-                            ? expectedValue.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                                           .Select(s => s.Trim().ToLower())
-                                           .ToArray()
-                            : Array.Empty<string>();
-                        
-                        if (targetStatuses.Length == 0) return false;
-                        
-                        var fieldToCheck = checkField?.ToLower() ?? "status";
-                        
-                        if (operatorType.ToLower() == "all_match")
-                        {
-                            if (fieldToCheck == "status")
-                            {
-                                var allMatch = jobs.All(j => targetStatuses.Contains(j.Status?.ToLower() ?? ""));
-                                _logger.LogInformation(
-                                    "EvaluateCollectionCondition: all_match check - {MatchCount}/{Total} jobs match [{Statuses}]. Result: {Result}",
-                                    jobs.Count(j => targetStatuses.Contains(j.Status?.ToLower() ?? "")),
-                                    jobs.Count,
-                                    string.Join(", ", targetStatuses),
-                                    allMatch);
-                                return allMatch;
-                            }
-                        }
-                        else if (operatorType.ToLower() == "any_match" || operatorType.ToLower() == "contains")
-                        {
-                            if (fieldToCheck == "status")
-                            {
-                                var anyMatch = jobs.Any(j => targetStatuses.Contains(j.Status?.ToLower() ?? ""));
-                                _logger.LogInformation(
-                                    "EvaluateCollectionCondition: any_match check - jobs match [{Statuses}]. Result: {Result}",
-                                    string.Join(", ", targetStatuses),
-                                    anyMatch);
-                                return anyMatch;
-                            }
-                        }
                     }
                 }
                 
@@ -1113,7 +954,7 @@ namespace MyApi.Modules.WorkflowEngine.Services
 
         #region Loop Nodes
 
-        private Task<NodeExecutionResult> ExecuteLoopNodeAsync(WorkflowNode node, WorkflowExecutionContext context)
+        private async Task<NodeExecutionResult> ExecuteLoopNodeAsync(WorkflowNode node, WorkflowExecutionContext context)
         {
             var loopType = GetNodeDataString(node, "loopType") ?? "for";
             var iterations = GetNodeDataInt(node, "iterations") ?? 1;
@@ -1127,7 +968,7 @@ namespace MyApi.Modules.WorkflowEngine.Services
 
             // Note: Actual loop re-execution is handled by the graph executor
             // which checks if a node has loop semantics and re-queues children
-            return Task.FromResult(new NodeExecutionResult
+            return new NodeExecutionResult
             {
                 Success = true,
                 Status = "completed",
@@ -1138,7 +979,7 @@ namespace MyApi.Modules.WorkflowEngine.Services
                     ["iterations"] = iterations,
                     ["status"] = "loop_started"
                 }
-            });
+            };
         }
 
         #endregion
@@ -1919,13 +1760,8 @@ namespace MyApi.Modules.WorkflowEngine.Services
                     toEntityType, fromEntityType, fromEntityId);
             }
             
-            // Fallback: return fromEntityId but log a clear warning
-            // This will likely cause the update to fail gracefully (entity not found at that ID for the target type)
-            _logger.LogWarning(
-                "[WORKFLOW-RESOLVE] ⚠️ No relationship found from {FromEntity}#{FromId} → {ToEntity}. " +
-                "Falling back to fromEntityId={FromId} which may target the WRONG entity. " +
-                "Check workflow configuration and entity relationships.",
-                fromEntityType, fromEntityId, toEntityType, fromEntityId);
+            // Fallback: return 0 to indicate failure (don't return fromEntityId as it's the wrong entity type)
+            _logger.LogWarning("[WORKFLOW-RESOLVE] Falling back to original ID (may cause issues)");
             return fromEntityId;
         }
 
@@ -1974,16 +1810,6 @@ namespace MyApi.Modules.WorkflowEngine.Services
             serviceOrder.Status = newStatus;
             serviceOrder.ModifiedDate = DateTime.UtcNow;
             serviceOrder.ModifiedBy = userId;
-            
-            // Set ActualStartDate when status changes to in_progress
-            var lowerNewStatus = newStatus.ToLower();
-            if (lowerNewStatus == "in_progress" && !serviceOrder.ActualStartDate.HasValue)
-            {
-                serviceOrder.ActualStartDate = DateTime.UtcNow;
-                _logger.LogInformation(
-                    "[WORKFLOW-UPDATE-SO] Set ActualStartDate for ServiceOrder #{Id} (status: in_progress)",
-                    id);
-            }
             
             // DYNAMIC: Set completion timestamps based on status name patterns
             // The status names come from workflow configuration - users can define any status

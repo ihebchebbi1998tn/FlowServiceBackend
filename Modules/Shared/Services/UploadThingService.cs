@@ -204,7 +204,7 @@ namespace MyApi.Modules.Shared.Services
                 if (!response.IsSuccessStatusCode)
                     return new UploadThingResult { Success = false, Error = $"v6 API failed: {responseText}" };
 
-                var presigned = JsonSerializer.Deserialize<V6PresignedResponse>(responseText ?? "{}", 
+                var presigned = JsonSerializer.Deserialize<V6PresignedResponse>(responseText, 
                     new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
                 if (presigned?.Data == null || presigned.Data.Length == 0)

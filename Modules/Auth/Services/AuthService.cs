@@ -27,8 +27,6 @@ namespace MyApi.Modules.Auth.Services
         Task<bool> LogoutAsync(int userId);
         Task<bool> AdminExistsAsync();
         Task<AdminExistsResultDto> GetAdminExistsWithPreferencesAsync();
-        Task<string?> GetCompanyLogoUrlAsync();
-        Task<(System.IO.Stream Stream, string ContentType, string FileName)?> GetCompanyLogoFileAsync(int documentId);
     }
 
     public class AuthService : IAuthService
@@ -255,8 +253,7 @@ namespace MyApi.Modules.Auth.Services
                     AdminExists = true,
                     SignupAllowed = false,
                     Message = "An administrator account exists. Please login.",
-                    AdminPreferences = adminPreferences,
-                    CompanyLogoUrl = admin.CompanyLogoUrl
+                    AdminPreferences = adminPreferences
                 };
             }
             catch (Exception ex)
@@ -268,54 +265,6 @@ namespace MyApi.Modules.Auth.Services
                     SignupAllowed = true,
                     Message = "Error checking admin status"
                 };
-            }
-        }
-
-        /// <summary>
-        /// Get the company logo URL/reference from the first admin user.
-        /// Public — no auth required.
-        /// </summary>
-        public async Task<string?> GetCompanyLogoUrlAsync()
-        {
-            try
-            {
-                var admin = await _context.MainAdminUsers
-                    .Where(a => a.IsActive)
-                    .Select(a => a.CompanyLogoUrl)
-                    .FirstOrDefaultAsync();
-                return admin;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error getting company logo URL");
-                return null;
-            }
-        }
-
-        /// <summary>
-        /// Get the company logo file stream for a given document ID.
-        /// Used by the public /api/Auth/company-logo endpoint.
-        /// </summary>
-        public async Task<(System.IO.Stream Stream, string ContentType, string FileName)?> GetCompanyLogoFileAsync(int documentId)
-        {
-            try
-            {
-                var doc = await _context.Documents.FindAsync(documentId);
-                if (doc == null) return null;
-
-                // Resolve file path (same logic as DocumentsController)
-                var relative = doc.FilePath.TrimStart('/');
-                var fullPath = Path.Combine(Directory.GetCurrentDirectory(), relative);
-
-                if (!System.IO.File.Exists(fullPath)) return null;
-
-                var stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
-                return (stream, doc.ContentType ?? "image/png", doc.OriginalName ?? doc.FileName);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error getting company logo file {DocumentId}", documentId);
-                return null;
             }
         }
 
@@ -571,9 +520,6 @@ namespace MyApi.Modules.Auth.Services
                     user.CompanyName = updateDto.CompanyName;
                 if (!string.IsNullOrEmpty(updateDto.CompanyWebsite))
                     user.CompanyWebsite = updateDto.CompanyWebsite;
-                // CompanyLogoUrl: update if provided (empty string = remove, URL = set)
-                if (updateDto.CompanyLogoUrl != null)
-                    user.CompanyLogoUrl = string.IsNullOrEmpty(updateDto.CompanyLogoUrl) ? null : updateDto.CompanyLogoUrl;
                 if (!string.IsNullOrEmpty(updateDto.Preferences))
                     user.PreferencesJson = updateDto.Preferences;
                 if (updateDto.OnboardingCompleted.HasValue)
@@ -814,7 +760,6 @@ namespace MyApi.Modules.Auth.Services
                 Industry = user.Industry ?? "",
                 CompanyName = user.CompanyName,
                 CompanyWebsite = user.CompanyWebsite,
-                CompanyLogoUrl = user.CompanyLogoUrl,
                 Preferences = user.PreferencesJson,
                 CreatedAt = user.CreatedAt,
                 LastLoginAt = user.LastLoginAt ?? user.LastLoginDate,

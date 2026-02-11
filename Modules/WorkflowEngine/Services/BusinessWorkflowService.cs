@@ -10,7 +10,7 @@ using System.Text.Json;
 
 namespace MyApi.Modules.WorkflowEngine.Services
 {
-    public partial class BusinessWorkflowService : IBusinessWorkflowService
+    public class BusinessWorkflowService : IBusinessWorkflowService
     {
         private readonly ApplicationDbContext _db;
         private readonly ILogger<BusinessWorkflowService> _logger;
@@ -60,25 +60,6 @@ namespace MyApi.Modules.WorkflowEngine.Services
                 // Get contact for geolocation data
                 var contact = await _db.Contacts.FindAsync(offer.ContactId);
 
-                // Resolve user name for CreatedByName
-                string createdByName = userId ?? "system";
-                if (!string.IsNullOrEmpty(userId) && userId != "system")
-                {
-                    var adminUser = await _db.MainAdminUsers.FirstOrDefaultAsync(u => u.Id.ToString() == userId);
-                    if (adminUser != null)
-                    {
-                        createdByName = $"{adminUser.FirstName} {adminUser.LastName}".Trim();
-                    }
-                    else
-                    {
-                        var regularUser = await _db.Users.FirstOrDefaultAsync(u => u.Id.ToString() == userId);
-                        if (regularUser != null)
-                        {
-                            createdByName = $"{regularUser.FirstName} {regularUser.LastName}".Trim();
-                        }
-                    }
-                }
-
                 // Create the sale with ALL offer fields (matching ConvertOfferAsync/CreateSaleFromOfferAsync)
                 var sale = new Sale
                 {
@@ -111,7 +92,6 @@ namespace MyApi.Modules.WorkflowEngine.Services
                     SaleDate = DateTime.UtcNow,
                     CreatedDate = DateTime.UtcNow,
                     CreatedBy = userId ?? "system",
-                    CreatedByName = createdByName,
                     UpdatedAt = DateTime.UtcNow,
                     // Copy contact geolocation
                     ContactLatitude = contact?.Latitude ?? offer.ContactLatitude,
@@ -279,33 +259,22 @@ namespace MyApi.Modules.WorkflowEngine.Services
                 // Get contact for geolocation data
                 var contact = await _db.Contacts.FindAsync(sale.ContactId);
 
-                // Determine ServiceType from service items
-                var serviceType = string.Join(", ", serviceItems
-                    .Select(si => si.ItemName ?? si.Description ?? "")
-                    .Where(name => !string.IsNullOrEmpty(name))
-                    .Distinct()
-                    .Take(3));
-                if (string.IsNullOrEmpty(serviceType)) serviceType = "maintenance";
-
                 // Create service order with config values + helper columns + geolocation
                 var serviceOrder = new ServiceOrder
                 {
                     SaleId = saleId.ToString(),
-                    OfferId = sale.OfferId,  // Propagate OfferId from Sale
                     ContactId = sale.ContactId,
-                    Status = "pending",  // Initial status after creation - workflow: pending → ready_for_planning → scheduled → in_progress...
+                    Status = "pending",
                     OrderNumber = $"SO-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..6].ToUpper()}",
                     OrderDate = DateTime.UtcNow,
                     CreatedDate = DateTime.UtcNow,
                     CreatedBy = userId ?? "system",
                     Priority = priority,
-                    ServiceType = serviceType,  // Set ServiceType from sale service items
                     Description = notes ?? $"Service order created from sale #{saleId}",
                     Notes = notes,
                     ScheduledDate = startDate,
                     TargetCompletionDate = targetDate,
                     TotalAmount = serviceItems.Sum(si => si.LineTotal),
-                    EstimatedCost = sale.GrandTotal > 0 ? sale.GrandTotal : sale.TotalAmount,
                     // Helper columns
                     ServiceCount = serviceItems.Count,
                     CompletedDispatchCount = 0,
@@ -343,37 +312,7 @@ namespace MyApi.Modules.WorkflowEngine.Services
                 }
                 await _db.SaveChangesAsync();
 
-                // Copy article/material items from sale to service order materials
-                var materialItems = sale.Items?.Where(i => i.Type == "article").ToList() ?? new List<SaleItem>();
-                if (materialItems.Any())
-                {
-                    foreach (var materialItem in materialItems)
-                    {
-                        var soMaterial = new ServiceOrderMaterial
-                        {
-                            ServiceOrderId = serviceOrder.Id,
-                            SaleItemId = materialItem.Id,
-                            ArticleId = materialItem.ArticleId,
-                            Name = materialItem.ItemName ?? "Material",
-                            Sku = materialItem.ItemCode,
-                            Description = materialItem.Description,
-                            Quantity = materialItem.Quantity,
-                            UnitPrice = materialItem.UnitPrice,
-                            TotalPrice = materialItem.LineTotal,
-                            Status = "pending",
-                            Source = "sale_conversion",
-                            InstallationId = materialItem.InstallationId,
-                            InstallationName = materialItem.InstallationName,
-                            CreatedBy = userId ?? "system",
-                            CreatedAt = DateTime.UtcNow
-                        };
-                        _db.ServiceOrderMaterials.Add(soMaterial);
-                    }
-                    await _db.SaveChangesAsync();
-                    _logger.LogInformation("HandleSaleInProgress: Copied {Count} material(s) to service order {ServiceOrderId}", 
-                        materialItems.Count, serviceOrder.Id);
-                }
-
+                // Create SaleActivity for service order creation (upward propagation)
                 var saleActivity = new SaleActivity
                 {
                     SaleId = saleId,
@@ -883,7 +822,7 @@ namespace MyApi.Modules.WorkflowEngine.Services
             };
         }
 
-        private Task LogWorkflowNoteAsync(string entityType, int entityId, string? fromStatus, string toStatus, 
+        private async Task LogWorkflowNoteAsync(string entityType, int entityId, string? fromStatus, string toStatus, 
             string? userId, string reason)
         {
             try
@@ -897,7 +836,6 @@ namespace MyApi.Modules.WorkflowEngine.Services
             {
                 _logger.LogWarning(ex, "Failed to log workflow note for {EntityType}#{EntityId}", entityType, entityId);
             }
-            return Task.CompletedTask;
         }
     }
 }

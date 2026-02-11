@@ -41,8 +41,6 @@ namespace MyApi.Modules.Dispatches.DTOs
         public string Status { get; set; } = null!;
         public DateTime Date { get; set; }
         public DateTime CreatedAt { get; set; }
-        public string? InvoiceStatus { get; set; }
-        public string? SourceTable { get; set; } // "service_order" or "dispatch"
     }
 
     public class ApproveExpenseDto

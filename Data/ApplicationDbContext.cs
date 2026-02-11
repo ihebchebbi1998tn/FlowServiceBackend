@@ -33,11 +33,6 @@ using MyApi.Modules.Preferences.Models;
 using MyApi.Modules.DynamicForms.Models;
 using MyApi.Modules.AiChat.Models;
 using MyApi.Modules.WorkflowEngine.Models;
-using MyApi.Modules.Documents.Models;
-using MyApi.Modules.Signatures.Models;
-using MyApi.Modules.WebsiteBuilder.Models;
-using MyApi.Modules.WebsiteBuilder.Data.Configurations;
-using MyApi.Modules.EmailAccounts.Models;
 
 namespace MyApi.Data
 {
@@ -78,10 +73,6 @@ namespace MyApi.Data
         public DbSet<EventType> EventTypes { get; set; }
         public DbSet<EventAttendee> EventAttendees { get; set; }
         public DbSet<EventReminder> EventReminders { get; set; }
-
-        // Email Accounts Module (Gmail/Outlook OAuth)
-        public DbSet<ConnectedEmailAccount> ConnectedEmailAccounts { get; set; }
-        public DbSet<EmailBlocklistItem> EmailBlocklistItems { get; set; }
 
         // Tasks Module
         public DbSet<Project> Projects { get; set; }
@@ -166,24 +157,6 @@ namespace MyApi.Data
         public DbSet<WorkflowApproval> WorkflowApprovals { get; set; }
         public DbSet<WorkflowProcessedEntity> WorkflowProcessedEntities { get; set; }
 
-        // Documents Module
-        public DbSet<Document> Documents { get; set; }
-
-        // Signatures Module
-        public DbSet<UserSignature> UserSignatures { get; set; }
-
-        // Website Builder Module
-        public DbSet<WBSite> WBSites { get; set; }
-        public DbSet<WBPage> WBPages { get; set; }
-        public DbSet<WBPageVersion> WBPageVersions { get; set; }
-        public DbSet<WBGlobalBlock> WBGlobalBlocks { get; set; }
-        public DbSet<WBGlobalBlockUsage> WBGlobalBlockUsages { get; set; }
-        public DbSet<WBBrandProfile> WBBrandProfiles { get; set; }
-        public DbSet<WBFormSubmission> WBFormSubmissions { get; set; }
-        public DbSet<WBMedia> WBMedia { get; set; }
-        public DbSet<WBTemplate> WBTemplates { get; set; }
-        public DbSet<WBActivityLog> WBActivityLogs { get; set; }
-
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
@@ -258,19 +231,6 @@ namespace MyApi.Data
             ConfigureCalendarEntities(modelBuilder);
             ConfigureLookupEntities(modelBuilder);
             ConfigureTasksEntities(modelBuilder);
-            ConfigurePlanningEntities(modelBuilder);
-
-            // Website Builder Module configurations
-            new WBSiteConfiguration().Configure(modelBuilder);
-            new WBPageConfiguration().Configure(modelBuilder);
-            new WBPageVersionConfiguration().Configure(modelBuilder);
-            new WBGlobalBlockConfiguration().Configure(modelBuilder);
-            new WBGlobalBlockUsageConfiguration().Configure(modelBuilder);
-            new WBBrandProfileConfiguration().Configure(modelBuilder);
-            new WBFormSubmissionConfiguration().Configure(modelBuilder);
-            new WBMediaConfiguration().Configure(modelBuilder);
-            new WBTemplateConfiguration().Configure(modelBuilder);
-            new WBActivityLogConfiguration().Configure(modelBuilder);
         }
 
         private void ConfigureArticleEntities(ModelBuilder modelBuilder)
@@ -644,73 +604,6 @@ namespace MyApi.Data
 
                 entity.HasIndex(e => e.ConversationId);
                 entity.HasIndex(e => e.CreatedAt);
-            });
-        }
-
-        /// <summary>
-        /// Planning module entities: UserLeave, UserWorkingHours, UserStatusHistory
-        /// IMPORTANT: These tables intentionally have NO foreign key to "Users" because
-        /// user_id can reference either MainAdminUsers (id=1) or Users (id>=2).
-        /// We must explicitly tell EF Core to ignore the convention-based FK.
-        /// </summary>
-        private void ConfigurePlanningEntities(ModelBuilder modelBuilder)
-        {
-            // UserLeave - no FK on UserId (supports both MainAdminUsers and Users)
-            modelBuilder.Entity<UserLeave>(entity =>
-            {
-                entity.ToTable("user_leaves");
-                entity.HasKey(e => e.Id);
-                entity.Property(e => e.UserId).HasColumnName("user_id").IsRequired();
-                entity.Property(e => e.LeaveType).HasColumnName("leave_type").HasMaxLength(100).IsRequired();
-                entity.Property(e => e.StartDate).HasColumnName("start_date").IsRequired();
-                entity.Property(e => e.EndDate).HasColumnName("end_date").IsRequired();
-                entity.Property(e => e.Status).HasColumnName("status").HasMaxLength(20).HasDefaultValue("approved");
-                entity.Property(e => e.Reason).HasColumnName("reason");
-                entity.Property(e => e.ApprovedBy).HasColumnName("approved_by");
-                entity.Property(e => e.ApprovedAt).HasColumnName("approved_at");
-                entity.Property(e => e.CreatedAt).HasColumnName("created_at");
-                entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
-
-                // Explicitly ignore convention-based FK to Users table
-                entity.Ignore("User");
-                entity.HasIndex(e => e.UserId);
-                entity.HasIndex(e => new { e.StartDate, e.EndDate });
-                entity.HasIndex(e => e.Status);
-            });
-
-            // UserWorkingHours - no FK on UserId (supports both MainAdminUsers and Users)
-            modelBuilder.Entity<UserWorkingHours>(entity =>
-            {
-                entity.ToTable("user_working_hours");
-                entity.HasKey(e => e.Id);
-                entity.Property(e => e.UserId).HasColumnName("user_id").IsRequired();
-                entity.Property(e => e.DayOfWeek).HasColumnName("day_of_week").IsRequired();
-                entity.Property(e => e.StartTime).HasColumnName("start_time").IsRequired();
-                entity.Property(e => e.EndTime).HasColumnName("end_time").IsRequired();
-                entity.Property(e => e.IsActive).HasColumnName("is_active").HasDefaultValue(true);
-                entity.Property(e => e.EffectiveFrom).HasColumnName("effective_from");
-                entity.Property(e => e.EffectiveUntil).HasColumnName("effective_until");
-                entity.Property(e => e.CreatedAt).HasColumnName("created_at");
-                entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
-
-                entity.HasIndex(e => e.UserId);
-                entity.HasIndex(e => e.DayOfWeek);
-                entity.HasIndex(e => new { e.UserId, e.DayOfWeek }).IsUnique();
-            });
-
-            // UserStatusHistory - no FK on UserId (supports both MainAdminUsers and Users)
-            modelBuilder.Entity<UserStatusHistory>(entity =>
-            {
-                entity.ToTable("user_status_history");
-                entity.HasKey(e => e.Id);
-                entity.Property(e => e.UserId).HasColumnName("user_id").IsRequired();
-                entity.Property(e => e.NewStatus).HasColumnName("new_status").HasMaxLength(50).IsRequired();
-                entity.Property(e => e.PreviousStatus).HasColumnName("previous_status").HasMaxLength(50);
-                entity.Property(e => e.Reason).HasColumnName("reason");
-                entity.Property(e => e.ChangedAt).HasColumnName("changed_at");
-                entity.Property(e => e.ChangedBy).HasColumnName("changed_by");
-
-                entity.HasIndex(e => e.UserId);
             });
         }
 

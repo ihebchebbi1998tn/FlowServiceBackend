@@ -24,11 +24,10 @@ namespace MyApi.Modules.Projects.Services
         {
             try
             {
-                // ✅ OPTIMIZATION: Remove eager loading for list view (3-5x faster)
                 var query = _context.Projects
                     .AsNoTracking()
-                    // Removed: .Include(p => p.Columns) - only needed for detail view
-                    // Removed: .Include(p => p.Contact) - only needed for detail view
+                    .Include(p => p.Columns)
+                    .Include(p => p.Contact)
                     .AsQueryable();
 
                 // Apply filters

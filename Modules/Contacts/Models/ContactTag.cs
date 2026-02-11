@@ -17,8 +17,6 @@ namespace MyApi.Modules.Contacts.Models
         [StringLength(7)]
         public string? Color { get; set; } = "#3b82f6"; // Default blue color
 
-        public bool IsDeleted { get; set; } = false;
-
         public DateTime CreatedDate { get; set; } = DateTime.UtcNow;
 
         [Required]

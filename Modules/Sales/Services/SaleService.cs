@@ -248,6 +248,7 @@ namespace MyApi.Modules.Sales.Services
                 Tags = offer.Tags != null ? offer.Tags.Concat(new[] { "Converted" }).ToArray() : new[] { "Converted" },
                 OfferId = offerId.ToString(),
                 ConvertedFromOfferAt = DateTime.UtcNow,
+                ActualCloseDate = DateTime.UtcNow,
                 CreatedBy = userId,
                 CreatedByName = createdByName,
                 CreatedDate = DateTime.UtcNow,
@@ -350,16 +351,6 @@ namespace MyApi.Modules.Sales.Services
             if (updateDto.MaterialsFulfillment != null) sale.MaterialsFulfillment = updateDto.MaterialsFulfillment;
             if (updateDto.ServiceOrdersStatus != null) sale.ServiceOrdersStatus = updateDto.ServiceOrdersStatus;
             if (updateDto.Tags != null) sale.Tags = updateDto.Tags;
-
-            // Auto-set ActualCloseDate when closing, clear when reopening
-            if (isClosing && !sale.ActualCloseDate.HasValue)
-            {
-                sale.ActualCloseDate = DateTime.UtcNow;
-            }
-            if (isReopening)
-            {
-                sale.ActualCloseDate = null;
-            }
 
             sale.UpdatedAt = DateTime.UtcNow;
             sale.ModifiedBy = userId;
@@ -486,12 +477,10 @@ namespace MyApi.Modules.Sales.Services
                 // Nullify SaleItemId references in ServiceOrderJobs
                 if (saleItemIds.Any())
                 {
-                    // Parameterized update for each sale item ID to prevent SQL injection
-                    foreach (var saleItemId in saleItemIds)
-                    {
-                        await _context.Database.ExecuteSqlAsync(
-                            $@"UPDATE ""ServiceOrderJobs"" SET ""SaleItemId"" = NULL WHERE ""SaleItemId"" = {saleItemId.ToString()}");
-                    }
+                    // Build a comma-separated list of quoted IDs for the IN clause
+                    var saleItemIdList = string.Join(",", saleItemIds.Select(i => $"'{i}'"));
+                    await _context.Database.ExecuteSqlRawAsync(
+                        $@"UPDATE ""ServiceOrderJobs"" SET ""SaleItemId"" = NULL WHERE ""SaleItemId"" IN ({saleItemIdList})");
                 }
 
                 // Nullify SaleId reference in ServiceOrders (cast int to string for VARCHAR column)
@@ -584,7 +573,7 @@ namespace MyApi.Modules.Sales.Services
                 ArticleId = itemDto.ArticleId,
                 ItemName = itemDto.ItemName,
                 ItemCode = itemDto.ItemCode,
-                Description = itemDto.Description ?? string.Empty,
+                Description = itemDto.Description,
                 Quantity = itemDto.Quantity,
                 UnitPrice = itemDto.UnitPrice,
                 Discount = itemDto.Discount,
@@ -613,7 +602,7 @@ namespace MyApi.Modules.Sales.Services
             item.ArticleId = itemDto.ArticleId;
             item.ItemName = itemDto.ItemName;
             item.ItemCode = itemDto.ItemCode;
-            item.Description = itemDto.Description ?? string.Empty;
+            item.Description = itemDto.Description;
             item.Quantity = itemDto.Quantity;
             item.UnitPrice = itemDto.UnitPrice;
             item.Discount = itemDto.Discount;

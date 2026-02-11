@@ -117,7 +117,7 @@ namespace MyApi.Modules.Shared.Controllers
                 }
 
                 // Parse the response - v7 returns object directly with url, key, fileUrl, fields
-                var uploadData = JsonSerializer.Deserialize<V7FileData>(responseText ?? "{}", 
+                var uploadData = JsonSerializer.Deserialize<V7FileData>(responseText, 
                     new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
                 if (uploadData == null || string.IsNullOrEmpty(uploadData.Url))
