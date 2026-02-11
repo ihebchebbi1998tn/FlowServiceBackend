@@ -130,10 +130,14 @@ private async Task<SyncResultDto> SyncGmailEmailsAsync(ConnectedEmailAccount acc
             // Parse from field: "Name <email>" or just "email"
             var (fromName, fromEmail) = ParseEmailAddress(from);
 
-            // Parse received date
+            // Parse received date — ensure UTC for Npgsql
             DateTime receivedAt;
             if (!DateTime.TryParse(dateStr, out receivedAt))
                 receivedAt = DateTime.UtcNow;
+            else if (receivedAt.Kind == DateTimeKind.Local)
+                receivedAt = receivedAt.ToUniversalTime();
+            else if (receivedAt.Kind == DateTimeKind.Unspecified)
+                receivedAt = DateTime.SpecifyKind(receivedAt, DateTimeKind.Utc);
 
             var isRead = !labelIds.Contains("UNREAD");
 
@@ -233,7 +237,7 @@ private async Task<SyncResultDto> SyncOutlookEmailsAsync(ConnectedEmailAccount a
             }
 
             var receivedStr = msg.TryGetProperty("receivedDateTime", out var rd) ? rd.GetString() : null;
-            DateTime receivedAt = DateTime.TryParse(receivedStr, out var dt) ? dt : DateTime.UtcNow;
+            DateTime receivedAt = DateTime.TryParse(receivedStr, out var dt) ? EnsureUtc(dt) : DateTime.UtcNow;
 
             var syncedEmail = new SyncedEmail
             {
@@ -397,25 +401,35 @@ private async Task<CalendarSyncResultDto> SyncGoogleCalendarAsync(ConnectedEmail
             var location = item.TryGetProperty("location", out var loc) ? loc.GetString() : null;
             var status = item.TryGetProperty("status", out var st) ? st.GetString() ?? "confirmed" : "confirmed";
 
-            // Parse start/end times
+            // Parse start/end times — ensure UTC for Npgsql
             DateTime startTime = DateTime.UtcNow, endTime = DateTime.UtcNow;
             bool isAllDay = false;
             if (item.TryGetProperty("start", out var startObj))
             {
                 if (startObj.TryGetProperty("dateTime", out var sdt))
+                {
                     DateTime.TryParse(sdt.GetString(), out startTime);
+                    startTime = EnsureUtc(startTime);
+                }
                 else if (startObj.TryGetProperty("date", out var sd))
                 {
                     DateTime.TryParse(sd.GetString(), out startTime);
+                    startTime = DateTime.SpecifyKind(startTime, DateTimeKind.Utc);
                     isAllDay = true;
                 }
             }
             if (item.TryGetProperty("end", out var endObj))
             {
                 if (endObj.TryGetProperty("dateTime", out var edt))
+                {
                     DateTime.TryParse(edt.GetString(), out endTime);
+                    endTime = EnsureUtc(endTime);
+                }
                 else if (endObj.TryGetProperty("date", out var ed))
+                {
                     DateTime.TryParse(ed.GetString(), out endTime);
+                    endTime = DateTime.SpecifyKind(endTime, DateTimeKind.Utc);
+                }
             }
 
             // Parse attendees
@@ -514,9 +528,15 @@ private async Task<CalendarSyncResultDto> SyncOutlookCalendarAsync(ConnectedEmai
 
             DateTime startTime = DateTime.UtcNow, endTime = DateTime.UtcNow;
             if (evt.TryGetProperty("start", out var startObj) && startObj.TryGetProperty("dateTime", out var sdt))
+            {
                 DateTime.TryParse(sdt.GetString(), out startTime);
+                startTime = EnsureUtc(startTime);
+            }
             if (evt.TryGetProperty("end", out var endObj) && endObj.TryGetProperty("dateTime", out var edt))
+            {
                 DateTime.TryParse(edt.GetString(), out endTime);
+                endTime = EnsureUtc(endTime);
+            }
 
             var location = "";
             if (evt.TryGetProperty("location", out var locObj) && locObj.TryGetProperty("displayName", out var dn))
@@ -735,5 +755,16 @@ private static (string? name, string email) ParseEmailAddress(string raw)
 
     return (null, raw.Trim());
     }
+
+// Helper: ensure DateTime is UTC for Npgsql compatibility
+private static DateTime EnsureUtc(DateTime dt)
+{
+    return dt.Kind switch
+    {
+        DateTimeKind.Utc => dt,
+        DateTimeKind.Local => dt.ToUniversalTime(),
+        _ => DateTime.SpecifyKind(dt, DateTimeKind.Utc),
+    };
+}
 }
 }
