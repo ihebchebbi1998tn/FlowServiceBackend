@@ -92,3 +92,28 @@ public async Task<ActionResult<SyncedCalendarEventsPageDto>> GetCalendarEvents(
     var result = await _emailAccountService.GetCalendarEventsAsync(id, userId, page, pageSize, search);
     return Ok(result);
 }
+
+// ─── Send Email ───
+
+/// <summary>
+/// Send an email through a connected account (Gmail or Outlook)
+/// </summary>
+[HttpPost("{id}/send-email")]
+public async Task<ActionResult<SendEmailResultDto>> SendEmail(Guid id, [FromBody] SendEmailDto dto)
+{
+    var userId = GetUserId();
+    if (userId == 0) return Unauthorized();
+
+    try
+    {
+        var result = await _emailAccountService.SendEmailAsync(id, userId, dto);
+        if (!result.Success)
+            return BadRequest(result);
+        return Ok(result);
+    }
+    catch (Exception ex)
+    {
+        _logger.LogError(ex, "Failed to send email for account {Id}", id);
+        return StatusCode(500, new { message = "Failed to send email" });
+    }
+}

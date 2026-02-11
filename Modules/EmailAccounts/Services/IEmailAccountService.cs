@@ -38,5 +38,8 @@ namespace MyApi.Modules.EmailAccounts.Services
 
         Task<CalendarSyncResultDto> SyncCalendarAsync(Guid accountId, int userId, int maxResults = 50);
         Task<SyncedCalendarEventsPageDto> GetCalendarEventsAsync(Guid accountId, int userId, int page = 1, int pageSize = 25, string? search = null);
+
+        // ─── Send Email ───
+        Task<SendEmailResultDto> SendEmailAsync(Guid accountId, int userId, SendEmailDto dto);
     }
 }
