@@ -356,6 +356,10 @@ namespace MyApi.Modules.ServiceOrders.DTOs
         public List<int>? MaterialIds { get; set; }
         public List<int>? ExpenseIds { get; set; }
         public List<int>? TimeEntryIds { get; set; }
+        // IDs from dispatch tables (different from SO tables)
+        public List<int>? DispatchMaterialIds { get; set; }
+        public List<int>? DispatchExpenseIds { get; set; }
+        public List<int>? DispatchTimeEntryIds { get; set; }
         public string? Notes { get; set; }
     }
 }

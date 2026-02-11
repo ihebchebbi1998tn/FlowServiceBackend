@@ -915,6 +915,32 @@ namespace MyApi.Modules.ServiceOrders.Services
             if (serviceOrder == null)
                 throw new KeyNotFoundException($"Service order with ID {serviceOrderId} not found");
 
+            var allTimeEntries = new List<TimeEntryDto>();
+
+            // 1. Get time entries directly on the service order (ServiceOrderTimeEntries table)
+            var soTimeEntries = await _context.ServiceOrderTimeEntries
+                .Where(t => t.ServiceOrderId == serviceOrderId)
+                .ToListAsync();
+
+            allTimeEntries.AddRange(soTimeEntries.Select(te => new TimeEntryDto
+            {
+                Id = te.Id,
+                DispatchId = 0,
+                TechnicianId = te.TechnicianId ?? "",
+                WorkType = te.WorkType ?? "general",
+                StartTime = te.StartTime,
+                EndTime = te.EndTime,
+                Duration = te.Duration,
+                Description = te.Description,
+                TotalCost = te.TotalCost ?? 0,
+                Billable = te.Billable,
+                HourlyRate = te.HourlyRate,
+                CreatedAt = te.CreatedAt,
+                InvoiceStatus = te.InvoiceStatus,
+                SourceTable = "service_order"
+            }));
+
+            // 2. Get time entries from dispatches
             var jobIdStrings = serviceOrder.Jobs?.Select(j => j.Id.ToString()).ToList() ?? new List<string>();
             
             var dispatchIds = await _context.Dispatches
@@ -926,7 +952,7 @@ namespace MyApi.Modules.ServiceOrders.Services
                 .Where(te => dispatchIds.Contains(te.DispatchId))
                 .ToListAsync();
 
-            return timeEntries.Select(te => new TimeEntryDto
+            allTimeEntries.AddRange(timeEntries.Select(te => new TimeEntryDto
             {
                 Id = te.Id,
                 DispatchId = te.DispatchId,
@@ -936,9 +962,14 @@ namespace MyApi.Modules.ServiceOrders.Services
                 EndTime = te.EndTime,
                 Duration = (int)(te.Duration ?? 0),
                 Description = te.Description,
-                TotalCost = 0, // No TotalCost in TimeEntry model
-                CreatedAt = te.CreatedDate
-            }).ToList();
+                TotalCost = 0,
+                Billable = true, // Dispatch time entries don't have billable field - default true
+                CreatedAt = te.CreatedDate,
+                InvoiceStatus = null, // Dispatch TimeEntries don't have InvoiceStatus
+                SourceTable = "dispatch"
+            }));
+
+            return allTimeEntries;
         }
 
         public async Task<List<ExpenseDto>> GetExpensesForServiceOrderAsync(int serviceOrderId)
@@ -950,6 +981,30 @@ namespace MyApi.Modules.ServiceOrders.Services
             if (serviceOrder == null)
                 throw new KeyNotFoundException($"Service order with ID {serviceOrderId} not found");
 
+            var allExpenses = new List<ExpenseDto>();
+
+            // 1. Get expenses directly on the service order (ServiceOrderExpenses table)
+            var soExpenses = await _context.ServiceOrderExpenses
+                .Where(e => e.ServiceOrderId == serviceOrderId)
+                .ToListAsync();
+
+            allExpenses.AddRange(soExpenses.Select(e => new ExpenseDto
+            {
+                Id = e.Id,
+                DispatchId = 0,
+                TechnicianId = e.TechnicianId ?? "",
+                Type = e.Type ?? "other",
+                Amount = e.Amount,
+                Currency = e.Currency ?? "TND",
+                Description = e.Description,
+                Status = e.Status ?? "pending",
+                Date = e.Date ?? e.CreatedAt,
+                CreatedAt = e.CreatedAt,
+                InvoiceStatus = e.InvoiceStatus,
+                SourceTable = "service_order"
+            }));
+
+            // 2. Get expenses from dispatches
             var jobIdStrings = serviceOrder.Jobs?.Select(j => j.Id.ToString()).ToList() ?? new List<string>();
             
             var dispatchIds = await _context.Dispatches
@@ -961,18 +1016,23 @@ namespace MyApi.Modules.ServiceOrders.Services
                 .Where(e => dispatchIds.Contains(e.DispatchId))
                 .ToListAsync();
 
-            return expenses.Select(e => new ExpenseDto
+            allExpenses.AddRange(expenses.Select(e => new ExpenseDto
             {
                 Id = e.Id,
                 DispatchId = e.DispatchId,
                 TechnicianId = e.RecordedBy ?? "",
                 Type = e.ExpenseType ?? "other",
                 Amount = e.Amount,
-                Currency = "USD", // No Currency in Expense model
+                Currency = "TND",
                 Description = e.Description,
                 Status = "pending",
-                CreatedAt = e.CreatedDate
-            }).ToList();
+                Date = e.ExpenseDate,
+                CreatedAt = e.CreatedDate,
+                InvoiceStatus = null, // Dispatch Expenses don't have InvoiceStatus
+                SourceTable = "dispatch"
+            }));
+
+            return allExpenses;
         }
 
         public async Task<List<MaterialDto>> GetMaterialsForServiceOrderAsync(int serviceOrderId)
@@ -1012,7 +1072,9 @@ namespace MyApi.Modules.ServiceOrders.Services
                 InstallationId = m.InstallationId,
                 InstallationName = m.InstallationName,
                 CreatedBy = m.CreatedBy,
-                CreatedAt = m.CreatedAt
+                CreatedAt = m.CreatedAt,
+                InvoiceStatus = m.InvoiceStatus,
+                SourceTable = "service_order"
             }));
 
             // 2. Get materials from dispatches (used during work execution)
@@ -1029,7 +1091,7 @@ namespace MyApi.Modules.ServiceOrders.Services
 
             allMaterials.AddRange(dispatchMaterials.Select(m => new MaterialDto
             {
-                Id = m.Id + 100000, // Offset to avoid ID collision with direct materials
+                Id = m.Id, // Use real ID - SourceTable differentiates
                 DispatchId = m.DispatchId,
                 TechnicianId = m.RecordedBy,
                 ArticleId = m.ArticleId?.ToString(),
@@ -1041,7 +1103,9 @@ namespace MyApi.Modules.ServiceOrders.Services
                 Status = "used",
                 Source = "dispatch",
                 CreatedBy = m.RecordedBy,
-                CreatedAt = m.UsedDate
+                CreatedAt = m.UsedDate,
+                InvoiceStatus = null, // Dispatch materials don't have InvoiceStatus
+                SourceTable = "dispatch"
             }));
 
             return allMaterials;
@@ -1467,7 +1531,9 @@ namespace MyApi.Modules.ServiceOrders.Services
 
         public async Task<ServiceOrderDto> PrepareForInvoiceAsync(int id, PrepareInvoiceDto dto, string userId)
         {
-            var serviceOrder = await _context.ServiceOrders.FindAsync(id);
+            var serviceOrder = await _context.ServiceOrders
+                .Include(so => so.Jobs)
+                .FirstOrDefaultAsync(so => so.Id == id);
             if (serviceOrder == null)
                 throw new KeyNotFoundException($"Service order with ID {id} not found");
 
@@ -1484,15 +1550,22 @@ namespace MyApi.Modules.ServiceOrders.Services
 
             _logger.LogInformation("PrepareForInvoice: SO={Id}, SaleId={SaleId}, current sale items={Count}", id, saleId, sale.Items?.Count ?? 0);
 
+            // Pre-compute linked dispatch IDs for dispatch table lookups
+            var jobIdStrings = serviceOrder.Jobs?.Select(j => j.Id.ToString()).ToList() ?? new List<string>();
+            var linkedDispatchIds = await _context.Dispatches
+                .Where(d => d.JobId != null && jobIdStrings.Contains(d.JobId))
+                .Select(d => d.Id)
+                .ToListAsync();
+
             var newSaleItems = new List<Sales.Models.SaleItem>();
             var currentDisplayOrder = (sale.Items?.Count ?? 0);
 
             // Track source entities to update InvoiceStatus AFTER successful save
-            var materialsToMark = new List<ServiceOrderMaterial>();
-            var expensesToMark = new List<ServiceOrderExpense>();
-            var timeEntriesToMark = new List<ServiceOrderTimeEntry>();
+            var soMaterialsToMark = new List<ServiceOrderMaterial>();
+            var soExpensesToMark = new List<ServiceOrderExpense>();
+            var soTimeEntriesToMark = new List<ServiceOrderTimeEntry>();
 
-            // Process selected materials — allow retry by accepting null or selected_for_invoice
+            // ===== MATERIALS FROM ServiceOrderMaterials =====
             if (dto.MaterialIds != null && dto.MaterialIds.Any())
             {
                 var materials = await _context.ServiceOrderMaterials
@@ -1500,27 +1573,12 @@ namespace MyApi.Modules.ServiceOrders.Services
                         && (m.InvoiceStatus == null || m.InvoiceStatus == "selected_for_invoice"))
                     .ToListAsync();
 
-                _logger.LogInformation("PrepareForInvoice: Found {Count} materials to transfer (requested: {Requested})", 
-                    materials.Count, dto.MaterialIds.Count);
-
-                // Check if SaleItems already exist for these materials (prevent duplicates)
-                var existingSaleItemSoIds = sale.Items?
-                    .Where(i => i.ServiceOrderId == id.ToString())
-                    .Select(i => i.ItemName)
-                    .ToHashSet() ?? new HashSet<string?>();
+                _logger.LogInformation("PrepareForInvoice: Found {Count} SO materials (requested: {Requested})", materials.Count, dto.MaterialIds.Count);
 
                 foreach (var mat in materials)
                 {
-                    // Skip if a SaleItem with same name+SO already exists
-                    if (existingSaleItemSoIds.Contains(mat.Name))
-                    {
-                        _logger.LogInformation("PrepareForInvoice: Skipping duplicate material '{Name}' already in sale", mat.Name);
-                        materialsToMark.Add(mat);
-                        continue;
-                    }
-
                     currentDisplayOrder++;
-                    var saleItem = new Sales.Models.SaleItem
+                    newSaleItems.Add(new Sales.Models.SaleItem
                     {
                         SaleId = saleId,
                         Type = "article",
@@ -1535,28 +1593,51 @@ namespace MyApi.Modules.ServiceOrders.Services
                         InstallationName = mat.InstallationName,
                         ServiceOrderId = id.ToString(),
                         DisplayOrder = currentDisplayOrder
-                    };
-                    newSaleItems.Add(saleItem);
-                    materialsToMark.Add(mat);
+                    });
+                    soMaterialsToMark.Add(mat);
                 }
             }
 
-            // Process selected expenses — check BOTH ServiceOrderExpenses and DispatchExpenses tables
+            // ===== MATERIALS FROM DispatchMaterials =====
+            if (dto.DispatchMaterialIds != null && dto.DispatchMaterialIds.Any())
+            {
+                var dispatchMats = await _context.DispatchMaterials
+                    .Where(m => dto.DispatchMaterialIds.Contains(m.Id) && linkedDispatchIds.Contains(m.DispatchId))
+                    .ToListAsync();
+
+                _logger.LogInformation("PrepareForInvoice: Found {Count} dispatch materials (requested: {Requested})", dispatchMats.Count, dto.DispatchMaterialIds.Count);
+
+                foreach (var mat in dispatchMats)
+                {
+                    currentDisplayOrder++;
+                    newSaleItems.Add(new Sales.Models.SaleItem
+                    {
+                        SaleId = saleId,
+                        Type = "article",
+                        ItemName = mat.Description ?? $"Material #{mat.Id}",
+                        Description = mat.Description ?? $"Material from dispatch",
+                        Quantity = mat.Quantity,
+                        UnitPrice = mat.UnitPrice,
+                        LineTotal = mat.TotalPrice,
+                        ArticleId = mat.ArticleId,
+                        ServiceOrderId = id.ToString(),
+                        DisplayOrder = currentDisplayOrder
+                    });
+                }
+            }
+
+            // ===== EXPENSES FROM ServiceOrderExpenses =====
             if (dto.ExpenseIds != null && dto.ExpenseIds.Any())
             {
-                var remainingExpenseIds = new List<int>(dto.ExpenseIds);
-
-                // 1. Check ServiceOrderExpenses table first
                 var soExpenses = await _context.ServiceOrderExpenses
                     .Where(e => dto.ExpenseIds.Contains(e.Id) && e.ServiceOrderId == id
                         && (e.InvoiceStatus == null || e.InvoiceStatus == "selected_for_invoice"))
                     .ToListAsync();
 
-                _logger.LogInformation("PrepareForInvoice: Found {Count} SO expenses for IDs [{Ids}]", soExpenses.Count, string.Join(",", dto.ExpenseIds));
+                _logger.LogInformation("PrepareForInvoice: Found {Count} SO expenses (requested: {Requested})", soExpenses.Count, dto.ExpenseIds.Count);
 
                 foreach (var exp in soExpenses)
                 {
-                    remainingExpenseIds.Remove(exp.Id);
                     currentDisplayOrder++;
                     newSaleItems.Add(new Sales.Models.SaleItem
                     {
@@ -1570,56 +1651,38 @@ namespace MyApi.Modules.ServiceOrders.Services
                         ServiceOrderId = id.ToString(),
                         DisplayOrder = currentDisplayOrder
                     });
-                    expensesToMark.Add(exp);
-                }
-
-                // 2. For remaining IDs, check DispatchExpenses table (expenses from dispatches linked to this SO)
-                if (remainingExpenseIds.Any())
-                {
-                    // Get dispatch IDs linked to this service order
-                    var serviceOrderWithJobs = await _context.ServiceOrders
-                        .Include(so => so.Jobs)
-                        .FirstOrDefaultAsync(so => so.Id == id);
-                    var jobIdStrings = serviceOrderWithJobs?.Jobs?.Select(j => j.Id.ToString()).ToList() ?? new List<string>();
-                    var linkedDispatchIds = await _context.Dispatches
-                        .Where(d => d.JobId != null && jobIdStrings.Contains(d.JobId))
-                        .Select(d => d.Id)
-                        .ToListAsync();
-
-                    var dispatchExpenses = await _context.DispatchExpenses
-                        .Where(e => remainingExpenseIds.Contains(e.Id) && linkedDispatchIds.Contains(e.DispatchId))
-                        .ToListAsync();
-
-                    _logger.LogInformation("PrepareForInvoice: Found {Count} dispatch expenses for remaining IDs [{Ids}]", 
-                        dispatchExpenses.Count, string.Join(",", remainingExpenseIds));
-
-                    foreach (var dExp in dispatchExpenses)
-                    {
-                        remainingExpenseIds.Remove(dExp.Id);
-                        currentDisplayOrder++;
-                        newSaleItems.Add(new Sales.Models.SaleItem
-                        {
-                            SaleId = saleId,
-                            Type = "service",
-                            ItemName = $"Expense: {dExp.ExpenseType}",
-                            Description = dExp.Description ?? $"Expense - {dExp.ExpenseType}",
-                            Quantity = 1,
-                            UnitPrice = dExp.Amount,
-                            LineTotal = dExp.Amount,
-                            ServiceOrderId = id.ToString(),
-                            DisplayOrder = currentDisplayOrder
-                        });
-                    }
-                }
-
-                // If we still couldn't find some IDs, warn but don't fail
-                if (remainingExpenseIds.Any())
-                {
-                    _logger.LogWarning("PrepareForInvoice: Could not find expenses with IDs [{Ids}] in either table", string.Join(",", remainingExpenseIds));
+                    soExpensesToMark.Add(exp);
                 }
             }
 
-            // Process selected time entries — allow retry
+            // ===== EXPENSES FROM DispatchExpenses =====
+            if (dto.DispatchExpenseIds != null && dto.DispatchExpenseIds.Any())
+            {
+                var dispatchExpenses = await _context.DispatchExpenses
+                    .Where(e => dto.DispatchExpenseIds.Contains(e.Id) && linkedDispatchIds.Contains(e.DispatchId))
+                    .ToListAsync();
+
+                _logger.LogInformation("PrepareForInvoice: Found {Count} dispatch expenses (requested: {Requested})", dispatchExpenses.Count, dto.DispatchExpenseIds.Count);
+
+                foreach (var dExp in dispatchExpenses)
+                {
+                    currentDisplayOrder++;
+                    newSaleItems.Add(new Sales.Models.SaleItem
+                    {
+                        SaleId = saleId,
+                        Type = "service",
+                        ItemName = $"Expense: {dExp.ExpenseType}",
+                        Description = dExp.Description ?? $"Expense - {dExp.ExpenseType}",
+                        Quantity = 1,
+                        UnitPrice = dExp.Amount,
+                        LineTotal = dExp.Amount,
+                        ServiceOrderId = id.ToString(),
+                        DisplayOrder = currentDisplayOrder
+                    });
+                }
+            }
+
+            // ===== TIME ENTRIES FROM ServiceOrderTimeEntries =====
             if (dto.TimeEntryIds != null && dto.TimeEntryIds.Any())
             {
                 var timeEntries = await _context.ServiceOrderTimeEntries
@@ -1627,8 +1690,7 @@ namespace MyApi.Modules.ServiceOrders.Services
                         && (t.InvoiceStatus == null || t.InvoiceStatus == "selected_for_invoice"))
                     .ToListAsync();
 
-                _logger.LogInformation("PrepareForInvoice: Found {Count} time entries to transfer (requested: {Requested})", 
-                    timeEntries.Count, dto.TimeEntryIds.Count);
+                _logger.LogInformation("PrepareForInvoice: Found {Count} SO time entries (requested: {Requested})", timeEntries.Count, dto.TimeEntryIds.Count);
 
                 foreach (var te in timeEntries)
                 {
@@ -1637,7 +1699,7 @@ namespace MyApi.Modules.ServiceOrders.Services
                     var rate = te.HourlyRate ?? 0;
                     var total = te.TotalCost ?? (hours * rate);
 
-                    var saleItem = new Sales.Models.SaleItem
+                    newSaleItems.Add(new Sales.Models.SaleItem
                     {
                         SaleId = saleId,
                         Type = "service",
@@ -1648,10 +1710,52 @@ namespace MyApi.Modules.ServiceOrders.Services
                         LineTotal = total,
                         ServiceOrderId = id.ToString(),
                         DisplayOrder = currentDisplayOrder
-                    };
-                    newSaleItems.Add(saleItem);
-                    timeEntriesToMark.Add(te);
+                    });
+                    soTimeEntriesToMark.Add(te);
                 }
+            }
+
+            // ===== TIME ENTRIES FROM Dispatch TimeEntries =====
+            if (dto.DispatchTimeEntryIds != null && dto.DispatchTimeEntryIds.Any())
+            {
+                var dispatchTimeEntries = await _context.TimeEntries
+                    .Where(t => dto.DispatchTimeEntryIds.Contains(t.Id) && linkedDispatchIds.Contains(t.DispatchId))
+                    .ToListAsync();
+
+                _logger.LogInformation("PrepareForInvoice: Found {Count} dispatch time entries (requested: {Requested})", dispatchTimeEntries.Count, dto.DispatchTimeEntryIds.Count);
+
+                foreach (var te in dispatchTimeEntries)
+                {
+                    currentDisplayOrder++;
+                    var duration = te.Duration ?? 0;
+                    var hours = duration / 60.0m;
+                    // Dispatch TimeEntries don't have HourlyRate/TotalCost - use 0
+                    var total = hours * 0; // No rate info available
+
+                    newSaleItems.Add(new Sales.Models.SaleItem
+                    {
+                        SaleId = saleId,
+                        Type = "service",
+                        ItemName = $"Labor: {te.WorkType ?? "work"}",
+                        Description = te.Description ?? $"Time entry - {te.WorkType ?? "work"} ({duration} min)",
+                        Quantity = 1,
+                        UnitPrice = total,
+                        LineTotal = total,
+                        ServiceOrderId = id.ToString(),
+                        DisplayOrder = currentDisplayOrder
+                    });
+                }
+            }
+
+            _logger.LogInformation("PrepareForInvoice: Total new sale items to add: {Count}", newSaleItems.Count);
+
+            // Check that at least something was found if IDs were requested
+            var hasRequestedIds = (dto.MaterialIds?.Any() == true) || (dto.ExpenseIds?.Any() == true) || (dto.TimeEntryIds?.Any() == true)
+                || (dto.DispatchMaterialIds?.Any() == true) || (dto.DispatchExpenseIds?.Any() == true) || (dto.DispatchTimeEntryIds?.Any() == true);
+
+            if (hasRequestedIds && !newSaleItems.Any())
+            {
+                throw new InvalidOperationException("Items were requested for transfer but none could be found or matched. Check that the IDs exist and belong to this service order.");
             }
 
             // Use execution strategy to support retrying transactions with Npgsql
@@ -1669,23 +1773,12 @@ namespace MyApi.Modules.ServiceOrders.Services
 
                         _context.SaleItems.AddRange(newSaleItems);
                         await _context.SaveChangesAsync();
-                        
-                        _logger.LogInformation("PrepareForInvoice: Successfully saved {Count} new sale items", newSaleItems.Count);
 
-                        // NOW mark source entities as transferred
-                        foreach (var mat in materialsToMark) mat.InvoiceStatus = "selected_for_invoice";
-                        foreach (var exp in expensesToMark) exp.InvoiceStatus = "selected_for_invoice";
-                        foreach (var te in timeEntriesToMark) te.InvoiceStatus = "selected_for_invoice";
+                        // Mark SO source entities as transferred (dispatch entities don't have InvoiceStatus)
+                        foreach (var mat in soMaterialsToMark) mat.InvoiceStatus = "selected_for_invoice";
+                        foreach (var exp in soExpensesToMark) exp.InvoiceStatus = "selected_for_invoice";
+                        foreach (var te in soTimeEntriesToMark) te.InvoiceStatus = "selected_for_invoice";
                         await _context.SaveChangesAsync();
-                    }
-                    else
-                    {
-                        // If IDs were provided but nothing to transfer, this is an error
-                        var hasRequestedIds = (dto.MaterialIds?.Any() == true) || (dto.ExpenseIds?.Any() == true) || (dto.TimeEntryIds?.Any() == true);
-                        if (hasRequestedIds)
-                        {
-                            throw new InvalidOperationException($"Items were requested for transfer but none were created as SaleItems. Materials: {materialsToMark.Count}, Expenses: {expensesToMark.Count}, TimeEntries: {timeEntriesToMark.Count}");
-                        }
                     }
 
                     // Update service order status
