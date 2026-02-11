@@ -1,20 +1,23 @@
 // ────────────────────────────────────────────────
-// Email Sync & Fetch — ADD these methods to EmailAccountService.cs
+// Email & Calendar Sync — ADD these methods to EmailAccountService.cs
 // ────────────────────────────────────────────────
 // 
 // IMPORTANT: Add these methods INSIDE your existing EmailAccountService class.
 // Also add `using System.Text.Json;` at the top of the file.
-// Also register SyncedEmails in your ApplicationDbContext:
+// Also register in your ApplicationDbContext:
 //   public DbSet<SyncedEmail> SyncedEmails { get; set; }
+//   public DbSet<SyncedCalendarEvent> SyncedCalendarEvents { get; set; }
 //
 // ────────────────────────────────────────────────
-
-/*
 
 // Add this using at the top:
 using System.Text.Json;
 
 // Add these methods inside EmailAccountService class:
+
+// ═══════════════════════════════════════════════
+// EMAIL SYNC
+// ═══════════════════════════════════════════════
 
 public async Task<SyncResultDto> SyncEmailsAsync(Guid accountId, int userId, int maxResults = 50)
 {
@@ -310,6 +313,306 @@ public async Task<SyncedEmailsPageDto> GetSyncedEmailsAsync(Guid accountId, int 
     };
 }
 
+// ═══════════════════════════════════════════════
+// CALENDAR SYNC
+// ═══════════════════════════════════════════════
+
+public async Task<CalendarSyncResultDto> SyncCalendarAsync(Guid accountId, int userId, int maxResults = 50)
+{
+    var account = await _context.ConnectedEmailAccounts
+        .FirstOrDefaultAsync(a => a.Id == accountId && a.UserId == userId);
+
+    if (account == null)
+        throw new InvalidOperationException("Account not found");
+
+    if (!account.IsCalendarSyncEnabled)
+        throw new InvalidOperationException("Calendar sync is disabled for this account");
+
+    _logger.LogInformation("Starting calendar sync for account {Handle} ({Provider})", account.Handle, account.Provider);
+
+    var result = account.Provider switch
+    {
+        "google" => await SyncGoogleCalendarAsync(account, maxResults),
+        "microsoft" => await SyncOutlookCalendarAsync(account, maxResults),
+        _ => throw new InvalidOperationException($"Unsupported provider: {account.Provider}")
+    };
+
+    account.LastSyncedAt = DateTime.UtcNow;
+    account.SyncStatus = "active";
+    account.UpdatedAt = DateTime.UtcNow;
+    await _context.SaveChangesAsync();
+
+    return result;
+}
+
+private async Task<CalendarSyncResultDto> SyncGoogleCalendarAsync(ConnectedEmailAccount account, int maxResults)
+{
+    var client = _httpClientFactory.CreateClient();
+    var accessToken = await EnsureValidGoogleTokenAsync(account);
+    client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
+
+    var timeMin = DateTime.UtcNow.AddDays(-7).ToString("o");
+    var timeMax = DateTime.UtcNow.AddDays(30).ToString("o");
+    var url = $"https://www.googleapis.com/calendar/v3/calendars/primary/events?maxResults={maxResults}&timeMin={timeMin}&timeMax={timeMax}&singleEvents=true&orderBy=startTime";
+
+    var response = await client.GetAsync(url);
+    if (!response.IsSuccessStatusCode)
+    {
+        _logger.LogError("Google Calendar sync failed: {Status}", response.StatusCode);
+        account.SyncStatus = "failed";
+        await _context.SaveChangesAsync();
+        throw new InvalidOperationException("Failed to fetch events from Google Calendar");
+    }
+
+    var json = await response.Content.ReadAsStringAsync();
+    var data = JsonSerializer.Deserialize<JsonElement>(json);
+
+    int newCount = 0, updatedCount = 0;
+
+    if (data.TryGetProperty("items", out var items))
+    {
+        foreach (var item in items.EnumerateArray())
+        {
+            var externalId = item.GetProperty("id").GetString()!;
+
+            var existing = await _context.Set<SyncedCalendarEvent>()
+                .FirstOrDefaultAsync(e => e.ConnectedEmailAccountId == account.Id && e.ExternalId == externalId);
+
+            var summary = item.TryGetProperty("summary", out var s) ? s.GetString() ?? "" : "";
+            var description = item.TryGetProperty("description", out var d) ? d.GetString() : null;
+            var location = item.TryGetProperty("location", out var loc) ? loc.GetString() : null;
+            var status = item.TryGetProperty("status", out var st) ? st.GetString() ?? "confirmed" : "confirmed";
+
+            // Parse start/end times
+            DateTime startTime = DateTime.UtcNow, endTime = DateTime.UtcNow;
+            bool isAllDay = false;
+            if (item.TryGetProperty("start", out var startObj))
+            {
+                if (startObj.TryGetProperty("dateTime", out var sdt))
+                    DateTime.TryParse(sdt.GetString(), out startTime);
+                else if (startObj.TryGetProperty("date", out var sd))
+                {
+                    DateTime.TryParse(sd.GetString(), out startTime);
+                    isAllDay = true;
+                }
+            }
+            if (item.TryGetProperty("end", out var endObj))
+            {
+                if (endObj.TryGetProperty("dateTime", out var edt))
+                    DateTime.TryParse(edt.GetString(), out endTime);
+                else if (endObj.TryGetProperty("date", out var ed))
+                    DateTime.TryParse(ed.GetString(), out endTime);
+            }
+
+            // Parse attendees
+            var attendees = new List<string>();
+            if (item.TryGetProperty("attendees", out var atts))
+            {
+                foreach (var att in atts.EnumerateArray())
+                {
+                    if (att.TryGetProperty("email", out var email))
+                        attendees.Add(email.GetString() ?? "");
+                }
+            }
+
+            var organizerEmail = "";
+            if (item.TryGetProperty("organizer", out var org) && org.TryGetProperty("email", out var oe))
+                organizerEmail = oe.GetString() ?? "";
+
+            if (existing != null)
+            {
+                // Update existing event
+                existing.Title = summary;
+                existing.Description = description;
+                existing.Location = location;
+                existing.StartTime = startTime;
+                existing.EndTime = endTime;
+                existing.IsAllDay = isAllDay;
+                existing.Status = status;
+                existing.Attendees = attendees.Count > 0 ? JsonSerializer.Serialize(attendees) : null;
+                existing.OrganizerEmail = organizerEmail;
+                existing.UpdatedAt = DateTime.UtcNow;
+                updatedCount++;
+            }
+            else
+            {
+                var evt = new SyncedCalendarEvent
+                {
+                    ConnectedEmailAccountId = account.Id,
+                    ExternalId = externalId,
+                    Title = summary,
+                    Description = description,
+                    Location = location,
+                    StartTime = startTime,
+                    EndTime = endTime,
+                    IsAllDay = isAllDay,
+                    Status = status,
+                    OrganizerEmail = organizerEmail,
+                    Attendees = attendees.Count > 0 ? JsonSerializer.Serialize(attendees) : null,
+                };
+                _context.Set<SyncedCalendarEvent>().Add(evt);
+                newCount++;
+            }
+        }
+
+        await _context.SaveChangesAsync();
+    }
+
+    return new CalendarSyncResultDto { NewEvents = newCount, UpdatedEvents = updatedCount, SyncedAt = DateTime.UtcNow };
+}
+
+private async Task<CalendarSyncResultDto> SyncOutlookCalendarAsync(ConnectedEmailAccount account, int maxResults)
+{
+    var client = _httpClientFactory.CreateClient();
+    var accessToken = await EnsureValidMicrosoftTokenAsync(account);
+    client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
+
+    var startDate = DateTime.UtcNow.AddDays(-7).ToString("o");
+    var endDate = DateTime.UtcNow.AddDays(30).ToString("o");
+    var url = $"https://graph.microsoft.com/v1.0/me/calendarView?startDateTime={startDate}&endDateTime={endDate}&$top={maxResults}&$orderby=start/dateTime&$select=id,subject,bodyPreview,start,end,location,isAllDay,organizer,attendees,showAs";
+
+    var response = await client.GetAsync(url);
+    if (!response.IsSuccessStatusCode)
+    {
+        _logger.LogError("Outlook Calendar sync failed: {Status}", response.StatusCode);
+        account.SyncStatus = "failed";
+        await _context.SaveChangesAsync();
+        throw new InvalidOperationException("Failed to fetch events from Outlook Calendar");
+    }
+
+    var json = await response.Content.ReadAsStringAsync();
+    var data = JsonSerializer.Deserialize<JsonElement>(json);
+
+    int newCount = 0, updatedCount = 0;
+
+    if (data.TryGetProperty("value", out var events))
+    {
+        foreach (var evt in events.EnumerateArray())
+        {
+            var externalId = evt.GetProperty("id").GetString()!;
+
+            var existing = await _context.Set<SyncedCalendarEvent>()
+                .FirstOrDefaultAsync(e => e.ConnectedEmailAccountId == account.Id && e.ExternalId == externalId);
+
+            var subject = evt.TryGetProperty("subject", out var sub) ? sub.GetString() ?? "" : "";
+            var bodyPreview = evt.TryGetProperty("bodyPreview", out var bp) ? bp.GetString() : null;
+            var isAllDay = evt.TryGetProperty("isAllDay", out var iad) && iad.GetBoolean();
+
+            DateTime startTime = DateTime.UtcNow, endTime = DateTime.UtcNow;
+            if (evt.TryGetProperty("start", out var startObj) && startObj.TryGetProperty("dateTime", out var sdt))
+                DateTime.TryParse(sdt.GetString(), out startTime);
+            if (evt.TryGetProperty("end", out var endObj) && endObj.TryGetProperty("dateTime", out var edt))
+                DateTime.TryParse(edt.GetString(), out endTime);
+
+            var location = "";
+            if (evt.TryGetProperty("location", out var locObj) && locObj.TryGetProperty("displayName", out var dn))
+                location = dn.GetString();
+
+            var organizerEmail = "";
+            if (evt.TryGetProperty("organizer", out var org) && org.TryGetProperty("emailAddress", out var oea) && oea.TryGetProperty("address", out var oa))
+                organizerEmail = oa.GetString() ?? "";
+
+            var attendees = new List<string>();
+            if (evt.TryGetProperty("attendees", out var atts))
+            {
+                foreach (var att in atts.EnumerateArray())
+                {
+                    if (att.TryGetProperty("emailAddress", out var aea) && aea.TryGetProperty("address", out var aa))
+                        attendees.Add(aa.GetString() ?? "");
+                }
+            }
+
+            if (existing != null)
+            {
+                existing.Title = subject;
+                existing.Description = bodyPreview;
+                existing.Location = location;
+                existing.StartTime = startTime;
+                existing.EndTime = endTime;
+                existing.IsAllDay = isAllDay;
+                existing.OrganizerEmail = organizerEmail;
+                existing.Attendees = attendees.Count > 0 ? JsonSerializer.Serialize(attendees) : null;
+                existing.UpdatedAt = DateTime.UtcNow;
+                updatedCount++;
+            }
+            else
+            {
+                var calEvent = new SyncedCalendarEvent
+                {
+                    ConnectedEmailAccountId = account.Id,
+                    ExternalId = externalId,
+                    Title = subject,
+                    Description = bodyPreview,
+                    Location = location,
+                    StartTime = startTime,
+                    EndTime = endTime,
+                    IsAllDay = isAllDay,
+                    Status = "confirmed",
+                    OrganizerEmail = organizerEmail,
+                    Attendees = attendees.Count > 0 ? JsonSerializer.Serialize(attendees) : null,
+                };
+                _context.Set<SyncedCalendarEvent>().Add(calEvent);
+                newCount++;
+            }
+        }
+
+        await _context.SaveChangesAsync();
+    }
+
+    return new CalendarSyncResultDto { NewEvents = newCount, UpdatedEvents = updatedCount, SyncedAt = DateTime.UtcNow };
+}
+
+public async Task<SyncedCalendarEventsPageDto> GetCalendarEventsAsync(Guid accountId, int userId, int page = 1, int pageSize = 25, string? search = null)
+{
+    var account = await _context.ConnectedEmailAccounts
+        .FirstOrDefaultAsync(a => a.Id == accountId && a.UserId == userId);
+
+    if (account == null)
+        return new SyncedCalendarEventsPageDto();
+
+    var query = _context.Set<SyncedCalendarEvent>()
+        .Where(e => e.ConnectedEmailAccountId == accountId);
+
+    if (!string.IsNullOrWhiteSpace(search))
+    {
+        var term = search.ToLower();
+        query = query.Where(e =>
+            e.Title.ToLower().Contains(term) ||
+            (e.Description != null && e.Description.ToLower().Contains(term)) ||
+            (e.Location != null && e.Location.ToLower().Contains(term)) ||
+            (e.OrganizerEmail != null && e.OrganizerEmail.ToLower().Contains(term))
+        );
+    }
+
+    var totalCount = await query.CountAsync();
+
+    var events = await query
+        .OrderBy(e => e.StartTime)
+        .Skip((page - 1) * pageSize)
+        .Take(pageSize)
+        .Select(e => new SyncedCalendarEventDto
+        {
+            Id = e.Id,
+            ExternalId = e.ExternalId,
+            Title = e.Title,
+            Description = e.Description,
+            Location = e.Location,
+            StartTime = e.StartTime,
+            EndTime = e.EndTime,
+            IsAllDay = e.IsAllDay,
+            Status = e.Status,
+            OrganizerEmail = e.OrganizerEmail,
+            Attendees = e.Attendees,
+        })
+        .ToListAsync();
+
+    return new SyncedCalendarEventsPageDto
+    {
+        Events = events,
+        TotalCount = totalCount,
+    };
+}
+
 // ────────────────────────────────────────────────
 // Token refresh helpers
 // ────────────────────────────────────────────────
@@ -377,7 +680,7 @@ private async Task<string> EnsureValidMicrosoftTokenAsync(ConnectedEmailAccount 
         ["client_secret"] = _configuration["OAuth:Microsoft:ClientSecret"] ?? "",
         ["refresh_token"] = account.RefreshToken,
         ["grant_type"] = "refresh_token",
-        ["scope"] = "openid email profile offline_access Mail.ReadWrite Mail.Send Calendars.Read User.Read"
+        ["scope"] = "openid email profile offline_access Mail.ReadWrite Mail.Send Calendars.Read Calendars.ReadWrite User.Read"
     });
 
     var response = await refreshClient.PostAsync("https://login.microsoftonline.com/common/oauth2/v2.0/token", body);
@@ -418,5 +721,3 @@ private static (string? name, string email) ParseEmailAddress(string raw)
 
     return (null, raw.Trim());
 }
-
-*/
