@@ -18,6 +18,9 @@ namespace MyApi.Modules.Contacts.Models
 
         public DateTime AssignedDate { get; set; } = DateTime.UtcNow;
 
+        [StringLength(100)]
+        public string? AssignedBy { get; set; }
+
         // Navigation properties
         [ForeignKey("ContactId")]
         public virtual Contact? Contact { get; set; }

@@ -42,7 +42,11 @@ namespace MyApi.Modules.Dispatches.DTOs
         public int Duration { get; set; }
         public string? Description { get; set; }
         public decimal? TotalCost { get; set; }
+        public bool Billable { get; set; }
+        public decimal? HourlyRate { get; set; }
         public DateTime CreatedAt { get; set; }
+        public string? InvoiceStatus { get; set; }
+        public string? SourceTable { get; set; } // "service_order" or "dispatch"
     }
 
     public class ApproveTimeEntryDto

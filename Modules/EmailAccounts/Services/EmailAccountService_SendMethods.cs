@@ -1,12 +1,13 @@
-// ────────────────────────────────────────────────
-// Send Email — ADD these methods INSIDE your existing EmailAccountService class
-// ────────────────────────────────────────────────
-// Also add to IEmailAccountService:
-//   Task<SendEmailResultDto> SendEmailAsync(Guid accountId, int userId, SendEmailDto dto);
-// ────────────────────────────────────────────────
-
 using System.Text;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using MyApi.Modules.EmailAccounts.DTOs;
+using MyApi.Modules.EmailAccounts.Models;
+
+namespace MyApi.Modules.EmailAccounts.Services
+{
+    public partial class EmailAccountService
+    {
 
 public async Task<SendEmailResultDto> SendEmailAsync(Guid accountId, int userId, SendEmailDto dto)
 {
@@ -116,4 +117,5 @@ private async Task<SendEmailResultDto> SendOutlookEmailAsync(ConnectedEmailAccou
 
     // Microsoft sendMail returns 202 Accepted with no body
     return new SendEmailResultDto { Success = true };
+    }
 }

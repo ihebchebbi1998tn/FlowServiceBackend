@@ -1,19 +1,12 @@
-// ────────────────────────────────────────────────
-// Email & Calendar Sync — ADD these methods to EmailAccountService.cs
-// ────────────────────────────────────────────────
-// 
-// IMPORTANT: Add these methods INSIDE your existing EmailAccountService class.
-// Also add `using System.Text.Json;` at the top of the file.
-// Also register in your ApplicationDbContext:
-//   public DbSet<SyncedEmail> SyncedEmails { get; set; }
-//   public DbSet<SyncedCalendarEvent> SyncedCalendarEvents { get; set; }
-//
-// ────────────────────────────────────────────────
-
-// Add this using at the top:
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using MyApi.Modules.EmailAccounts.DTOs;
+using MyApi.Modules.EmailAccounts.Models;
 
-// Add these methods inside EmailAccountService class:
+namespace MyApi.Modules.EmailAccounts.Services
+{
+    public partial class EmailAccountService
+    {
 
 // ═══════════════════════════════════════════════
 // EMAIL SYNC
@@ -720,4 +713,5 @@ private static (string? name, string email) ParseEmailAddress(string raw)
     }
 
     return (null, raw.Trim());
+    }
 }

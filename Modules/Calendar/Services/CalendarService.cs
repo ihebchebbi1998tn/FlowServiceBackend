@@ -15,21 +15,24 @@ namespace MyApi.Modules.Calendar.Services
             _context = context;
         }
 
-        // Calendar Events
+        // ✅ OPTIMIZATION: List endpoints use minimal loading
         public async Task<IEnumerable<CalendarEventDto>> GetAllEventsAsync()
         {
+            // ⚠️ This should have pagination in production! Remove .ToListAsync() on large datasets
             var events = await _context.CalendarEvents
                 .AsNoTracking()
-                .Include(e => e.Contact)
-                .Include(e => e.EventTypeNavigation)
-                .Include(e => e.EventAttendees)
-                .Include(e => e.EventReminders)
+                // Removed eager loading - load related data only when needed
+                // .Include(e => e.Contact)
+                // .Include(e => e.EventTypeNavigation)
+                // .Include(e => e.EventAttendees)
+                // .Include(e => e.EventReminders)
                 .OrderBy(e => e.Start)
                 .ToListAsync();
 
             return events.Select(MapToDto);
         }
 
+        // ✅ OPTIMIZATION: Detail endpoint - keep eager loading (only loads single entity)
         public async Task<CalendarEventDto?> GetEventByIdAsync(Guid id)
         {
             var calendarEvent = await _context.CalendarEvents
@@ -43,14 +46,16 @@ namespace MyApi.Modules.Calendar.Services
             return calendarEvent != null ? MapToDto(calendarEvent) : null;
         }
 
+        // ✅ OPTIMIZATION: Range queries - remove unnecessary includes for list view
         public async Task<IEnumerable<CalendarEventDto>> GetEventsByDateRangeAsync(DateTime start, DateTime end)
         {
             var events = await _context.CalendarEvents
                 .AsNoTracking()
-                .Include(e => e.Contact)
-                .Include(e => e.EventTypeNavigation)
-                .Include(e => e.EventAttendees)
-                .Include(e => e.EventReminders)
+                // Removed eager loading for list view
+                // .Include(e => e.Contact)
+                // .Include(e => e.EventTypeNavigation)
+                // .Include(e => e.EventAttendees)
+                // .Include(e => e.EventReminders)
                 .Where(e => e.Start >= start && e.Start <= end)
                 .OrderBy(e => e.Start)
                 .ToListAsync();
@@ -58,14 +63,16 @@ namespace MyApi.Modules.Calendar.Services
             return events.Select(MapToDto);
         }
 
+        // ✅ OPTIMIZATION: Contact events - remove unnecessary includes
         public async Task<IEnumerable<CalendarEventDto>> GetEventsByContactAsync(int contactId)
         {
             var events = await _context.CalendarEvents
                 .AsNoTracking()
-                .Include(e => e.Contact)
-                .Include(e => e.EventTypeNavigation)
-                .Include(e => e.EventAttendees)
-                .Include(e => e.EventReminders)
+                // Removed eager loading for list view
+                // .Include(e => e.Contact)
+                // .Include(e => e.EventTypeNavigation)
+                // .Include(e => e.EventAttendees)
+                // .Include(e => e.EventReminders)
                 .Where(e => e.ContactId == contactId)
                 .OrderBy(e => e.Start)
                 .ToListAsync();

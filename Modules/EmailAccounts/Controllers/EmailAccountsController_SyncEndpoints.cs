@@ -1,8 +1,10 @@
-// ────────────────────────────────────────────────
-// Email & Calendar Sync Endpoints
-// ADD these endpoints INSIDE your existing EmailAccountsController class
-// ────────────────────────────────────────────────
+using Microsoft.AspNetCore.Mvc;
+using MyApi.Modules.EmailAccounts.DTOs;
 
+namespace MyApi.Modules.EmailAccounts.Controllers
+{
+    public partial class EmailAccountsController
+    {
 // ─── Email Sync ───
 
 /// <summary>
@@ -115,5 +117,6 @@ public async Task<ActionResult<SendEmailResultDto>> SendEmail(Guid id, [FromBody
     {
         _logger.LogError(ex, "Failed to send email for account {Id}", id);
         return StatusCode(500, new { message = "Failed to send email" });
+    }
     }
 }

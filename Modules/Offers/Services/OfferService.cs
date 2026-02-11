@@ -671,7 +671,7 @@ namespace MyApi.Modules.Offers.Services
                 ArticleId = itemDto.ArticleId,
                 ItemName = itemDto.ItemName,
                 ItemCode = itemDto.ItemCode,
-                Description = itemDto.Description,
+                Description = itemDto.Description ?? string.Empty,
                 Quantity = itemDto.Quantity,
                 UnitPrice = itemDto.UnitPrice,
                 Discount = itemDto.Discount,
@@ -727,7 +727,7 @@ namespace MyApi.Modules.Offers.Services
             item.ArticleId = itemDto.ArticleId;
             item.ItemName = itemDto.ItemName;
             item.ItemCode = itemDto.ItemCode;
-            item.Description = itemDto.Description;
+            item.Description = itemDto.Description ?? string.Empty;
             item.Quantity = itemDto.Quantity;
             item.UnitPrice = itemDto.UnitPrice;
             item.Discount = itemDto.Discount;
@@ -1116,7 +1116,7 @@ namespace MyApi.Modules.Offers.Services
                             {
                                 Id = offer.Id,
                                 OfferNumber = offer.OfferNumber,
-                                Title = offer.Title,
+                                Title = offer.Title ?? string.Empty,
                                 Status = offer.Status,
                                 Currency = offer.Currency
                             });

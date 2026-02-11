@@ -22,6 +22,9 @@ namespace MyApi.Modules.Auth.Data.Configurations
                     .HasDefaultValue(true);
                 entity.Property(e => e.OnboardingCompleted)
                     .HasDefaultValue(false);
+                entity.Property(e => e.CompanyLogoUrl)
+                    .HasColumnName("CompanyLogoUrl")
+                    .HasMaxLength(500);
             });
         }
     }

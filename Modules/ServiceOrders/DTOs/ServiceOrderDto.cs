@@ -72,6 +72,7 @@ namespace MyApi.Modules.ServiceOrders.DTOs
         public string? InstallationName { get; set; }
         public string? CreatedBy { get; set; }
         public DateTime CreatedAt { get; set; }
+        public string? InvoiceStatus { get; set; }
     }
 
     public class CreateServiceOrderMaterialDto
@@ -120,6 +121,7 @@ namespace MyApi.Modules.ServiceOrders.DTOs
         public string Status { get; set; } = "pending";
         public string Source { get; set; } = "service_order";
         public DateTime CreatedAt { get; set; }
+        public string? InvoiceStatus { get; set; }
     }
 
     public class CreateServiceOrderTimeEntryDto
@@ -146,6 +148,7 @@ namespace MyApi.Modules.ServiceOrders.DTOs
         public string Status { get; set; } = "pending";
         public string Source { get; set; } = "service_order";
         public DateTime CreatedAt { get; set; }
+        public string? InvoiceStatus { get; set; }
     }
 
     public class CreateServiceOrderExpenseDto
@@ -346,5 +349,17 @@ namespace MyApi.Modules.ServiceOrders.DTOs
         [System.ComponentModel.DataAnnotations.Required]
         public string Content { get; set; } = null!;
         public string Type { get; set; } = "internal"; // "internal", "external", "creation"
+    }
+
+    public class PrepareInvoiceDto
+    {
+        public List<int>? MaterialIds { get; set; }
+        public List<int>? ExpenseIds { get; set; }
+        public List<int>? TimeEntryIds { get; set; }
+        // IDs from dispatch tables (different from SO tables)
+        public List<int>? DispatchMaterialIds { get; set; }
+        public List<int>? DispatchExpenseIds { get; set; }
+        public List<int>? DispatchTimeEntryIds { get; set; }
+        public string? Notes { get; set; }
     }
 }

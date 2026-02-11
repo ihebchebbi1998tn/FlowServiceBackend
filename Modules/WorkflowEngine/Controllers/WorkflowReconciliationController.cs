@@ -31,6 +31,7 @@ namespace MyApi.Modules.WorkflowEngine.Controllers
             public int SalesFixed { get; set; }
             public int ServiceOrdersFixed { get; set; }
             public int DispatchesFixed { get; set; }
+            public int ConsistencyFixes { get; set; }
             public int TotalFixed { get; set; }
             public string Message { get; set; } = "";
         }
@@ -65,6 +66,10 @@ namespace MyApi.Modules.WorkflowEngine.Controllers
             var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
             var notificationService = scope.ServiceProvider.GetRequiredService<IWorkflowNotificationService>();
             var graphExecutor = scope.ServiceProvider.GetRequiredService<IWorkflowGraphExecutor>();
+
+            // Phase 1: Direct status consistency reconciliation
+            var consistencyFixes = await ReconcileStatusConsistencyAsync(db, cancellationToken);
+            _logger.LogInformation("[WORKFLOW-RECONCILE] Phase 1 - Consistency fixes: {Fixes}", consistencyFixes);
 
             // Get all active triggers with their workflows (same criteria as WorkflowPollingService)
             var triggers = await db.WorkflowTriggers
@@ -132,8 +137,9 @@ namespace MyApi.Modules.WorkflowEngine.Controllers
                 SalesFixed = salesFixed,
                 ServiceOrdersFixed = serviceOrdersFixed,
                 DispatchesFixed = dispatchesFixed,
-                TotalFixed = totalTriggered,
-                Message = $"Reconciliation complete in {(endedAt - startedAt).TotalSeconds:F1}s. Entities checked: {totalProcessed}. Workflows triggered: {totalTriggered}."
+                ConsistencyFixes = consistencyFixes,
+                TotalFixed = totalTriggered + consistencyFixes,
+                Message = $"Reconciliation complete in {(endedAt - startedAt).TotalSeconds:F1}s. Consistency fixes: {consistencyFixes}. Entities checked: {totalProcessed}. Workflows triggered: {totalTriggered}."
             };
 
             _logger.LogInformation("[WORKFLOW-RECONCILE] {Message}", result.Message);
@@ -577,6 +583,472 @@ namespace MyApi.Modules.WorkflowEngine.Controllers
             if (string.IsNullOrEmpty(value)) return value;
             return value.Length <= maxLength ? value : value.Substring(0, maxLength);
         }
+
+        /// <summary>
+        /// WORKFLOW-DRIVEN status consistency reconciliation.
+        /// Reads ALL active workflow definitions, extracts the condition→action rules
+        /// the user configured, and applies them dynamically.
+        /// Supports infinite combinations of entity types, statuses, and cascading rules.
+        /// </summary>
+        private async Task<int> ReconcileStatusConsistencyAsync(ApplicationDbContext db, CancellationToken cancellationToken)
+        {
+            int totalFixes = 0;
+
+            try
+            {
+                // ═══ WORKFLOW-DRIVEN STATUS RECONCILIATION ═══
+                var activeWorkflows = await db.WorkflowDefinitions
+                    .Where(w => w.IsActive && !w.IsDeleted)
+                    .ToListAsync(cancellationToken);
+
+                _logger.LogInformation(
+                    "[WORKFLOW-RECONCILE] Analyzing {Count} active workflows for consistency rules",
+                    activeWorkflows.Count);
+
+                var allRules = new List<ReconciliationRule>();
+
+                foreach (var workflow in activeWorkflows)
+                {
+                    var nodes = ParseReconcileNodes(workflow.Nodes);
+                    var edges = ParseReconcileEdges(workflow.Edges);
+                    var rules = ExtractReconciliationRules(nodes, edges);
+                    allRules.AddRange(rules);
+
+                    if (rules.Any())
+                    {
+                        _logger.LogInformation(
+                            "[WORKFLOW-RECONCILE] Workflow '{Name}' (#{Id}): extracted {Count} rules",
+                            workflow.Name, workflow.Id, rules.Count);
+                    }
+                }
+
+                // Apply direct cascade rules first, then collection rules (collection can override)
+                foreach (var rule in allRules.Where(r => r.IsDirect))
+                {
+                    try { totalFixes += await ApplyDirectCascadeRuleAsync(db, rule, cancellationToken); }
+                    catch (Exception ex) { _logger.LogError(ex, "[WORKFLOW-RECONCILE] Error applying direct rule: {Desc}", rule.Description); }
+                }
+                foreach (var rule in allRules.Where(r => r.IsCollectionRule))
+                {
+                    try { totalFixes += await ApplyCollectionRuleAsync(db, rule, cancellationToken); }
+                    catch (Exception ex) { _logger.LogError(ex, "[WORKFLOW-RECONCILE] Error applying collection rule: {Desc}", rule.Description); }
+                }
+
+                // ═══ DATA INTEGRITY FIXES ═══
+                totalFixes += await FixMissingStartDatesAsync(db, cancellationToken);
+                totalFixes += await FixCompletedDispatchCountsAsync(db, cancellationToken);
+                totalFixes += await FixMissingOfferIdsAsync(db, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[WORKFLOW-RECONCILE] Error during status consistency reconciliation");
+            }
+
+            return totalFixes;
+        }
+
+        #region Workflow Graph Parsing for Reconciliation
+
+        private List<ReconcileNode> ParseReconcileNodes(string nodesJson)
+        {
+            try
+            {
+                var elements = JsonSerializer.Deserialize<List<JsonElement>>(nodesJson);
+                if (elements == null) return new List<ReconcileNode>();
+                return elements.Select(ParseReconcileNode).Where(n => n != null).Cast<ReconcileNode>().ToList();
+            }
+            catch { return new List<ReconcileNode>(); }
+        }
+
+        private ReconcileNode? ParseReconcileNode(JsonElement el)
+        {
+            try
+            {
+                var node = new ReconcileNode
+                {
+                    Id = el.TryGetProperty("id", out var id) ? id.GetString() ?? "" : "",
+                    Type = el.TryGetProperty("type", out var type) ? type.GetString() ?? "" : ""
+                };
+                if (el.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object)
+                {
+                    node.Label = data.TryGetProperty("label", out var label) ? label.GetString() ?? "" : "";
+                    if (data.TryGetProperty("type", out var dataType))
+                    {
+                        var bt = dataType.GetString();
+                        if (!string.IsNullOrEmpty(bt)) node.Type = bt;
+                    }
+                    foreach (var prop in data.EnumerateObject())
+                        node.Data[prop.Name] = prop.Value.Clone();
+                }
+                return node;
+            }
+            catch { return null; }
+        }
+
+        private List<ReconcileEdge> ParseReconcileEdges(string edgesJson)
+        {
+            try
+            {
+                var elements = JsonSerializer.Deserialize<List<JsonElement>>(edgesJson);
+                if (elements == null) return new List<ReconcileEdge>();
+                return elements.Select(el => new ReconcileEdge
+                {
+                    Id = el.TryGetProperty("id", out var id) ? id.GetString() ?? "" : "",
+                    Source = el.TryGetProperty("source", out var src) ? src.GetString() ?? "" : "",
+                    Target = el.TryGetProperty("target", out var tgt) ? tgt.GetString() ?? "" : "",
+                    SourceHandle = el.TryGetProperty("sourceHandle", out var sh) ? sh.GetString() : null,
+                    Label = el.TryGetProperty("label", out var lbl) ? lbl.GetString() : null
+                }).ToList();
+            }
+            catch { return new List<ReconcileEdge>(); }
+        }
+
+        #endregion
+
+        #region Rule Extraction
+
+        private List<ReconciliationRule> ExtractReconciliationRules(List<ReconcileNode> nodes, List<ReconcileEdge> edges)
+        {
+            var rules = new List<ReconciliationRule>();
+            var adjacency = edges.GroupBy(e => e.Source).ToDictionary(g => g.Key, g => g.ToList());
+
+            // Pattern 1: Condition → Action chains
+            foreach (var condNode in nodes.Where(n => IsConditionNodeType(n.Type)))
+            {
+                if (!adjacency.TryGetValue(condNode.Id, out var outEdges)) continue;
+
+                var field = condNode.GetDataString("field") ?? condNode.GetConfigString("field") ?? condNode.GetConditionDataString("field");
+                var op = condNode.GetDataString("operator") ?? condNode.GetConfigString("operator") ?? condNode.GetConditionDataString("operator");
+                var value = condNode.GetDataString("value") ?? condNode.GetConfigString("value") ?? condNode.GetConditionDataString("value");
+                var checkField = condNode.GetConditionDataString("checkField") ?? condNode.GetConfigString("checkField");
+
+                if (string.IsNullOrEmpty(field) || !field.Contains('.')) continue;
+
+                var yesBranch = outEdges.FirstOrDefault(e => IsYesBranch(e));
+                var noBranch = outEdges.FirstOrDefault(e => IsNoBranch(e));
+                var yesAction = yesBranch != null ? nodes.FirstOrDefault(n => n.Id == yesBranch.Target) : null;
+                var noAction = noBranch != null ? nodes.FirstOrDefault(n => n.Id == noBranch.Target) : null;
+
+                string? yesEntityType = null, yesStatus = null, noEntityType = null, noStatus = null;
+                if (yesAction != null && IsUpdateStatusNodeType(yesAction.Type))
+                {
+                    yesEntityType = yesAction.GetDataString("entityType") ?? InferEntityTypeFromNodeType(yesAction.Type);
+                    yesStatus = yesAction.GetDataString("newStatus") ?? yesAction.GetConfigString("newStatus");
+                }
+                if (noAction != null && IsUpdateStatusNodeType(noAction.Type))
+                {
+                    noEntityType = noAction.GetDataString("entityType") ?? InferEntityTypeFromNodeType(noAction.Type);
+                    noStatus = noAction.GetDataString("newStatus") ?? noAction.GetConfigString("newStatus");
+                }
+
+                if (yesStatus == null && noStatus == null) continue;
+
+                rules.Add(new ReconciliationRule
+                {
+                    IsCollectionRule = true,
+                    ConditionField = field, ConditionOperator = op ?? "all_match",
+                    ConditionValue = value, ConditionCheckField = checkField ?? "status",
+                    YesTargetEntityType = yesEntityType, YesTargetStatus = yesStatus,
+                    NoTargetEntityType = noEntityType, NoTargetStatus = noStatus,
+                    Description = $"Collection: {field} {op} [{value}] → YES:{yesEntityType}={yesStatus}, NO:{noEntityType}={noStatus}"
+                });
+            }
+
+            // Pattern 2: Trigger → Direct Action
+            foreach (var triggerNode in nodes.Where(n => n.Type.Contains("status-trigger")))
+            {
+                if (!adjacency.TryGetValue(triggerNode.Id, out var outEdges)) continue;
+                foreach (var edge in outEdges)
+                {
+                    var targetNode = nodes.FirstOrDefault(n => n.Id == edge.Target);
+                    if (targetNode == null || IsConditionNodeType(targetNode.Type) || !IsUpdateStatusNodeType(targetNode.Type)) continue;
+
+                    var triggerEntityType = InferEntityTypeFromNodeType(triggerNode.Type);
+                    var triggerToStatus = triggerNode.GetDataString("toStatus");
+                    var actionEntityType = targetNode.GetDataString("entityType") ?? InferEntityTypeFromNodeType(targetNode.Type);
+                    var actionNewStatus = targetNode.GetDataString("newStatus") ?? targetNode.GetConfigString("newStatus");
+                    var condition = targetNode.GetConfigString("condition");
+
+                    if (triggerEntityType == null || actionEntityType == null || actionNewStatus == null) continue;
+                    if (triggerEntityType == actionEntityType) continue;
+
+                    rules.Add(new ReconciliationRule
+                    {
+                        IsDirect = true,
+                        DirectTriggerEntityType = triggerEntityType, DirectTriggerStatus = triggerToStatus,
+                        DirectCondition = condition,
+                        YesTargetEntityType = actionEntityType, YesTargetStatus = actionNewStatus,
+                        Description = $"Direct: {triggerEntityType}={triggerToStatus} → {actionEntityType}={actionNewStatus}"
+                    });
+                }
+            }
+
+            return rules;
+        }
+
+        #endregion
+
+        #region Rule Application
+
+        private async Task<int> ApplyCollectionRuleAsync(ApplicationDbContext db, ReconciliationRule rule, CancellationToken ct)
+        {
+            int fixes = 0;
+            var parts = rule.ConditionField!.Split('.', 2);
+            var parentPrefix = parts[0].ToLower().Replace("_", "");
+            var collectionName = parts[1].ToLower();
+            var parentEntityType = ResolveEntityType(parentPrefix);
+            if (parentEntityType == null) return 0;
+
+            if (parentEntityType == "service_order" && collectionName == "dispatches")
+            {
+                var serviceOrders = await db.ServiceOrders
+                    .Where(so => so.Status != "closed" && so.Status != "cancelled")
+                    .Select(so => new { so.Id, so.Status, Dispatches = db.Dispatches.Where(d => d.ServiceOrderId == so.Id && !d.IsDeleted).Select(d => new { d.Id, d.Status }).ToList() })
+                    .ToListAsync(ct);
+
+                foreach (var so in serviceOrders)
+                {
+                    if (!so.Dispatches.Any()) continue;
+                    var childStatuses = so.Dispatches.Select(d => d.Status ?? "").ToList();
+                    var conditionMet = EvaluateCollectionCondition(childStatuses, rule.ConditionOperator ?? "all_match", rule.ConditionValue ?? "");
+                    string? expectedStatus = conditionMet ? rule.YesTargetStatus : rule.NoTargetStatus;
+                    string? expectedEntityType = conditionMet ? rule.YesTargetEntityType : rule.NoTargetEntityType;
+                    if (expectedStatus == null || so.Status == expectedStatus) continue;
+                    if (expectedEntityType != null && expectedEntityType != "service_order") continue;
+
+                    var serviceOrder = await db.ServiceOrders.FindAsync(new object[] { so.Id }, ct);
+                    if (serviceOrder == null) continue;
+                    var oldStatus = serviceOrder.Status;
+                    serviceOrder.Status = expectedStatus;
+                    serviceOrder.ModifiedDate = DateTime.UtcNow;
+                    serviceOrder.ModifiedBy = "system-reconcile";
+                    var condStatuses = (rule.ConditionValue ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries).Select(s => s.Trim()).ToHashSet();
+                    serviceOrder.CompletedDispatchCount = so.Dispatches.Count(d => condStatuses.Contains(d.Status ?? ""));
+                    if (expectedStatus == "in_progress" && !serviceOrder.ActualStartDate.HasValue) serviceOrder.ActualStartDate = DateTime.UtcNow;
+                    if (expectedStatus == "technically_completed" || expectedStatus == "completed") { serviceOrder.TechnicallyCompletedAt ??= DateTime.UtcNow; serviceOrder.ActualCompletionDate ??= DateTime.UtcNow; }
+                    await db.SaveChangesAsync(ct);
+                    fixes++;
+                    _logger.LogInformation("[WORKFLOW-RECONCILE] 🔧 Collection: SO #{Id} '{Old}' → '{New}' (condition={Met})", so.Id, oldStatus, expectedStatus, conditionMet ? "YES" : "NO");
+                }
+            }
+            else if (parentEntityType == "sale" && (collectionName == "serviceorders" || collectionName == "service_orders"))
+            {
+                var sales = await db.Sales
+                    .Where(s => s.Status != "closed" && s.Status != "cancelled")
+                    .Select(s => new { s.Id, s.Status, ServiceOrders = db.ServiceOrders.Where(so => so.SaleId == s.Id.ToString()).Select(so => new { so.Id, so.Status }).ToList() })
+                    .ToListAsync(ct);
+                foreach (var sale in sales)
+                {
+                    if (!sale.ServiceOrders.Any()) continue;
+                    var childStatuses = sale.ServiceOrders.Select(so => so.Status ?? "").ToList();
+                    var conditionMet = EvaluateCollectionCondition(childStatuses, rule.ConditionOperator ?? "all_match", rule.ConditionValue ?? "");
+                    string? expectedStatus = conditionMet ? rule.YesTargetStatus : rule.NoTargetStatus;
+                    if (expectedStatus == null || sale.Status == expectedStatus) continue;
+                    var saleEntity = await db.Sales.FindAsync(new object[] { sale.Id }, ct);
+                    if (saleEntity == null) continue;
+                    var oldStatus = saleEntity.Status;
+                    saleEntity.Status = expectedStatus;
+                    saleEntity.ModifiedDate = DateTime.UtcNow;
+                    saleEntity.ModifiedBy = "system-reconcile";
+                    await db.SaveChangesAsync(ct);
+                    fixes++;
+                    _logger.LogInformation("[WORKFLOW-RECONCILE] 🔧 Collection: Sale #{Id} '{Old}' → '{New}' (condition={Met})", sale.Id, oldStatus, expectedStatus, conditionMet ? "YES" : "NO");
+                }
+            }
+
+            return fixes;
+        }
+
+        private async Task<int> ApplyDirectCascadeRuleAsync(ApplicationDbContext db, ReconciliationRule rule, CancellationToken ct)
+        {
+            int fixes = 0;
+            if (rule.DirectTriggerEntityType == null || rule.YesTargetEntityType == null || rule.YesTargetStatus == null) return 0;
+
+            if (rule.DirectTriggerEntityType == "dispatch" && rule.YesTargetEntityType == "service_order")
+            {
+                var soIds = await db.Dispatches.Where(d => !d.IsDeleted && d.Status == rule.DirectTriggerStatus && d.ServiceOrderId != null).Select(d => d.ServiceOrderId!.Value).Distinct().ToListAsync(ct);
+                foreach (var soId in soIds)
+                {
+                    var so = await db.ServiceOrders.FindAsync(new object[] { soId }, ct);
+                    if (so == null || so.Status == "closed" || so.Status == "cancelled") continue;
+                    if (rule.DirectCondition == "ifNotAlreadyInProgress" && so.Status == rule.YesTargetStatus) continue;
+                    if (GetStatusOrder("service_order", so.Status ?? "") >= GetStatusOrder("service_order", rule.YesTargetStatus)) continue;
+                    var oldStatus = so.Status;
+                    so.Status = rule.YesTargetStatus;
+                    so.ModifiedDate = DateTime.UtcNow;
+                    so.ModifiedBy = "system-reconcile";
+                    if (rule.YesTargetStatus == "in_progress" && !so.ActualStartDate.HasValue) so.ActualStartDate = DateTime.UtcNow;
+                    await db.SaveChangesAsync(ct);
+                    fixes++;
+                    _logger.LogInformation("[WORKFLOW-RECONCILE] 🔧 Direct: SO #{Id} '{Old}' → '{New}'", soId, oldStatus, rule.YesTargetStatus);
+                }
+            }
+            else if (rule.DirectTriggerEntityType == "service_order" && rule.YesTargetEntityType == "sale")
+            {
+                var sos = await db.ServiceOrders.Where(so => so.Status == rule.DirectTriggerStatus && so.SaleId != null).Select(so => new { so.Id, so.SaleId }).ToListAsync(ct);
+                foreach (var soInfo in sos)
+                {
+                    if (!int.TryParse(soInfo.SaleId, out var saleId)) continue;
+                    var sale = await db.Sales.FindAsync(new object[] { saleId }, ct);
+                    if (sale == null || sale.Status == "closed" || sale.Status == "cancelled") continue;
+                    if (GetStatusOrder("sale", sale.Status ?? "") >= GetStatusOrder("sale", rule.YesTargetStatus)) continue;
+                    var oldStatus = sale.Status;
+                    sale.Status = rule.YesTargetStatus;
+                    sale.ModifiedDate = DateTime.UtcNow;
+                    sale.ModifiedBy = "system-reconcile";
+                    await db.SaveChangesAsync(ct);
+                    fixes++;
+                    _logger.LogInformation("[WORKFLOW-RECONCILE] 🔧 Direct: Sale #{Id} '{Old}' → '{New}'", saleId, oldStatus, rule.YesTargetStatus);
+                }
+            }
+            else if (rule.DirectTriggerEntityType == "sale" && rule.YesTargetEntityType == "offer")
+            {
+                var sales = await db.Sales.Where(s => s.Status == rule.DirectTriggerStatus && s.OfferId != null).Select(s => new { s.Id, s.OfferId }).ToListAsync(ct);
+                foreach (var saleInfo in sales)
+                {
+                    if (!int.TryParse(saleInfo.OfferId, out var offerId)) continue;
+                    var offer = await db.Offers.FindAsync(new object[] { offerId }, ct);
+                    if (offer == null || offer.Status == "cancelled" || offer.Status == "rejected") continue;
+                    if (GetStatusOrder("offer", offer.Status ?? "") >= GetStatusOrder("offer", rule.YesTargetStatus)) continue;
+                    var oldStatus = offer.Status;
+                    offer.Status = rule.YesTargetStatus;
+                    offer.ModifiedDate = DateTime.UtcNow;
+                    offer.ModifiedBy = "system-reconcile";
+                    await db.SaveChangesAsync(ct);
+                    fixes++;
+                    _logger.LogInformation("[WORKFLOW-RECONCILE] 🔧 Direct: Offer #{Id} '{Old}' → '{New}'", offerId, oldStatus, rule.YesTargetStatus);
+                }
+            }
+
+            return fixes;
+        }
+
+        #endregion
+
+        #region Condition Evaluation
+
+        private bool EvaluateCollectionCondition(List<string> childStatuses, string operatorType, string expectedValue)
+        {
+            var expectedValues = expectedValue.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(v => v.Trim().ToLower()).ToHashSet();
+            if (!expectedValues.Any()) return false;
+            return operatorType.ToLower() switch
+            {
+                "all_match" => childStatuses.All(s => expectedValues.Contains(s?.ToLower() ?? "")),
+                "any_match" => childStatuses.Any(s => expectedValues.Contains(s?.ToLower() ?? "")),
+                "contains" => childStatuses.Any(s => expectedValues.Contains(s?.ToLower() ?? "")),
+                "none_match" => childStatuses.All(s => !expectedValues.Contains(s?.ToLower() ?? "")),
+                _ => false
+            };
+        }
+
+        private int GetStatusOrder(string entityType, string status)
+        {
+            return entityType switch
+            {
+                "service_order" => status switch
+                {
+                    "draft" => 0, "pending" => 1, "planned" => 2, "ready_for_planning" => 2, "scheduled" => 3,
+                    "in_progress" => 4, "on_hold" => 4, "partially_completed" => 5,
+                    "technically_completed" => 6, "ready_for_invoice" => 7, "completed" => 8, "invoiced" => 9, "closed" => 10,
+                    "cancelled" => -1, _ => 0
+                },
+                "sale" => status switch { "created" => 0, "in_progress" => 1, "partially_invoiced" => 2, "invoiced" => 3, "closed" => 4, "cancelled" => -1, _ => 0 },
+                "dispatch" => status switch
+                {
+                    "pending" => 0, "planned" => 1, "assigned" => 2, "acknowledged" => 3, "en_route" => 4,
+                    "on_site" => 5, "in_progress" => 6, "technically_completed" => 7, "completed" => 8, "cancelled" => -1, _ => 0
+                },
+                "offer" => status switch
+                {
+                    "draft" => 0, "sent" => 1, "pending" => 2, "negotiation" => 3, "accepted" => 4,
+                    "won" => 5, "lost" => -1, "cancelled" => -1, "rejected" => -1, "expired" => -1, "declined" => -1, "modified" => 3, _ => 0
+                },
+                _ => 0
+            };
+        }
+
+        #endregion
+
+        #region Node Type Helpers
+
+        private bool IsConditionNodeType(string type) { var t = type.ToLower(); return t.Contains("condition") || t.Contains("if-") || t.Contains("if_else"); }
+        private bool IsUpdateStatusNodeType(string type) { var t = type.ToLower(); return t.Contains("update-") && t.Contains("status"); }
+        private bool IsYesBranch(ReconcileEdge e) { var h = e.SourceHandle?.ToLower() ?? ""; var l = e.Label?.ToLower() ?? ""; return h == "yes" || h == "true" || l == "yes" || l == "true"; }
+        private bool IsNoBranch(ReconcileEdge e) { var h = e.SourceHandle?.ToLower() ?? ""; var l = e.Label?.ToLower() ?? ""; return h == "no" || h == "false" || l == "no" || l == "false"; }
+        private string? InferEntityTypeFromNodeType(string t) { t = t.ToLower(); if (t.Contains("service-order") || t.Contains("service_order")) return "service_order"; if (t.Contains("dispatch")) return "dispatch"; if (t.Contains("sale")) return "sale"; if (t.Contains("offer")) return "offer"; return null; }
+        private string? ResolveEntityType(string p) { if (p.Contains("serviceorder") || p.Contains("service_order")) return "service_order"; if (p.Contains("sale")) return "sale"; if (p.Contains("offer")) return "offer"; if (p.Contains("dispatch")) return "dispatch"; return null; }
+
+        #endregion
+
+        #region Data Integrity Fixes
+
+        private async Task<int> FixMissingStartDatesAsync(ApplicationDbContext db, CancellationToken ct)
+        {
+            var sos = await db.ServiceOrders.Where(so => so.Status == "in_progress" && so.ActualStartDate == null).ToListAsync(ct);
+            foreach (var so in sos) { so.ActualStartDate = DateTime.UtcNow; so.ModifiedDate = DateTime.UtcNow; so.ModifiedBy = "system-reconcile"; }
+            if (sos.Any()) await db.SaveChangesAsync(ct);
+            return sos.Count;
+        }
+
+        private async Task<int> FixCompletedDispatchCountsAsync(ApplicationDbContext db, CancellationToken ct)
+        {
+            var mismatches = await db.ServiceOrders
+                .Where(so => so.Status != "draft" && so.Status != "cancelled" && so.Status != "closed")
+                .Select(so => new { so.Id, so.CompletedDispatchCount, Actual = db.Dispatches.Count(d => d.ServiceOrderId == so.Id && !d.IsDeleted && (d.Status == "technically_completed" || d.Status == "completed")) })
+                .Where(x => x.CompletedDispatchCount != x.Actual).ToListAsync(ct);
+            foreach (var m in mismatches) { var so = await db.ServiceOrders.FindAsync(new object[] { m.Id }, ct); if (so != null) { so.CompletedDispatchCount = m.Actual; so.ModifiedDate = DateTime.UtcNow; so.ModifiedBy = "system-reconcile"; } }
+            if (mismatches.Any()) await db.SaveChangesAsync(ct);
+            return mismatches.Count;
+        }
+
+        private async Task<int> FixMissingOfferIdsAsync(ApplicationDbContext db, CancellationToken ct)
+        {
+            var sos = await db.ServiceOrders.Where(so => so.OfferId == null && so.SaleId != null).ToListAsync(ct);
+            int fixes = 0;
+            foreach (var so in sos) { if (int.TryParse(so.SaleId, out var saleId)) { var sale = await db.Sales.FindAsync(new object[] { saleId }, ct); if (sale?.OfferId != null) { so.OfferId = sale.OfferId; so.ModifiedDate = DateTime.UtcNow; so.ModifiedBy = "system-reconcile"; fixes++; } } }
+            if (sos.Any()) await db.SaveChangesAsync(ct);
+            return fixes;
+        }
+
+        #endregion
+
+        #region Helper Classes
+
+        private class ReconcileNode
+        {
+            public string Id { get; set; } = "";
+            public string Type { get; set; } = "";
+            public string Label { get; set; } = "";
+            public Dictionary<string, JsonElement> Data { get; set; } = new();
+            public string? GetDataString(string key) { if (Data.TryGetValue(key, out var el) && el.ValueKind == JsonValueKind.String) return el.GetString(); return null; }
+            public string? GetConfigString(string key) { if (Data.TryGetValue("config", out var c) && c.ValueKind == JsonValueKind.Object && c.TryGetProperty(key, out var p) && p.ValueKind == JsonValueKind.String) return p.GetString(); return null; }
+            public string? GetConditionDataString(string key)
+            {
+                if (Data.TryGetValue("config", out var c) && c.ValueKind == JsonValueKind.Object && c.TryGetProperty("conditionData", out var cd) && cd.ValueKind == JsonValueKind.Object && cd.TryGetProperty(key, out var p) && p.ValueKind == JsonValueKind.String) return p.GetString();
+                if (Data.TryGetValue("conditionData", out var tc) && tc.ValueKind == JsonValueKind.Object && tc.TryGetProperty(key, out var tp) && tp.ValueKind == JsonValueKind.String) return tp.GetString();
+                return null;
+            }
+        }
+        private class ReconcileEdge { public string Id { get; set; } = ""; public string Source { get; set; } = ""; public string Target { get; set; } = ""; public string? SourceHandle { get; set; } public string? Label { get; set; } }
+        private class ReconciliationRule
+        {
+            public bool IsCollectionRule { get; set; }
+            public bool IsDirect { get; set; }
+            public string? ConditionField { get; set; }
+            public string? ConditionOperator { get; set; }
+            public string? ConditionValue { get; set; }
+            public string? ConditionCheckField { get; set; }
+            public string? YesTargetEntityType { get; set; }
+            public string? YesTargetStatus { get; set; }
+            public string? NoTargetEntityType { get; set; }
+            public string? NoTargetStatus { get; set; }
+            public string? DirectTriggerEntityType { get; set; }
+            public string? DirectTriggerStatus { get; set; }
+            public string? DirectCondition { get; set; }
+            public string Description { get; set; } = "";
+        }
+
+        #endregion
 
         private class EntityStatusInfo
         {
