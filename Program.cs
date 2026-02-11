@@ -415,6 +415,7 @@ using (var scope = app.Services.CreateScope())
             // Email Accounts
             "ConnectedEmailAccounts",
             "EmailBlocklistItems"
+		};
 
         var existingTables = context.Database.SqlQueryRaw<string>(
             @"SELECT table_name 
