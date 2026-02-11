@@ -22,6 +22,7 @@ using MyApi.Modules.WorkflowEngine.Services;
 using MyApi.Modules.Signatures.Services;
 using MyApi.Modules.WorkflowEngine.Hubs;
 using MyApi.Modules.WebsiteBuilder;
+using MyApi.Modules.EmailAccounts.Services;
 using MyApi.Modules.WebsiteBuilder.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.DataProtection;
@@ -240,6 +241,9 @@ builder.Services.AddScoped<IBusinessWorkflowService, BusinessWorkflowService>();
 // Website Builder Module
 builder.Services.AddWebsiteBuilderServices();
 
+// Email Accounts Module Services (Gmail/Outlook OAuth)
+builder.Services.AddScoped<IEmailAccountService, EmailAccountService>();
+
 // Workflow Polling Background Service (state-based triggers every 5 minutes)
 builder.Services.AddHostedService<WorkflowPollingService>();
 
@@ -407,8 +411,10 @@ using (var scope = app.Services.CreateScope())
             "WB_FormSubmissions",
             "WB_Media",
             "WB_Templates",
-            "WB_ActivityLog"
-        };
+            "WB_ActivityLog",
+            // Email Accounts
+            "ConnectedEmailAccounts",
+            "EmailBlocklistItems"
 
         var existingTables = context.Database.SqlQueryRaw<string>(
             @"SELECT table_name 

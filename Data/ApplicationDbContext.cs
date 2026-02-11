@@ -37,6 +37,7 @@ using MyApi.Modules.Documents.Models;
 using MyApi.Modules.Signatures.Models;
 using MyApi.Modules.WebsiteBuilder.Models;
 using MyApi.Modules.WebsiteBuilder.Data.Configurations;
+using MyApi.Modules.EmailAccounts.Models;
 
 namespace MyApi.Data
 {
@@ -77,6 +78,10 @@ namespace MyApi.Data
         public DbSet<EventType> EventTypes { get; set; }
         public DbSet<EventAttendee> EventAttendees { get; set; }
         public DbSet<EventReminder> EventReminders { get; set; }
+
+        // Email Accounts Module (Gmail/Outlook OAuth)
+        public DbSet<ConnectedEmailAccount> ConnectedEmailAccounts { get; set; }
+        public DbSet<EmailBlocklistItem> EmailBlocklistItems { get; set; }
 
         // Tasks Module
         public DbSet<Project> Projects { get; set; }
