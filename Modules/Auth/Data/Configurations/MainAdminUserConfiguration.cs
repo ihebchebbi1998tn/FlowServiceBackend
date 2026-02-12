@@ -25,6 +25,9 @@ namespace MyApi.Modules.Auth.Data.Configurations
                 entity.Property(e => e.CompanyLogoUrl)
                     .HasColumnName("CompanyLogoUrl")
                     .HasMaxLength(500);
+                entity.Property(e => e.ProfilePictureUrl)
+                    .HasColumnName("ProfilePictureUrl")
+                    .HasMaxLength(500);
             });
         }
     }

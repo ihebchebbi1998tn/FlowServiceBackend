@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS "MainAdminUsers" (
     "Industry" VARCHAR(100) DEFAULT '',
     "CompanyName" VARCHAR(255),
     "CompanyWebsite" VARCHAR(500),
+    "ProfilePictureUrl" VARCHAR(500),
     "PreferencesJson" TEXT,
     "UpdatedAt" TIMESTAMP,
     "LastLoginAt" TIMESTAMP
@@ -56,7 +57,8 @@ CREATE TABLE IF NOT EXISTS "Users" (
     "ModifyDate" TIMESTAMP,
     "Role" VARCHAR(50) DEFAULT 'User',
     "Skills" TEXT,
-    "PhoneNumber" VARCHAR(20)
+    "PhoneNumber" VARCHAR(20),
+    "ProfilePictureUrl" VARCHAR(500)
 );
 
 -- User Preferences Table (Simple structure with JSONB)

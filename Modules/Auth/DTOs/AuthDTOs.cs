@@ -75,6 +75,8 @@ namespace MyApi.Modules.Auth.DTOs
         public string? CompanyWebsite { get; set; }
         [JsonPropertyName("companyLogoUrl")]
         public string? CompanyLogoUrl { get; set; }
+        [JsonPropertyName("profilePictureUrl")]
+        public string? ProfilePictureUrl { get; set; }
         public string? Preferences { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime? LastLoginAt { get; set; }
@@ -113,6 +115,10 @@ namespace MyApi.Modules.Auth.DTOs
         [MaxLength(500)]
         [JsonPropertyName("companyLogoUrl")]
         public string? CompanyLogoUrl { get; set; }
+
+        [MaxLength(500)]
+        [JsonPropertyName("profilePictureUrl")]
+        public string? ProfilePictureUrl { get; set; }
 
         public string? Preferences { get; set; }
         

@@ -44,6 +44,9 @@ namespace MyApi.Modules.Users.DTOs
         public string? Role { get; set; }
 
         public bool? IsActive { get; set; }
+
+        [MaxLength(500)]
+        public string? ProfilePictureUrl { get; set; }
     }
 
     public class UserResponseDto
@@ -56,6 +59,7 @@ namespace MyApi.Modules.Users.DTOs
         public string Country { get; set; } = string.Empty;
         public string? Role { get; set; }
         public bool IsActive { get; set; }
+        public string? ProfilePictureUrl { get; set; }
         public string CreatedUser { get; set; } = string.Empty;
         public string? ModifyUser { get; set; }
         public DateTime CreatedDate { get; set; }

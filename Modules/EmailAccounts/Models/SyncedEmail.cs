@@ -91,5 +91,10 @@ namespace MyApi.Modules.EmailAccounts.Models
         public DateTime ReceivedAt { get; set; }
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+        /// <summary>
+        /// Navigation property for attachments
+        /// </summary>
+        public virtual ICollection<SyncedEmailAttachment> Attachments { get; set; } = new List<SyncedEmailAttachment>();
     }
 }

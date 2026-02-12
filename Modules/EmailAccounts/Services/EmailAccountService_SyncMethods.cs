@@ -92,8 +92,8 @@ private async Task<SyncResultDto> SyncGmailEmailsAsync(ConnectedEmailAccount acc
                 continue;
             }
 
-            // 2. Get full message details
-            var detailUrl = $"https://gmail.googleapis.com/gmail/v1/users/me/messages/{messageId}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Cc&metadataHeaders=Date";
+            // 2. Get full message details (include parts to detect attachments)
+            var detailUrl = $"https://gmail.googleapis.com/gmail/v1/users/me/messages/{messageId}?format=full";
             var detailResponse = await client.GetAsync(detailUrl);
 
             if (!detailResponse.IsSuccessStatusCode) continue;
@@ -141,6 +141,34 @@ private async Task<SyncResultDto> SyncGmailEmailsAsync(ConnectedEmailAccount acc
 
             var isRead = !labelIds.Contains("UNREAD");
 
+            // Detect attachments from payload parts
+            var hasAttachments = false;
+            var attachmentList = new List<SyncedEmailAttachment>();
+            if (detail.TryGetProperty("payload", out var payload) && payload.TryGetProperty("parts", out var parts))
+            {
+                foreach (var part in parts.EnumerateArray())
+                {
+                    var partFileName = part.TryGetProperty("filename", out var fn) ? fn.GetString() : null;
+                    if (string.IsNullOrEmpty(partFileName)) continue;
+
+                    hasAttachments = true;
+                    var partBody = part.TryGetProperty("body", out var bodyObj) ? bodyObj : default;
+                    var attachmentId = partBody.ValueKind != JsonValueKind.Undefined && partBody.TryGetProperty("attachmentId", out var aid)
+                        ? aid.GetString() ?? "" : "";
+                    var size = partBody.ValueKind != JsonValueKind.Undefined && partBody.TryGetProperty("size", out var sz)
+                        ? sz.GetInt64() : 0;
+                    var mimeType = part.TryGetProperty("mimeType", out var mt) ? mt.GetString() ?? "application/octet-stream" : "application/octet-stream";
+
+                    attachmentList.Add(new SyncedEmailAttachment
+                    {
+                        ExternalAttachmentId = attachmentId,
+                        FileName = partFileName,
+                        ContentType = mimeType,
+                        Size = size,
+                    });
+                }
+            }
+
             var syncedEmail = new SyncedEmail
             {
                 ConnectedEmailAccountId = account.Id,
@@ -154,12 +182,20 @@ private async Task<SyncResultDto> SyncGmailEmailsAsync(ConnectedEmailAccount acc
                 CcEmails = string.IsNullOrEmpty(cc) ? null : JsonSerializer.Serialize(cc.Split(',').Select(e => e.Trim()).ToList()),
                 BodyPreview = snippet?.Length > 200 ? snippet.Substring(0, 200) : snippet,
                 IsRead = isRead,
-                HasAttachments = labelIds.Contains("ATTACHMENT") || (detail.TryGetProperty("payload", out var payload) && payload.TryGetProperty("parts", out _)),
+                HasAttachments = hasAttachments,
                 Labels = labelIds,
                 ReceivedAt = receivedAt,
             };
 
             _context.Set<SyncedEmail>().Add(syncedEmail);
+
+            // Add attachment metadata records
+            foreach (var att in attachmentList)
+            {
+                att.SyncedEmailId = syncedEmail.Id;
+                _context.Set<SyncedEmailAttachment>().Add(att);
+            }
+
             newCount++;
         }
 
@@ -239,6 +275,37 @@ private async Task<SyncResultDto> SyncOutlookEmailsAsync(ConnectedEmailAccount a
             var receivedStr = msg.TryGetProperty("receivedDateTime", out var rd) ? rd.GetString() : null;
             DateTime receivedAt = DateTime.TryParse(receivedStr, out var dt) ? EnsureUtc(dt) : DateTime.UtcNow;
 
+            // Fetch attachment metadata from Outlook if hasAttachments
+            var outlookAttachments = new List<SyncedEmailAttachment>();
+            if (hasAttachments)
+            {
+                var attUrl = $"https://graph.microsoft.com/v1.0/me/messages/{messageId}/attachments?$select=id,name,contentType,size";
+                var attResponse = await client.GetAsync(attUrl);
+                if (attResponse.IsSuccessStatusCode)
+                {
+                    var attJson = await attResponse.Content.ReadAsStringAsync();
+                    var attData = JsonSerializer.Deserialize<JsonElement>(attJson);
+                    if (attData.TryGetProperty("value", out var attItems))
+                    {
+                        foreach (var att in attItems.EnumerateArray())
+                        {
+                            var attId = att.TryGetProperty("id", out var aId) ? aId.GetString() ?? "" : "";
+                            var attName = att.TryGetProperty("name", out var aN) ? aN.GetString() ?? "" : "";
+                            var attType = att.TryGetProperty("contentType", out var aCt) ? aCt.GetString() ?? "application/octet-stream" : "application/octet-stream";
+                            var attSize = att.TryGetProperty("size", out var aS) ? aS.GetInt64() : 0;
+
+                            outlookAttachments.Add(new SyncedEmailAttachment
+                            {
+                                ExternalAttachmentId = attId,
+                                FileName = attName,
+                                ContentType = attType,
+                                Size = attSize,
+                            });
+                        }
+                    }
+                }
+            }
+
             var syncedEmail = new SyncedEmail
             {
                 ConnectedEmailAccountId = account.Id,
@@ -257,6 +324,14 @@ private async Task<SyncResultDto> SyncOutlookEmailsAsync(ConnectedEmailAccount a
             };
 
             _context.Set<SyncedEmail>().Add(syncedEmail);
+
+            // Add attachment metadata records
+            foreach (var att in outlookAttachments)
+            {
+                att.SyncedEmailId = syncedEmail.Id;
+                _context.Set<SyncedEmailAttachment>().Add(att);
+            }
+
             newCount++;
         }
 
@@ -311,6 +386,14 @@ public async Task<SyncedEmailsPageDto> GetSyncedEmailsAsync(Guid accountId, int 
             HasAttachments = e.HasAttachments,
             Labels = e.Labels,
             ReceivedAt = e.ReceivedAt,
+            Attachments = e.Attachments.Select(a => new SyncedEmailAttachmentDto
+            {
+                Id = a.Id,
+                ExternalAttachmentId = a.ExternalAttachmentId,
+                FileName = a.FileName,
+                ContentType = a.ContentType,
+                Size = a.Size,
+            }).ToList(),
         })
         .ToListAsync();
 

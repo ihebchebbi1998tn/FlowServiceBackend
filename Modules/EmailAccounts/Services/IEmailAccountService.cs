@@ -39,6 +39,9 @@ namespace MyApi.Modules.EmailAccounts.Services
         Task<CalendarSyncResultDto> SyncCalendarAsync(Guid accountId, int userId, int maxResults = 50);
         Task<SyncedCalendarEventsPageDto> GetCalendarEventsAsync(Guid accountId, int userId, int page = 1, int pageSize = 25, string? search = null);
 
+        // ─── Create Calendar Event on External Provider ───
+        Task<CreateExternalCalendarEventResultDto> CreateCalendarEventAsync(Guid accountId, int userId, CreateExternalCalendarEventDto dto);
+
         // ─── Send Email ───
         Task<SendEmailResultDto> SendEmailAsync(Guid accountId, int userId, SendEmailDto dto);
 
@@ -46,5 +49,8 @@ namespace MyApi.Modules.EmailAccounts.Services
         Task<bool> ToggleStarEmailAsync(Guid accountId, int userId, Guid emailId);
         Task<bool> ToggleReadEmailAsync(Guid accountId, int userId, Guid emailId);
         Task<bool> DeleteEmailAsync(Guid accountId, int userId, Guid emailId);
+
+        // ─── Attachment Download ───
+        Task<AttachmentDownloadDto?> DownloadAttachmentAsync(Guid accountId, int userId, Guid emailId, Guid attachmentId);
     }
 }

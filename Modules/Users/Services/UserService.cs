@@ -189,6 +189,10 @@ namespace MyApi.Modules.Users.Services
                 if (updateDto.IsActive.HasValue)
                     user.IsActive = updateDto.IsActive.Value;
 
+                // ProfilePictureUrl: update if provided (empty string = remove, URL = set)
+                if (updateDto.ProfilePictureUrl != null)
+                    user.ProfilePictureUrl = string.IsNullOrEmpty(updateDto.ProfilePictureUrl) ? null : updateDto.ProfilePictureUrl;
+
                 user.ModifyUser = modifiedByUser;
                 user.ModifyDate = DateTime.UtcNow;
 
@@ -333,6 +337,7 @@ namespace MyApi.Modules.Users.Services
                 Country = user.Country ?? string.Empty,
                 Role = user.Role,
                 IsActive = user.IsActive,
+                ProfilePictureUrl = user.ProfilePictureUrl,
                 CreatedUser = user.CreatedUser ?? string.Empty,
                 ModifyUser = user.ModifyUser ?? string.Empty,
                 CreatedDate = user.CreatedDate,

@@ -83,6 +83,7 @@ namespace MyApi.Data
         public DbSet<ConnectedEmailAccount> ConnectedEmailAccounts { get; set; }
         public DbSet<EmailBlocklistItem> EmailBlocklistItems { get; set; }
         public DbSet<SyncedEmail> SyncedEmails { get; set; }
+        public DbSet<SyncedEmailAttachment> SyncedEmailAttachments { get; set; }
         public DbSet<SyncedCalendarEvent> SyncedCalendarEvents { get; set; }
 
         // Tasks Module

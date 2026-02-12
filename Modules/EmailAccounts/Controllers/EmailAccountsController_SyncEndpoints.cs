@@ -95,6 +95,31 @@ public async Task<ActionResult<SyncedCalendarEventsPageDto>> GetCalendarEvents(
     return Ok(result);
 }
 
+// ─── Create Calendar Event on Provider ───
+
+/// <summary>
+/// Create a calendar event on the external provider (Google Calendar / Outlook Calendar)
+/// </summary>
+[HttpPost("{id}/calendar-events")]
+public async Task<ActionResult<CreateExternalCalendarEventResultDto>> CreateCalendarEvent(Guid id, [FromBody] CreateExternalCalendarEventDto dto)
+{
+    var userId = GetUserId();
+    if (userId == 0) return Unauthorized();
+
+    try
+    {
+        var result = await _emailAccountService.CreateCalendarEventAsync(id, userId, dto);
+        if (!result.Success)
+            return BadRequest(result);
+        return Ok(result);
+    }
+    catch (Exception ex)
+    {
+        _logger.LogError(ex, "Failed to create calendar event for account {Id}", id);
+        return StatusCode(500, new { message = "Failed to create calendar event" });
+    }
+}
+
 // ─── Send Email ───
 
 /// <summary>
@@ -201,6 +226,33 @@ public async Task<IActionResult> DeleteEmail(Guid id, Guid emailId)
     {
         _logger.LogError(ex, "Failed to delete email {EmailId} in account {Id}", emailId, id);
         return StatusCode(500, new { message = "Failed to delete email" });
+}
+
+// ─── Download Attachment ───
+
+/// <summary>
+/// Download an attachment from a synced email (fetches content on-demand from provider)
+/// </summary>
+[HttpGet("{id}/emails/{emailId}/attachments/{attachmentId}")]
+[ProducesResponseType(typeof(AttachmentDownloadDto), 200)]
+[ProducesResponseType(401)]
+[ProducesResponseType(404)]
+[ProducesResponseType(500)]
+public async Task<IActionResult> DownloadAttachment(Guid id, Guid emailId, Guid attachmentId)
+{
+    var userId = GetUserId();
+    if (userId == 0) return Unauthorized();
+
+    try
+    {
+        var result = await _emailAccountService.DownloadAttachmentAsync(id, userId, emailId, attachmentId);
+        if (result == null) return NotFound(new { message = "Attachment not found" });
+        return Ok(result);
+    }
+    catch (Exception ex)
+    {
+        _logger.LogError(ex, "Failed to download attachment {AttachmentId} for email {EmailId} in account {Id}", attachmentId, emailId, id);
+        return StatusCode(500, new { message = "Failed to download attachment" });
     }
 }
     }

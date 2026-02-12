@@ -86,6 +86,9 @@ namespace MyApi.Modules.Users.Models
         [MaxLength(20)]
         public string? PhoneNumber { get; set; }
 
+        [MaxLength(500)]
+        public string? ProfilePictureUrl { get; set; }
+
         // Navigation properties
         public virtual ICollection<UserRole> UserRoles { get; set; } = new List<UserRole>();
         public virtual ICollection<UserSkill> UserSkills { get; set; } = new List<UserSkill>();

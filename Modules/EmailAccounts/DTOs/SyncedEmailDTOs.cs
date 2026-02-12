@@ -19,6 +19,7 @@ namespace MyApi.Modules.EmailAccounts.DTOs
         public bool HasAttachments { get; set; }
         public string? Labels { get; set; }      // JSON array
         public DateTime ReceivedAt { get; set; }
+        public List<SyncedEmailAttachmentDto> Attachments { get; set; } = new();
     }
 
     public class SyncedEmailsPageDto

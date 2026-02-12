@@ -64,6 +64,9 @@ namespace MyApi.Modules.Auth.Models
         [MaxLength(500)]
         public string? CompanyLogoUrl { get; set; }
 
+        [MaxLength(500)]
+        public string? ProfilePictureUrl { get; set; }
+
         [Column(TypeName = "text")]
         public string? PreferencesJson { get; set; }
 

@@ -574,6 +574,9 @@ namespace MyApi.Modules.Auth.Services
                 // CompanyLogoUrl: update if provided (empty string = remove, URL = set)
                 if (updateDto.CompanyLogoUrl != null)
                     user.CompanyLogoUrl = string.IsNullOrEmpty(updateDto.CompanyLogoUrl) ? null : updateDto.CompanyLogoUrl;
+                // ProfilePictureUrl: update if provided (empty string = remove, URL = set)
+                if (updateDto.ProfilePictureUrl != null)
+                    user.ProfilePictureUrl = string.IsNullOrEmpty(updateDto.ProfilePictureUrl) ? null : updateDto.ProfilePictureUrl;
                 if (!string.IsNullOrEmpty(updateDto.Preferences))
                     user.PreferencesJson = updateDto.Preferences;
                 if (updateDto.OnboardingCompleted.HasValue)
@@ -815,6 +818,7 @@ namespace MyApi.Modules.Auth.Services
                 CompanyName = user.CompanyName,
                 CompanyWebsite = user.CompanyWebsite,
                 CompanyLogoUrl = user.CompanyLogoUrl,
+                ProfilePictureUrl = user.ProfilePictureUrl,
                 Preferences = user.PreferencesJson,
                 CreatedAt = user.CreatedAt,
                 LastLoginAt = user.LastLoginAt ?? user.LastLoginDate,
@@ -835,6 +839,7 @@ namespace MyApi.Modules.Auth.Services
                 Industry = user.Role ?? "User",
                 CompanyName = "",
                 CompanyWebsite = "",
+                ProfilePictureUrl = user.ProfilePictureUrl,
                 Preferences = "",
                 CreatedAt = user.CreatedDate,
                 LastLoginAt = user.LastLoginAt,
