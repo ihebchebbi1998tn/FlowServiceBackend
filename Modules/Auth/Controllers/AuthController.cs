@@ -504,6 +504,77 @@ namespace MyApi.Modules.Auth.Controllers
         }
 
         /// <summary>
+        /// Get the company logo as a base64 data URI string — specifically for PDF reports.
+        /// This avoids CORS issues that occur when @react-pdf/renderer tries to fetch() static files.
+        /// The regular company-logo endpoint and CompanyLogoUrl remain unchanged for normal image display.
+        /// </summary>
+        [HttpGet("company-logo-base64")]
+        [AllowAnonymous]
+        public async Task<ActionResult> GetCompanyLogoBase64()
+        {
+            try
+            {
+                var logoUrl = await _authService.GetCompanyLogoUrlAsync();
+                if (string.IsNullOrEmpty(logoUrl))
+                {
+                    return Ok(new { logoBase64 = "" });
+                }
+
+                // If it's a doc:{id} reference, read the file
+                byte[] fileBytes = null;
+                string contentType = "image/png";
+
+                var docMatch = System.Text.RegularExpressions.Regex.Match(logoUrl, @"^doc:(\d+)$");
+                if (docMatch.Success && int.TryParse(docMatch.Groups[1].Value, out var docId))
+                {
+                    var result = await _authService.GetCompanyLogoFileAsync(docId);
+                    if (result != null)
+                    {
+                        using var ms = new System.IO.MemoryStream();
+                        await result.Value.Stream.CopyToAsync(ms);
+                        fileBytes = ms.ToArray();
+                        contentType = result.Value.ContentType ?? "image/png";
+                    }
+                }
+                else
+                {
+                    // It's a relative path like "uploads/company/xxx.png" — read directly from disk
+                    var relative = logoUrl.TrimStart('/');
+                    var fullPath = Path.Combine(Directory.GetCurrentDirectory(), relative);
+                    if (System.IO.File.Exists(fullPath))
+                    {
+                        fileBytes = await System.IO.File.ReadAllBytesAsync(fullPath);
+                        // Detect content type from extension
+                        var ext = Path.GetExtension(fullPath).ToLowerInvariant();
+                        contentType = ext switch
+                        {
+                            ".jpg" or ".jpeg" => "image/jpeg",
+                            ".png" => "image/png",
+                            ".gif" => "image/gif",
+                            ".svg" => "image/svg+xml",
+                            ".webp" => "image/webp",
+                            ".bmp" => "image/bmp",
+                            _ => "image/png"
+                        };
+                    }
+                }
+
+                if (fileBytes == null || fileBytes.Length == 0)
+                {
+                    return Ok(new { logoBase64 = "" });
+                }
+
+                var base64 = $"data:{contentType};base64,{Convert.ToBase64String(fileBytes)}";
+                return Ok(new { logoBase64 = base64 });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting company logo as base64");
+                return Ok(new { logoBase64 = "" });
+            }
+        }
+
+        /// <summary>
         /// Change user password
         /// </summary>
         /// <param name="changePasswordRequest">Password change data</param>
