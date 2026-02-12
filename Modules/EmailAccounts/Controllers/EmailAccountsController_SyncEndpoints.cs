@@ -226,6 +226,7 @@ public async Task<IActionResult> DeleteEmail(Guid id, Guid emailId)
     {
         _logger.LogError(ex, "Failed to delete email {EmailId} in account {Id}", emailId, id);
         return StatusCode(500, new { message = "Failed to delete email" });
+    }
 }
 
 // ─── Download Attachment ───
