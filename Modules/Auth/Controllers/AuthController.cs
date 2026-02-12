@@ -521,7 +521,7 @@ namespace MyApi.Modules.Auth.Controllers
                 }
 
                 // If it's a doc:{id} reference, read the file
-                byte[] fileBytes = null;
+                byte[]? fileBytes = null;
                 string contentType = "image/png";
 
                 var docMatch = System.Text.RegularExpressions.Regex.Match(logoUrl, @"^doc:(\d+)$");
