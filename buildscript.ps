@@ -44,6 +44,13 @@ if [ "$LOCAL" != "$REMOTE" ]; then
     # Pull latest code and reset
     git reset --hard origin/$BRANCH
 
+    # Fix permissions on obj/bin directories (may be owned by root from previous builds)
+    sudo chown -R $(whoami):$(whoami) $REPO_DIR/obj $REPO_DIR/bin 2>/dev/null || true
+    
+    # Clean previous build artifacts to avoid stale cache issues
+    dotnet clean -c Release 2>/dev/null || true
+    rm -rf $REPO_DIR/obj $REPO_DIR/bin 2>/dev/null || true
+
     # Restore dependencies
     dotnet restore
 
