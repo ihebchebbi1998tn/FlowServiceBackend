@@ -41,21 +41,87 @@ private async Task<SendEmailResultDto> SendGmailEmailAsync(ConnectedEmailAccount
     var accessToken = await EnsureValidGoogleTokenAsync(account);
     client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
 
-    // Build RFC 2822 MIME message
-    var mime = new StringBuilder();
-    mime.AppendLine($"From: {account.Handle}");
-    mime.AppendLine($"To: {string.Join(", ", dto.To)}");
-    if (dto.Cc.Count > 0) mime.AppendLine($"Cc: {string.Join(", ", dto.Cc)}");
-    if (dto.Bcc.Count > 0) mime.AppendLine($"Bcc: {string.Join(", ", dto.Bcc)}");
-    mime.AppendLine($"Subject: {dto.Subject}");
-    mime.AppendLine("Content-Type: text/plain; charset=UTF-8");
-    mime.AppendLine();
-    mime.AppendLine(dto.Body);
+    var hasAttachments = dto.Attachments != null && dto.Attachments.Count > 0;
+    string rawMessage;
 
-    var rawMessage = Convert.ToBase64String(Encoding.UTF8.GetBytes(mime.ToString()))
-        .Replace('+', '-')
-        .Replace('/', '_')
-        .Replace("=", "");
+    if (hasAttachments)
+    {
+        // Build multipart MIME with attachments
+        var boundary = $"boundary_{Guid.NewGuid():N}";
+        var mime = new StringBuilder();
+        mime.AppendLine($"From: {account.Handle}");
+        mime.AppendLine($"To: {string.Join(", ", dto.To)}");
+        if (dto.Cc.Count > 0) mime.AppendLine($"Cc: {string.Join(", ", dto.Cc)}");
+        if (dto.Bcc.Count > 0) mime.AppendLine($"Bcc: {string.Join(", ", dto.Bcc)}");
+        mime.AppendLine($"Subject: {dto.Subject}");
+        mime.AppendLine("MIME-Version: 1.0");
+        mime.AppendLine($"Content-Type: multipart/mixed; boundary=\"{boundary}\"");
+        mime.AppendLine();
+
+        // Body part
+        mime.AppendLine($"--{boundary}");
+        if (!string.IsNullOrEmpty(dto.BodyHtml))
+        {
+            mime.AppendLine("Content-Type: text/html; charset=UTF-8");
+            mime.AppendLine();
+            mime.AppendLine(dto.BodyHtml);
+        }
+        else
+        {
+            mime.AppendLine("Content-Type: text/plain; charset=UTF-8");
+            mime.AppendLine();
+            mime.AppendLine(dto.Body);
+        }
+
+        // Attachment parts
+        foreach (var att in dto.Attachments!)
+        {
+            mime.AppendLine($"--{boundary}");
+            mime.AppendLine($"Content-Type: {att.ContentType}; name=\"{att.FileName}\"");
+            mime.AppendLine("Content-Transfer-Encoding: base64");
+            mime.AppendLine($"Content-Disposition: attachment; filename=\"{att.FileName}\"");
+            mime.AppendLine();
+            // Insert base64 content in 76-char lines
+            var b64 = att.ContentBase64;
+            for (int i = 0; i < b64.Length; i += 76)
+            {
+                mime.AppendLine(b64.Substring(i, Math.Min(76, b64.Length - i)));
+            }
+        }
+        mime.AppendLine($"--{boundary}--");
+
+        rawMessage = Convert.ToBase64String(Encoding.UTF8.GetBytes(mime.ToString()))
+            .Replace('+', '-')
+            .Replace('/', '_')
+            .Replace("=", "");
+    }
+    else
+    {
+        // Simple plain-text email (original logic)
+        var mime = new StringBuilder();
+        mime.AppendLine($"From: {account.Handle}");
+        mime.AppendLine($"To: {string.Join(", ", dto.To)}");
+        if (dto.Cc.Count > 0) mime.AppendLine($"Cc: {string.Join(", ", dto.Cc)}");
+        if (dto.Bcc.Count > 0) mime.AppendLine($"Bcc: {string.Join(", ", dto.Bcc)}");
+        mime.AppendLine($"Subject: {dto.Subject}");
+        if (!string.IsNullOrEmpty(dto.BodyHtml))
+        {
+            mime.AppendLine("Content-Type: text/html; charset=UTF-8");
+            mime.AppendLine();
+            mime.AppendLine(dto.BodyHtml);
+        }
+        else
+        {
+            mime.AppendLine("Content-Type: text/plain; charset=UTF-8");
+            mime.AppendLine();
+            mime.AppendLine(dto.Body);
+        }
+
+        rawMessage = Convert.ToBase64String(Encoding.UTF8.GetBytes(mime.ToString()))
+            .Replace('+', '-')
+            .Replace('/', '_')
+            .Replace("=", "");
+    }
 
     var jsonBody = JsonSerializer.Serialize(new { raw = rawMessage });
     var content = new StringContent(jsonBody, Encoding.UTF8, "application/json");
@@ -86,22 +152,63 @@ private async Task<SendEmailResultDto> SendOutlookEmailAsync(ConnectedEmailAccou
     var ccRecipients = dto.Cc.Select(e => new { emailAddress = new { address = e } }).ToList();
     var bccRecipients = dto.Bcc.Select(e => new { emailAddress = new { address = e } }).ToList();
 
-    var emailPayload = new
+    var bodyContentType = !string.IsNullOrEmpty(dto.BodyHtml) ? "HTML" : "Text";
+    var bodyContent = !string.IsNullOrEmpty(dto.BodyHtml) ? dto.BodyHtml : dto.Body;
+
+    var attachments = dto.Attachments?.Select(a => new
     {
-        message = new
+        @odata_type = "#microsoft.graph.fileAttachment",
+        name = a.FileName,
+        contentType = a.ContentType,
+        contentBytes = a.ContentBase64
+    }).ToList();
+
+    object emailPayload;
+    if (attachments != null && attachments.Count > 0)
+    {
+        emailPayload = new
         {
-            subject = dto.Subject,
-            body = new
+            message = new
             {
-                contentType = "Text",
-                content = dto.Body
+                subject = dto.Subject,
+                body = new
+                {
+                    contentType = bodyContentType,
+                    content = bodyContent
+                },
+                toRecipients,
+                ccRecipients,
+                bccRecipients,
+                attachments = attachments.Select(a => new Dictionary<string, object>
+                {
+                    { "@odata.type", "#microsoft.graph.fileAttachment" },
+                    { "name", a.name },
+                    { "contentType", a.contentType },
+                    { "contentBytes", a.contentBytes }
+                }).ToList()
             },
-            toRecipients,
-            ccRecipients,
-            bccRecipients
-        },
-        saveToSentItems = true
-    };
+            saveToSentItems = true
+        };
+    }
+    else
+    {
+        emailPayload = new
+        {
+            message = new
+            {
+                subject = dto.Subject,
+                body = new
+                {
+                    contentType = bodyContentType,
+                    content = bodyContent
+                },
+                toRecipients,
+                ccRecipients,
+                bccRecipients
+            },
+            saveToSentItems = true
+        };
+    }
 
     var jsonBody = JsonSerializer.Serialize(emailPayload);
     var content = new StringContent(jsonBody, Encoding.UTF8, "application/json");
