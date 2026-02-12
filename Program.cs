@@ -488,6 +488,9 @@ using (var scope = app.Services.CreateScope())
 // Middleware pipeline
 app.UseSwaggerDocumentation(builder.Configuration);
 
+// ✅ CORS MUST be BEFORE static files so uploads get Access-Control-Allow-Origin headers
+app.UseCors("AllowFrontend");
+
 // Serve static files for Swagger UI customizations
 app.UseStaticFiles();
 
@@ -502,9 +505,6 @@ app.UseStaticFiles(new StaticFileOptions
     FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(uploadsPath),
     RequestPath = "/uploads"
 });
-
-// ✅ CORS MUST be here - before authentication
-app.UseCors("AllowFrontend");
 
 // ✅ Add debugging middleware to log CORS issues (development only)
 if (builder.Environment.IsDevelopment())
