@@ -539,8 +539,15 @@ namespace MyApi.Modules.Auth.Controllers
                 else
                 {
                     // It's a relative path like "uploads/company/xxx.png" — read directly from disk
+                    // IMPORTANT: uploads folder lives ONE LEVEL ABOVE ContentRootPath (same as Program.cs)
                     var relative = logoUrl.TrimStart('/');
-                    var fullPath = Path.Combine(Directory.GetCurrentDirectory(), relative);
+                    if (relative.StartsWith("uploads/", StringComparison.OrdinalIgnoreCase))
+                        relative = relative.Substring("uploads/".Length);
+
+                    var backendRoot = Directory.GetCurrentDirectory();
+                    var parentDir = Directory.GetParent(backendRoot)?.FullName ?? backendRoot;
+                    var uploadsDir = Path.Combine(parentDir, "uploads");
+                    var fullPath = Path.Combine(uploadsDir, relative);
                     if (System.IO.File.Exists(fullPath))
                     {
                         fileBytes = await System.IO.File.ReadAllBytesAsync(fullPath);
