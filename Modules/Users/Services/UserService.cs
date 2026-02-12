@@ -208,6 +208,35 @@ namespace MyApi.Modules.Users.Services
             }
         }
 
+        /// <summary>
+        /// Dedicated method to update ONLY the ProfilePictureUrl for a regular User.
+        /// </summary>
+        public async Task<UserResponseDto?> UpdateUserProfilePictureAsync(int id, string? profilePictureUrl, string modifiedByUser)
+        {
+            try
+            {
+                var user = await _context.Users
+                    .Where(u => u.Id == id && !u.IsDeleted)
+                    .FirstOrDefaultAsync();
+
+                if (user == null) return null;
+
+                user.ProfilePictureUrl = string.IsNullOrEmpty(profilePictureUrl) ? null : profilePictureUrl;
+                user.ModifyUser = modifiedByUser;
+                user.ModifyDate = DateTime.UtcNow;
+
+                await _context.SaveChangesAsync();
+
+                _logger.LogInformation("ProfilePicture updated for User {UserId}: {Url}", id, profilePictureUrl ?? "(removed)");
+                return MapToUserDto(user);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error updating profile picture for User {UserId}", id);
+                throw;
+            }
+        }
+
         public async Task<bool> DeleteUserAsync(int id, string deletedByUser)
         {
             try

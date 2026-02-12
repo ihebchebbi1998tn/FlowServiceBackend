@@ -23,6 +23,7 @@ namespace MyApi.Modules.Auth.Services
         Task<IEnumerable<UserDto>> GetAllAdminUsersAsync();
         Task<AuthResponseDto> OAuthLoginAsync(string email);
         Task<AuthResponseDto> UpdateUserAsync(int userId, UpdateUserRequestDto updateDto);
+        Task<AuthResponseDto> UpdateProfilePictureAsync(int userId, string? profilePictureUrl);
         Task<AuthResponseDto> ChangePasswordAsync(int userId, ChangePasswordRequestDto changePasswordDto);
         Task<bool> LogoutAsync(int userId);
         Task<bool> AdminExistsAsync();
@@ -599,6 +600,47 @@ namespace MyApi.Modules.Auth.Services
                 {
                     Success = false,
                     Message = "An error occurred during user update"
+                };
+            }
+        }
+
+        /// <summary>
+        /// Dedicated method to update ONLY the ProfilePictureUrl for MainAdminUser.
+        /// This avoids any issues with the general UpdateUserAsync method.
+        /// </summary>
+        public async Task<AuthResponseDto> UpdateProfilePictureAsync(int userId, string? profilePictureUrl)
+        {
+            try
+            {
+                var user = await _context.MainAdminUsers
+                    .FirstOrDefaultAsync(u => u.Id == userId && u.IsActive);
+
+                if (user == null)
+                {
+                    _logger.LogWarning("UpdateProfilePicture: MainAdminUser not found for ID {UserId}", userId);
+                    return new AuthResponseDto { Success = false, Message = "User not found" };
+                }
+
+                user.ProfilePictureUrl = string.IsNullOrEmpty(profilePictureUrl) ? null : profilePictureUrl;
+                user.UpdatedAt = DateTime.UtcNow;
+                await _context.SaveChangesAsync();
+
+                _logger.LogInformation("ProfilePicture updated for MainAdminUser {UserId}: {Url}", userId, profilePictureUrl ?? "(removed)");
+
+                return new AuthResponseDto
+                {
+                    Success = true,
+                    Message = "Profile picture updated successfully",
+                    User = MapToUserDto(user)
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error updating profile picture for MainAdminUser {UserId}", userId);
+                return new AuthResponseDto
+                {
+                    Success = false,
+                    Message = "An error occurred updating profile picture: " + ex.Message
                 };
             }
         }

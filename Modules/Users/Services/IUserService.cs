@@ -12,6 +12,7 @@ namespace MyApi.Modules.Users.Services
         Task<bool> DeleteUserAsync(int id, string deletedByUser);
         Task<bool> ChangeUserPasswordAsync(int id, string newPassword, string modifiedByUser);
         Task<bool> UserExistsAsync(string email);
+        Task<UserResponseDto?> UpdateUserProfilePictureAsync(int id, string? profilePictureUrl, string modifiedByUser);
         Task<CheckEmailResponseDto> CheckEmailExistsAsync(string email, int? excludeUserId = null);
     }
 }

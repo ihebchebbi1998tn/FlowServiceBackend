@@ -423,6 +423,66 @@ namespace MyApi.Modules.Auth.Controllers
         }
 
         /// <summary>
+        /// Update profile picture for a specific user (MainAdminUser)
+        /// </summary>
+        [HttpPut("user/{userId}/profile-picture")]
+        public async Task<ActionResult<AuthResponseDto>> UpdateUserProfilePicture(string userId, [FromBody] UpdateProfilePictureRequestDto request)
+        {
+            try
+            {
+                if (!int.TryParse(userId, out var userIdInt))
+                {
+                    return BadRequest(new AuthResponseDto { Success = false, Message = "Invalid user ID format" });
+                }
+
+                var response = await _authService.UpdateProfilePictureAsync(userIdInt, request.ProfilePictureUrl);
+                if (!response.Success)
+                {
+                    return BadRequest(response);
+                }
+
+                _logger.LogInformation("Profile picture updated for user {UserId}", userIdInt);
+                return Ok(response);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error updating profile picture for user {UserId}", userId);
+                return StatusCode(500, new AuthResponseDto { Success = false, Message = "Internal error updating profile picture" });
+            }
+        }
+
+        /// <summary>
+        /// Update profile picture for the currently authenticated user
+        /// </summary>
+        [HttpPut("me/profile-picture")]
+        [Authorize]
+        public async Task<ActionResult<AuthResponseDto>> UpdateMyProfilePicture([FromBody] UpdateProfilePictureRequestDto request)
+        {
+            try
+            {
+                var userIdClaim = User.FindFirst("UserId")?.Value;
+                if (string.IsNullOrEmpty(userIdClaim) || !int.TryParse(userIdClaim, out var userId))
+                {
+                    return Unauthorized(new AuthResponseDto { Success = false, Message = "Invalid user token" });
+                }
+
+                var response = await _authService.UpdateProfilePictureAsync(userId, request.ProfilePictureUrl);
+                if (!response.Success)
+                {
+                    return BadRequest(response);
+                }
+
+                _logger.LogInformation("Profile picture updated for authenticated user {UserId}", userId);
+                return Ok(response);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error updating profile picture for authenticated user");
+                return StatusCode(500, new AuthResponseDto { Success = false, Message = "Internal error updating profile picture" });
+            }
+        }
+
+        /// <summary>
         /// Update current user information
         /// </summary>
         /// <param name="updateRequest">User update data</param>

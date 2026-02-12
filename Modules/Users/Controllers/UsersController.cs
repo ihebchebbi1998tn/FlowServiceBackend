@@ -209,6 +209,40 @@ namespace MyApi.Modules.Users.Controllers
             }
         }
 
+        /// <summary>
+        /// Update profile picture for a specific regular user
+        /// </summary>
+        [HttpPut("{id}/profile-picture")]
+        public async Task<IActionResult> UpdateUserProfilePicture(int id, [FromBody] UpdateProfilePictureRequestDto request)
+        {
+            try
+            {
+                var currentUserEmail = User?.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value;
+                if (string.IsNullOrEmpty(currentUserEmail))
+                {
+                    return Unauthorized(new ApiResponse<object> { Success = false, Message = "Unable to identify current user" });
+                }
+
+                var updatedUser = await _userService.UpdateUserProfilePictureAsync(id, request.ProfilePictureUrl, currentUserEmail);
+                if (updatedUser == null)
+                {
+                    return NotFound(new ApiResponse<object> { Success = false, Message = "User not found" });
+                }
+
+                return Ok(new ApiResponse<UserResponseDto>
+                {
+                    Success = true,
+                    Message = "Profile picture updated successfully",
+                    Data = updatedUser
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error updating profile picture for user {UserId}", id);
+                return StatusCode(500, new ApiResponse<object> { Success = false, Message = "Internal error updating profile picture" });
+            }
+        }
+
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteUser(int id)
         {
