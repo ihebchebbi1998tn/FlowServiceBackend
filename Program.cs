@@ -503,7 +503,14 @@ if (!Directory.Exists(uploadsPath))
 app.UseStaticFiles(new StaticFileOptions
 {
     FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(uploadsPath),
-    RequestPath = "/uploads"
+    RequestPath = "/uploads",
+    OnPrepareResponse = ctx =>
+    {
+        // Static files bypass CORS middleware, so we must add headers manually
+        ctx.Context.Response.Headers.Append("Access-Control-Allow-Origin", "*");
+        ctx.Context.Response.Headers.Append("Access-Control-Allow-Headers", "*");
+        ctx.Context.Response.Headers.Append("Access-Control-Allow-Methods", "GET, OPTIONS");
+    }
 });
 
 // ✅ Add debugging middleware to log CORS issues (development only)
