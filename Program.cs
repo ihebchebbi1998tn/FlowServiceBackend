@@ -590,4 +590,22 @@ app.MapGet("/", () => Results.Redirect("/swagger"));
 // Health endpoint
 app.MapGet("/health", () => new { status = "healthy", timestamp = DateTime.UtcNow });
 
+// DEBUG: Tenant resolution check (REMOVE after confirming multi-tenant works)
+app.MapGet("/api/debug/tenant", (HttpContext context, ITenantDbContextFactory factory) =>
+{
+    var tenant = context.Request.Headers["X-Tenant"].FirstOrDefault();
+    var envKey = $"TENANT_{tenant?.ToUpperInvariant()}_DATABASE_URL";
+    var envValue = Environment.GetEnvironmentVariable(envKey);
+    var connStr = factory.GetConnectionString(tenant);
+
+    return new
+    {
+        detectedTenant = tenant ?? "(none)",
+        envVarName = envKey,
+        envVarExists = !string.IsNullOrEmpty(envValue),
+        envVarPreview = envValue != null ? envValue.Substring(0, Math.Min(50, envValue.Length)) + "..." : "(not set)",
+        resolvedConnPreview = connStr?.Substring(0, Math.Min(50, connStr.Length)) + "..."
+    };
+});
+
 app.Run();
