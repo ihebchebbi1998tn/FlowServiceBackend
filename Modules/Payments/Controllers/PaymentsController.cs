@@ -278,6 +278,7 @@ namespace MyApi.Modules.Payments.Controllers
             {
                 _logger.LogError(ex, "Error deleting offer payment plan {PlanId}", planId);
                 return StatusCode(500, new { success = false, error = new { message = "Failed to delete plan" } });
+            }
         }
 
         // ══════════════════════════════════════════════
