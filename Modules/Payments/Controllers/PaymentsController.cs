@@ -332,4 +332,3 @@ namespace MyApi.Modules.Payments.Controllers
         public string PaymentId { get; set; } = "";
     }
 }
-}
