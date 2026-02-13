@@ -248,8 +248,15 @@ builder.Services.AddScoped<IEmailAccountService, EmailAccountService>();
 // User AI Settings Module Services (OpenRouter keys & preferences)
 builder.Services.AddScoped<IUserAiSettingsService, UserAiSettingsService>();
 
+// Payments Module Services
+builder.Services.AddScoped<MyApi.Modules.Payments.Services.IPaymentService, MyApi.Modules.Payments.Services.PaymentService>();
+builder.Services.AddScoped<MyApi.Modules.Payments.Services.IPaymentEmailService, MyApi.Modules.Payments.Services.PaymentEmailService>();
+
 // Workflow Polling Background Service (state-based triggers every 5 minutes)
 builder.Services.AddHostedService<WorkflowPollingService>();
+
+// Payment Reminder Background Service (checks every hour for upcoming installments)
+builder.Services.AddHostedService<MyApi.Modules.Payments.Services.PaymentReminderService>();
 
 // SignalR for real-time workflow notifications
 builder.Services.AddSignalR();

@@ -39,6 +39,7 @@ using MyApi.Modules.WebsiteBuilder.Models;
 using MyApi.Modules.WebsiteBuilder.Data.Configurations;
 using MyApi.Modules.EmailAccounts.Models;
 using MyApi.Modules.UserAiSettings.Models;
+using MyApi.Modules.Payments.Models;
 
 namespace MyApi.Data
 {
@@ -191,6 +192,12 @@ namespace MyApi.Data
         // User AI Settings Module
         public DbSet<UserAiKey> UserAiKeys { get; set; }
         public DbSet<UserAiPreference> UserAiPreferences { get; set; }
+
+        // Payments Module
+        public DbSet<Payment> Payments { get; set; }
+        public DbSet<PaymentPlan> PaymentPlans { get; set; }
+        public DbSet<PaymentPlanInstallment> PaymentPlanInstallments { get; set; }
+        public DbSet<PaymentItemAllocation> PaymentItemAllocations { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
