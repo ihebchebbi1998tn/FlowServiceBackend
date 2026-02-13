@@ -119,42 +119,45 @@ connectionString = connStringBuilder.ToString();
 
 // ── Multi-tenant DbContext registration ──
 // The factory is a singleton (caches connection strings).
-// ApplicationDbContext is scoped: resolved per-request using the X-Tenant header.
-// When no tenant header → uses the default connection string (zero overhead).
 builder.Services.AddSingleton<ITenantDbContextFactory, TenantDbContextFactory>();
 
-// Register DbContext options for the DEFAULT connection (used when no tenant header)
-builder.Services.AddDbContext<ApplicationDbContext>(options =>
+// Register DbContextOptions for the DEFAULT connection (needed by EF tooling & non-tenant paths)
+builder.Services.AddSingleton(sp =>
 {
-    options.UseNpgsql(connectionString, npgsqlOptions =>
+    var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>();
+    optionsBuilder.UseNpgsql(connectionString, npgsqlOptions =>
     {
         npgsqlOptions.EnableRetryOnFailure(3, TimeSpan.FromSeconds(10), null);
     });
     if (builder.Environment.IsDevelopment())
     {
-        options.EnableSensitiveDataLogging();
-        options.EnableDetailedErrors();
+        optionsBuilder.EnableSensitiveDataLogging();
+        optionsBuilder.EnableDetailedErrors();
     }
+    return optionsBuilder.Options;
 });
 
-// Override the default scoped ApplicationDbContext with tenant-aware resolution.
-// If X-Tenant header is present AND maps to a specific DB, a new context is created.
-// Otherwise, the default EF-registered context is returned (fast path).
+// Single scoped registration — tenant-aware DbContext for every request.
+// If X-Tenant header is present AND maps to a specific DB, a tenant-specific context is created.
+// Otherwise, the default connection is used.
 builder.Services.AddScoped<ApplicationDbContext>(sp =>
 {
     var httpContextAccessor = sp.GetRequiredService<IHttpContextAccessor>();
     var tenant = httpContextAccessor.HttpContext?.Items["Tenant"] as string;
 
-    // Fast path: no tenant → use default DI-registered context (no extra allocation)
-    if (string.IsNullOrEmpty(tenant))
+    if (!string.IsNullOrEmpty(tenant))
     {
-        var options = sp.GetRequiredService<DbContextOptions<ApplicationDbContext>>();
-        return new ApplicationDbContext(options);
+        // Tenant path: resolve via factory (connection string is cached)
+        var factory = sp.GetRequiredService<ITenantDbContextFactory>();
+        var ctx = factory.CreateDbContext(tenant);
+        var tenantLogger = sp.GetRequiredService<ILogger<TenantDbContextFactory>>();
+        tenantLogger.LogInformation("🏢 Request scoped DbContext created for tenant '{Tenant}'", tenant);
+        return ctx;
     }
 
-    // Tenant path: resolve via factory (connection string is cached)
-    var factory = sp.GetRequiredService<ITenantDbContextFactory>();
-    return factory.CreateDbContext(tenant);
+    // Default path: use pre-built options
+    var options = sp.GetRequiredService<DbContextOptions<ApplicationDbContext>>();
+    return new ApplicationDbContext(options);
 });
 
 // Allow services to depend on the base DbContext type (maps to ApplicationDbContext)
