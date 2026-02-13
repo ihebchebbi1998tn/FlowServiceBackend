@@ -155,6 +155,62 @@ namespace MyApi.Modules.WorkflowEngine.Controllers
         }
 
         /// <summary>
+        /// Creates a draft copy of an existing workflow for safe editing.
+        /// The original workflow remains active and untouched.
+        /// </summary>
+        [HttpPost("{id}/create-draft")]
+        public async Task<ActionResult<WorkflowDefinitionDto>> CreateDraft(int id)
+        {
+            try
+            {
+                var userId = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "system";
+                var draft = await _workflowService.CreateDraftFromWorkflowAsync(id, userId);
+                return CreatedAtAction(nameof(GetById), new { id = draft.Id }, draft);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Promotes a draft workflow to active, deactivating any conflicting active version.
+        /// </summary>
+        [HttpPost("{id}/promote")]
+        public async Task<ActionResult<WorkflowDefinitionDto>> Promote(int id)
+        {
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "system";
+            var workflow = await _workflowService.PromoteWorkflowAsync(id, userId);
+
+            if (workflow == null)
+                return NotFound(new { message = $"Workflow {id} not found" });
+
+            return Ok(workflow);
+        }
+
+        /// <summary>
+        /// Archives a workflow (soft-delete with history preservation).
+        /// Cannot archive workflows with running executions.
+        /// </summary>
+        [HttpPost("{id}/archive")]
+        public async Task<IActionResult> Archive(int id)
+        {
+            try
+            {
+                var userId = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "system";
+                var success = await _workflowService.ArchiveWorkflowAsync(id, userId);
+                if (!success)
+                    return NotFound(new { message = $"Workflow {id} not found" });
+
+                return Ok(new { message = "Workflow archived" });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new { message = ex.Message });
+            }
+        }
+
+        /// <summary>
         /// Gets workflow executions for this workflow
         /// </summary>
         [HttpGet("{id}/executions")]

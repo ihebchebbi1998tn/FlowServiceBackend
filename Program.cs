@@ -23,6 +23,7 @@ using MyApi.Modules.Signatures.Services;
 using MyApi.Modules.WorkflowEngine.Hubs;
 using MyApi.Modules.WebsiteBuilder;
 using MyApi.Modules.EmailAccounts.Services;
+using MyApi.Modules.UserAiSettings.Services;
 using MyApi.Modules.WebsiteBuilder.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.DataProtection;
@@ -243,6 +244,9 @@ builder.Services.AddWebsiteBuilderServices();
 
 // Email Accounts Module Services (Gmail/Outlook OAuth)
 builder.Services.AddScoped<IEmailAccountService, EmailAccountService>();
+
+// User AI Settings Module Services (OpenRouter keys & preferences)
+builder.Services.AddScoped<IUserAiSettingsService, UserAiSettingsService>();
 
 // Workflow Polling Background Service (state-based triggers every 5 minutes)
 builder.Services.AddHostedService<WorkflowPollingService>();

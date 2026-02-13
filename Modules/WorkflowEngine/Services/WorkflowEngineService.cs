@@ -146,6 +146,170 @@ namespace MyApi.Modules.WorkflowEngine.Services
             return true;
         }
 
+        // ─── Version Management ─────────────────────────────────────────────
+
+        /// <summary>
+        /// Creates a draft copy of an existing workflow for safe editing.
+        /// The original workflow remains active and untouched.
+        /// </summary>
+        public async Task<WorkflowDefinitionDto> CreateDraftFromWorkflowAsync(int id, string createdBy)
+        {
+            var source = await _db.WorkflowDefinitions
+                .Include(w => w.Triggers)
+                .FirstOrDefaultAsync(w => w.Id == id && !w.IsDeleted);
+
+            if (source == null)
+                throw new KeyNotFoundException($"Workflow {id} not found");
+
+            // Create a draft copy with incremented version
+            var draft = new WorkflowDefinition
+            {
+                Name = $"{source.Name} (Draft v{source.Version + 1})",
+                Description = source.Description,
+                Nodes = source.Nodes,   // Deep-copy the JSON as-is
+                Edges = source.Edges,
+                IsActive = false,       // Drafts are never active
+                Version = source.Version + 1,
+                CreatedBy = createdBy,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            _db.WorkflowDefinitions.Add(draft);
+            await _db.SaveChangesAsync();
+
+            // Copy triggers so the draft has the same trigger configuration
+            if (source.Triggers != null && source.Triggers.Any())
+            {
+                foreach (var srcTrigger in source.Triggers)
+                {
+                    _db.WorkflowTriggers.Add(new WorkflowTrigger
+                    {
+                        WorkflowId = draft.Id,
+                        NodeId = srcTrigger.NodeId,
+                        EntityType = srcTrigger.EntityType,
+                        FromStatus = srcTrigger.FromStatus,
+                        ToStatus = srcTrigger.ToStatus,
+                        IsActive = false, // Draft triggers are inactive
+                        CreatedAt = DateTime.UtcNow
+                    });
+                }
+                await _db.SaveChangesAsync();
+            }
+
+            // Reload with navigation properties
+            var result = await _db.WorkflowDefinitions
+                .Include(w => w.Triggers)
+                .Include(w => w.Executions)
+                .FirstAsync(w => w.Id == draft.Id);
+
+            return MapToDto(result);
+        }
+
+        /// <summary>
+        /// Promotes a draft/inactive workflow to active.
+        /// Deactivates any other active workflow with a similar base name to prevent conflicts.
+        /// </summary>
+        public async Task<WorkflowDefinitionDto?> PromoteWorkflowAsync(int id, string modifiedBy)
+        {
+            var workflow = await _db.WorkflowDefinitions
+                .Include(w => w.Triggers)
+                .FirstOrDefaultAsync(w => w.Id == id && !w.IsDeleted);
+
+            if (workflow == null) return null;
+
+            // Already active? Nothing to do
+            if (workflow.IsActive)
+            {
+                return MapToDto(workflow);
+            }
+
+            // Determine the base name (strip " (Draft vN)" suffix)
+            var baseName = workflow.Name;
+            var draftIdx = baseName.IndexOf(" (Draft", StringComparison.OrdinalIgnoreCase);
+            if (draftIdx > 0) baseName = baseName.Substring(0, draftIdx);
+
+            // Deactivate any currently active workflows with the same base name
+            var activeConflicts = await _db.WorkflowDefinitions
+                .Where(w => !w.IsDeleted && w.IsActive && w.Id != id
+                    && (w.Name == baseName || w.Name.StartsWith(baseName + " (")))
+                .ToListAsync();
+
+            foreach (var conflict in activeConflicts)
+            {
+                conflict.IsActive = false;
+                conflict.UpdatedAt = DateTime.UtcNow;
+                conflict.ModifiedBy = modifiedBy;
+            }
+
+            // Promote this workflow
+            workflow.IsActive = true;
+            workflow.Name = baseName; // Clean the name (remove Draft suffix)
+            workflow.UpdatedAt = DateTime.UtcNow;
+            workflow.ModifiedBy = modifiedBy;
+
+            // Activate its triggers
+            if (workflow.Triggers != null)
+            {
+                foreach (var trigger in workflow.Triggers)
+                {
+                    trigger.IsActive = true;
+                }
+            }
+
+            await _db.SaveChangesAsync();
+
+            // Re-extract triggers to make sure they're current with the nodes
+            _db.WorkflowTriggers.RemoveRange(workflow.Triggers ?? Enumerable.Empty<WorkflowTrigger>());
+            await _db.SaveChangesAsync();
+            await ExtractAndRegisterTriggersAsync(workflow);
+
+            // Reload
+            var result = await _db.WorkflowDefinitions
+                .Include(w => w.Triggers)
+                .Include(w => w.Executions)
+                .FirstAsync(w => w.Id == id);
+
+            return MapToDto(result);
+        }
+
+        /// <summary>
+        /// Archives a workflow (soft-delete that preserves history).
+        /// Cannot archive a workflow that has running executions.
+        /// </summary>
+        public async Task<bool> ArchiveWorkflowAsync(int id, string modifiedBy)
+        {
+            var workflow = await _db.WorkflowDefinitions
+                .Include(w => w.Triggers)
+                .Include(w => w.Executions)
+                .FirstOrDefaultAsync(w => w.Id == id && !w.IsDeleted);
+
+            if (workflow == null) return false;
+
+            // Safety: don't archive if there are running executions
+            var hasRunning = workflow.Executions?.Any(e => e.Status == "running" || e.Status == "waiting_approval") ?? false;
+            if (hasRunning)
+                throw new InvalidOperationException("Cannot archive a workflow with running executions. Cancel them first.");
+
+            // Deactivate and soft-delete
+            workflow.IsActive = false;
+            workflow.IsDeleted = true;
+            workflow.UpdatedAt = DateTime.UtcNow;
+            workflow.ModifiedBy = modifiedBy;
+
+            // Deactivate all triggers
+            if (workflow.Triggers != null)
+            {
+                foreach (var trigger in workflow.Triggers)
+                {
+                    trigger.IsActive = false;
+                }
+            }
+
+            await _db.SaveChangesAsync();
+            return true;
+        }
+
+
         public async Task<IEnumerable<WorkflowTriggerDto>> GetWorkflowTriggersAsync(int workflowId)
         {
             var triggers = await _db.WorkflowTriggers

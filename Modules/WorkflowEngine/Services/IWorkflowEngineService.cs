@@ -14,6 +14,11 @@ namespace MyApi.Modules.WorkflowEngine.Services
         Task<bool> ActivateWorkflowAsync(int id);
         Task<bool> DeactivateWorkflowAsync(int id);
 
+        // Version Management
+        Task<WorkflowDefinitionDto> CreateDraftFromWorkflowAsync(int id, string createdBy);
+        Task<WorkflowDefinitionDto?> PromoteWorkflowAsync(int id, string modifiedBy);
+        Task<bool> ArchiveWorkflowAsync(int id, string modifiedBy);
+
         // Workflow Triggers
         Task<IEnumerable<WorkflowTriggerDto>> GetWorkflowTriggersAsync(int workflowId);
         Task<WorkflowTriggerDto> RegisterTriggerAsync(RegisterTriggerDto dto);

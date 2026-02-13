@@ -123,6 +123,15 @@ namespace MyApi.Modules.WorkflowEngine.Services
                     // Scheduled trigger (already fired, pass through like other triggers)
                     var t when t.Contains("scheduled") => await ExecuteTriggerNodeAsync(node, context),
                     
+                    // Dynamic Form nodes
+                    var t when t.Contains("dynamic-form") || t.Contains("dynamic_form") => await ExecuteDynamicFormNodeAsync(node, context),
+                    
+                    // Data Transfer nodes
+                    var t when t.Contains("data-transfer") || t.Contains("data_transfer") => await ExecuteDataTransferNodeAsync(node, context),
+                    
+                    // Custom LLM nodes
+                    var t when t.Contains("custom-llm") || t.Contains("custom_llm") => await ExecuteCustomLLMNodeAsync(node, context),
+                    
                     // Default - just pass through
                     _ => await ExecuteDefaultNodeAsync(node, context)
                 };
@@ -993,26 +1002,193 @@ namespace MyApi.Modules.WorkflowEngine.Services
 
         #region Integration Nodes
 
-        private Task<NodeExecutionResult> ExecuteApiCallAsync(WorkflowNode node, WorkflowExecutionContext context)
+        private async Task<NodeExecutionResult> ExecuteApiCallAsync(WorkflowNode node, WorkflowExecutionContext context)
         {
             var url = GetNodeDataString(node, "url");
-            var method = GetNodeDataString(node, "method") ?? "GET";
+            var method = GetNodeDataString(node, "httpMethod") ?? GetNodeDataString(node, "method") ?? "GET";
+            var requestBody = GetNodeDataString(node, "requestBody");
+            var customHeaders = GetNodeDataString(node, "customHeaders");
+            var authType = GetNodeDataString(node, "authType") ?? "none";
+            var timeout = GetNodeDataInt(node, "timeout") ?? 30;
+            var contentType = GetNodeDataString(node, "contentType") ?? "json";
+            var retryOnFailure = GetNodeDataBool(node, "retryOnFailure");
+            var retryCount = GetNodeDataInt(node, "retryCount") ?? 3;
+            var retryDelay = GetNodeDataInt(node, "retryDelay") ?? 1000;
 
-            _logger.LogInformation("API call: {Method} {Url}", method, url);
-
-            // TODO: Actually make HTTP call
-            return Task.FromResult(new NodeExecutionResult
+            if (string.IsNullOrEmpty(url))
             {
-                Success = true,
-                Status = "completed",
-                Output = new Dictionary<string, object?>
+                return new NodeExecutionResult
                 {
-                    ["action"] = "api_call",
-                    ["url"] = url,
-                    ["method"] = method,
-                    ["status"] = "simulated"
+                    Success = false,
+                    Status = "failed",
+                    Error = "URL is required for HTTP Request node"
+                };
+            }
+
+            // Resolve variables in URL
+            url = ResolveVariables(url, context);
+            if (!string.IsNullOrEmpty(requestBody))
+                requestBody = ResolveVariables(requestBody, context);
+
+            // Append query params
+            var queryParams = GetNodeDataString(node, "queryParams");
+            if (!string.IsNullOrEmpty(queryParams))
+            {
+                var resolvedParams = ResolveVariables(queryParams, context);
+                var paramPairs = resolvedParams.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(line => line.Split(':', 2))
+                    .Where(parts => parts.Length == 2)
+                    .Select(parts => $"{Uri.EscapeDataString(parts[0].Trim())}={Uri.EscapeDataString(parts[1].Trim())}");
+                var separator = url.Contains('?') ? "&" : "?";
+                url = url + separator + string.Join("&", paramPairs);
+            }
+
+            var attempt = 0;
+            var maxAttempts = retryOnFailure ? retryCount + 1 : 1;
+
+            while (attempt < maxAttempts)
+            {
+                attempt++;
+                try
+                {
+                    using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(timeout) };
+
+                    // Set auth headers
+                    switch (authType)
+                    {
+                        case "bearer":
+                            var token = ResolveVariables(GetNodeDataString(node, "bearerToken") ?? "", context);
+                            httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+                            break;
+                        case "basic":
+                            var username = GetNodeDataString(node, "username") ?? "";
+                            var password = GetNodeDataString(node, "password") ?? "";
+                            var basicToken = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes($"{username}:{password}"));
+                            httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", basicToken);
+                            break;
+                        case "api_key":
+                            var headerName = GetNodeDataString(node, "apiKeyHeader") ?? "X-API-Key";
+                            var apiKey = ResolveVariables(GetNodeDataString(node, "apiKeyValue") ?? "", context);
+                            httpClient.DefaultRequestHeaders.Add(headerName, apiKey);
+                            break;
+                        case "oauth2":
+                            var oauthToken = ResolveVariables(GetNodeDataString(node, "oauth2Token") ?? "", context);
+                            httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", oauthToken);
+                            break;
+                    }
+
+                    // Set custom headers
+                    if (!string.IsNullOrEmpty(customHeaders))
+                    {
+                        var resolvedHeaders = ResolveVariables(customHeaders, context);
+                        foreach (var line in resolvedHeaders.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+                        {
+                            var parts = line.Split(':', 2);
+                            if (parts.Length == 2)
+                            {
+                                httpClient.DefaultRequestHeaders.TryAddWithoutValidation(parts[0].Trim(), parts[1].Trim());
+                            }
+                        }
+                    }
+
+                    // Build request
+                    var httpMethod = new HttpMethod(method.ToUpper());
+                    var request = new HttpRequestMessage(httpMethod, url);
+
+                    if (!string.IsNullOrEmpty(requestBody) && method.ToUpper() != "GET")
+                    {
+                        var mediaType = contentType switch
+                        {
+                            "json" => "application/json",
+                            "form" => "application/x-www-form-urlencoded",
+                            "xml" => "application/xml",
+                            "text" => "text/plain",
+                            _ => "application/json"
+                        };
+                        request.Content = new StringContent(requestBody, System.Text.Encoding.UTF8, mediaType);
+                    }
+
+                    var response = await httpClient.SendAsync(request);
+                    var responseBody = await response.Content.ReadAsStringAsync();
+
+                    _logger.LogInformation("HTTP {Method} {Url} → {StatusCode}", method, url, (int)response.StatusCode);
+
+                    // Check success condition
+                    var successCondition = GetNodeDataString(node, "successCondition") ?? "status_2xx";
+                    var isSuccess = successCondition switch
+                    {
+                        "status_200" => response.StatusCode == System.Net.HttpStatusCode.OK,
+                        "status_201" => response.StatusCode == System.Net.HttpStatusCode.Created,
+                        "status_2xx" => response.IsSuccessStatusCode,
+                        _ => response.IsSuccessStatusCode
+                    };
+
+                    // Parse response for mapping
+                    object? parsedBody = responseBody;
+                    try
+                    {
+                        parsedBody = JsonSerializer.Deserialize<JsonElement>(responseBody);
+                    }
+                    catch { /* keep as string */ }
+
+                    var output = new Dictionary<string, object?>
+                    {
+                        ["statusCode"] = (int)response.StatusCode,
+                        ["body"] = parsedBody,
+                        ["success"] = isSuccess,
+                        ["url"] = url,
+                        ["method"] = method
+                    };
+
+                    // Store headers if requested
+                    var storeFullResponse = GetNodeDataBool(node, "storeFullResponse");
+                    if (storeFullResponse)
+                    {
+                        output["headers"] = response.Headers.ToDictionary(h => h.Key, h => string.Join(", ", h.Value));
+                    }
+
+                    return new NodeExecutionResult
+                    {
+                        Success = isSuccess,
+                        Status = isSuccess ? "completed" : "failed",
+                        Error = isSuccess ? null : $"HTTP {(int)response.StatusCode}: {responseBody.Substring(0, Math.Min(500, responseBody.Length))}",
+                        Output = output
+                    };
                 }
-            });
+                catch (TaskCanceledException)
+                {
+                    if (attempt >= maxAttempts)
+                    {
+                        return new NodeExecutionResult
+                        {
+                            Success = false,
+                            Status = "failed",
+                            Error = $"HTTP Request timed out after {timeout} seconds"
+                        };
+                    }
+                    await Task.Delay(retryDelay);
+                }
+                catch (HttpRequestException ex)
+                {
+                    if (attempt >= maxAttempts)
+                    {
+                        return new NodeExecutionResult
+                        {
+                            Success = false,
+                            Status = "failed",
+                            Error = $"HTTP Request failed: {ex.Message}"
+                        };
+                    }
+                    await Task.Delay(retryDelay);
+                }
+            }
+
+            return new NodeExecutionResult
+            {
+                Success = false,
+                Status = "failed",
+                Error = "HTTP Request failed after all retries"
+            };
         }
 
         private Task<NodeExecutionResult> ExecuteWebhookAsync(WorkflowNode node, WorkflowExecutionContext context)
@@ -1247,11 +1423,67 @@ namespace MyApi.Modules.WorkflowEngine.Services
 
         private async Task<NodeExecutionResult> ExecuteDelayAsync(WorkflowNode node, WorkflowExecutionContext context)
         {
-            var delayMs = GetNodeDataInt(node, "delayMs") ?? GetNodeDataInt(node, "delay") ?? 1000;
-            
-            // For actual production, this would schedule a job
-            // For now, we simulate a short delay
-            await Task.Delay(Math.Min(delayMs, 5000)); // Cap at 5 seconds for safety
+            // Support both legacy delayMs and new delayValue + delayUnit
+            var delayValue = GetNodeDataInt(node, "delayValue");
+            var delayUnit = GetNodeDataString(node, "delayUnit") ?? "minutes";
+            var delayMode = GetNodeDataString(node, "delayMode") ?? "relative";
+
+            int delayMs;
+            if (delayValue.HasValue)
+            {
+                delayMs = delayUnit switch
+                {
+                    "seconds" => delayValue.Value * 1000,
+                    "minutes" => delayValue.Value * 60 * 1000,
+                    "hours" => delayValue.Value * 60 * 60 * 1000,
+                    "days" => delayValue.Value * 24 * 60 * 60 * 1000,
+                    _ => delayValue.Value * 60 * 1000
+                };
+            }
+            else
+            {
+                // Legacy: direct delayMs
+                delayMs = GetNodeDataInt(node, "delayMs") ?? GetNodeDataInt(node, "delay") ?? 1000;
+            }
+
+            _logger.LogInformation(
+                "Delay node: {Value} {Unit} (mode={Mode}, totalMs={Ms})",
+                delayValue ?? delayMs, delayUnit, delayMode, delayMs);
+
+            // Handle "wait until" mode
+            if (delayMode == "until")
+            {
+                var waitUntil = GetNodeDataString(node, "waitUntilTime");
+                if (!string.IsNullOrEmpty(waitUntil) && DateTime.TryParse(waitUntil, out var targetTime))
+                {
+                    var now = DateTime.UtcNow;
+                    if (targetTime > now)
+                    {
+                        delayMs = (int)(targetTime - now).TotalMilliseconds;
+                    }
+                    else
+                    {
+                        delayMs = 0; // Already past
+                    }
+                }
+            }
+
+            // For production: schedule a background job for long delays
+            // For short delays (< 30s), wait inline
+            if (delayMs <= 30000)
+            {
+                await Task.Delay(delayMs);
+            }
+            else
+            {
+                // For longer delays, store the resume time and mark as waiting
+                var resumeAt = DateTime.UtcNow.AddMilliseconds(delayMs);
+                context.Variables["__delay_resume_at"] = resumeAt.ToString("O");
+                
+                // In production, a background scheduler would pick this up
+                // For now, cap at 30 seconds for safety
+                await Task.Delay(Math.Min(delayMs, 30000));
+            }
 
             return new NodeExecutionResult
             {
@@ -1260,7 +1492,11 @@ namespace MyApi.Modules.WorkflowEngine.Services
                 Output = new Dictionary<string, object?>
                 {
                     ["action"] = "delay",
-                    ["delayMs"] = delayMs
+                    ["delayMs"] = delayMs,
+                    ["delayValue"] = delayValue ?? delayMs,
+                    ["delayUnit"] = delayUnit,
+                    ["delayMode"] = delayMode,
+                    ["completedAt"] = DateTime.UtcNow.ToString("O")
                 }
             };
         }
@@ -1427,6 +1663,50 @@ namespace MyApi.Modules.WorkflowEngine.Services
             if (value is double d) return (int)d;
             if (value is string s && int.TryParse(s, out var parsed)) return parsed;
             return null;
+        }
+
+        private bool GetNodeDataBool(WorkflowNode node, string key)
+        {
+            var value = GetNodeDataValue(node, key);
+            if (value is bool b) return b;
+            if (value is string s) return s.Equals("true", StringComparison.OrdinalIgnoreCase);
+            return false;
+        }
+
+        /// <summary>
+        /// Resolves {{variable}} references in a string using workflow context
+        /// </summary>
+        private string ResolveVariables(string input, WorkflowExecutionContext context)
+        {
+            if (string.IsNullOrEmpty(input)) return input;
+
+            // Replace {{trigger.xxx}} with trigger entity data
+            input = System.Text.RegularExpressions.Regex.Replace(input, @"\{\{trigger\.(\w+)\}\}", match =>
+            {
+                var key = match.Groups[1].Value;
+                if (context.Variables.TryGetValue(key, out var val) && val != null)
+                    return val.ToString() ?? "";
+                return match.Value; // Keep unresolved
+            });
+
+            // Replace {{stepX.xxx}} with node outputs
+            input = System.Text.RegularExpressions.Regex.Replace(input, @"\{\{(\w+)\.(\w+)\}\}", match =>
+            {
+                var nodeId = match.Groups[1].Value;
+                var key = match.Groups[2].Value;
+                if (context.NodeOutputs.TryGetValue(nodeId, out var outputs) && outputs is Dictionary<string, object?> dict)
+                {
+                    if (dict.TryGetValue(key, out var val) && val != null)
+                        return val.ToString() ?? "";
+                }
+                // Also check Variables directly
+                var fullKey = $"{nodeId}.{key}";
+                if (context.Variables.TryGetValue(fullKey, out var directVal) && directVal != null)
+                    return directVal.ToString() ?? "";
+                return match.Value;
+            });
+
+            return input;
         }
 
         /// <summary>
@@ -2099,6 +2379,247 @@ namespace MyApi.Modules.WorkflowEngine.Services
             }
             
             return true;
+        }
+
+        #endregion
+
+        #region Dynamic Form, Data Transfer, Custom LLM Nodes
+
+        private Task<NodeExecutionResult> ExecuteDynamicFormNodeAsync(WorkflowNode node, WorkflowExecutionContext context)
+        {
+            var formId = GetNodeDataString(node, "formId");
+            var formAction = GetNodeDataString(node, "formAction") ?? "collect";
+            var assignTo = GetNodeDataString(node, "assignTo");
+
+            _logger.LogInformation("Dynamic Form node: formId={FormId}, action={Action}, assignTo={AssignTo}", 
+                formId, formAction, assignTo);
+
+            switch (formAction)
+            {
+                case "collect":
+                    // Pause workflow and wait for form submission
+                    return Task.FromResult(new NodeExecutionResult
+                    {
+                        Success = true,
+                        Status = "waiting_approval", // Reuse approval status to pause
+                        Output = new Dictionary<string, object?>
+                        {
+                            ["action"] = "dynamic_form_collect",
+                            ["formId"] = formId,
+                            ["assignTo"] = assignTo,
+                            ["awaitingSubmission"] = true
+                        },
+                        ShouldStop = true // Pause until form is submitted
+                    });
+
+                case "prefill":
+                    var prefillMapping = GetNodeDataString(node, "prefillMapping");
+                    var resolvedMapping = !string.IsNullOrEmpty(prefillMapping) 
+                        ? ResolveVariables(prefillMapping, context) 
+                        : "";
+
+                    return Task.FromResult(new NodeExecutionResult
+                    {
+                        Success = true,
+                        Status = "completed",
+                        Output = new Dictionary<string, object?>
+                        {
+                            ["action"] = "dynamic_form_prefill",
+                            ["formId"] = formId,
+                            ["prefillData"] = resolvedMapping,
+                            ["assignTo"] = assignTo
+                        }
+                    });
+
+                case "read":
+                    // Read last form response — in production, query the form responses table
+                    return Task.FromResult(new NodeExecutionResult
+                    {
+                        Success = true,
+                        Status = "completed",
+                        Output = new Dictionary<string, object?>
+                        {
+                            ["action"] = "dynamic_form_read",
+                            ["formId"] = formId,
+                            ["responses"] = new Dictionary<string, object?>(), // Populated from DB in production
+                            ["submittedBy"] = "system",
+                            ["submittedAt"] = DateTime.UtcNow.ToString("O")
+                        }
+                    });
+
+                default:
+                    return Task.FromResult(new NodeExecutionResult
+                    {
+                        Success = false,
+                        Status = "failed",
+                        Error = $"Unknown form action: {formAction}"
+                    });
+            }
+        }
+
+        private Task<NodeExecutionResult> ExecuteDataTransferNodeAsync(WorkflowNode node, WorkflowExecutionContext context)
+        {
+            var sourceModule = GetNodeDataString(node, "sourceModule") ?? "unknown";
+            var operation = GetNodeDataString(node, "operation") ?? "read";
+            var filter = GetNodeDataString(node, "filter");
+            var dataMapping = GetNodeDataString(node, "dataMapping");
+
+            if (!string.IsNullOrEmpty(filter))
+                filter = ResolveVariables(filter, context);
+            if (!string.IsNullOrEmpty(dataMapping))
+                dataMapping = ResolveVariables(dataMapping, context);
+
+            _logger.LogInformation("Data Transfer: module={Module}, op={Operation}, filter={Filter}", 
+                sourceModule, operation, filter);
+
+            // In production, this would query the appropriate module's service
+            // For now, return a structured result that downstream nodes can consume
+            return Task.FromResult(new NodeExecutionResult
+            {
+                Success = true,
+                Status = "completed",
+                Output = new Dictionary<string, object?>
+                {
+                    ["action"] = $"data_transfer_{operation}",
+                    ["module"] = sourceModule,
+                    ["operation"] = operation,
+                    ["filter"] = filter,
+                    ["dataMapping"] = dataMapping,
+                    ["records"] = new List<object>(),
+                    ["count"] = 0,
+                    ["success"] = true
+                }
+            });
+        }
+
+        private async Task<NodeExecutionResult> ExecuteCustomLLMNodeAsync(WorkflowNode node, WorkflowExecutionContext context)
+        {
+            var providerName = GetNodeDataString(node, "providerName") ?? "Custom";
+            var apiUrl = GetNodeDataString(node, "customApiUrl");
+            var modelName = GetNodeDataString(node, "customModelName");
+            var apiKey = GetNodeDataString(node, "customApiKey");
+            var systemPrompt = GetNodeDataString(node, "systemPrompt") ?? "";
+            var userPrompt = GetNodeDataString(node, "userPrompt") ?? "";
+            var temperature = GetNodeDataDouble(node, "temperature") ?? 0.7;
+            var maxTokens = GetNodeDataInt(node, "maxTokens") ?? 1000;
+
+            if (string.IsNullOrEmpty(apiUrl) || string.IsNullOrEmpty(modelName))
+            {
+                return new NodeExecutionResult
+                {
+                    Success = false,
+                    Status = "failed",
+                    Error = "Custom LLM requires API URL and Model Name"
+                };
+            }
+
+            // Resolve variables in prompts
+            systemPrompt = ResolveVariables(systemPrompt, context);
+            userPrompt = ResolveVariables(userPrompt, context);
+
+            try
+            {
+                using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+                
+                if (!string.IsNullOrEmpty(apiKey))
+                {
+                    httpClient.DefaultRequestHeaders.Authorization = 
+                        new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+                }
+
+                var requestBody = new
+                {
+                    model = modelName,
+                    messages = new[]
+                    {
+                        new { role = "system", content = systemPrompt },
+                        new { role = "user", content = userPrompt }
+                    },
+                    temperature = temperature,
+                    max_tokens = maxTokens
+                };
+
+                var json = JsonSerializer.Serialize(requestBody);
+                var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+
+                var response = await httpClient.PostAsync(apiUrl, content);
+                var responseBody = await response.Content.ReadAsStringAsync();
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogError("Custom LLM call failed: {Status} {Body}", (int)response.StatusCode, responseBody);
+                    return new NodeExecutionResult
+                    {
+                        Success = false,
+                        Status = "failed",
+                        Error = $"LLM API returned {(int)response.StatusCode}: {responseBody.Substring(0, Math.Min(200, responseBody.Length))}"
+                    };
+                }
+
+                // Parse OpenAI-compatible response
+                var parsed = JsonSerializer.Deserialize<JsonElement>(responseBody);
+                var outputText = "";
+                var tokensUsed = 0;
+
+                if (parsed.TryGetProperty("choices", out var choices) && choices.GetArrayLength() > 0)
+                {
+                    var firstChoice = choices[0];
+                    if (firstChoice.TryGetProperty("message", out var message) && 
+                        message.TryGetProperty("content", out var c))
+                    {
+                        outputText = c.GetString() ?? "";
+                    }
+                }
+
+                if (parsed.TryGetProperty("usage", out var usage) && 
+                    usage.TryGetProperty("total_tokens", out var totalTokens))
+                {
+                    tokensUsed = totalTokens.GetInt32();
+                }
+
+                return new NodeExecutionResult
+                {
+                    Success = true,
+                    Status = "completed",
+                    Output = new Dictionary<string, object?>
+                    {
+                        ["output"] = outputText,
+                        ["model"] = modelName,
+                        ["provider"] = providerName,
+                        ["tokensUsed"] = tokensUsed,
+                        ["action"] = "custom_llm"
+                    }
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Custom LLM execution failed for provider {Provider}", providerName);
+                return new NodeExecutionResult
+                {
+                    Success = false,
+                    Status = "failed",
+                    Error = $"Custom LLM error: {ex.Message}"
+                };
+            }
+        }
+
+        /// <summary>
+        /// Get a double value from node data
+        /// </summary>
+        private double? GetNodeDataDouble(WorkflowNode node, string key)
+        {
+            if (node.Data.TryGetValue(key, out var val) && val != null)
+            {
+                if (val is double d) return d;
+                if (val is float f) return f;
+                if (val is int i) return i;
+                if (val is JsonElement je)
+                {
+                    if (je.ValueKind == JsonValueKind.Number) return je.GetDouble();
+                }
+                if (double.TryParse(val.ToString(), out var parsed)) return parsed;
+            }
+            return null;
         }
 
         #endregion

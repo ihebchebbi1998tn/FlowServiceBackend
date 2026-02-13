@@ -38,6 +38,7 @@ using MyApi.Modules.Signatures.Models;
 using MyApi.Modules.WebsiteBuilder.Models;
 using MyApi.Modules.WebsiteBuilder.Data.Configurations;
 using MyApi.Modules.EmailAccounts.Models;
+using MyApi.Modules.UserAiSettings.Models;
 
 namespace MyApi.Data
 {
@@ -186,6 +187,10 @@ namespace MyApi.Data
         public DbSet<WBMedia> WBMedia { get; set; }
         public DbSet<WBTemplate> WBTemplates { get; set; }
         public DbSet<WBActivityLog> WBActivityLogs { get; set; }
+
+        // User AI Settings Module
+        public DbSet<UserAiKey> UserAiKeys { get; set; }
+        public DbSet<UserAiPreference> UserAiPreferences { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
