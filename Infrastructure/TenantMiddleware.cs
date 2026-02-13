@@ -19,10 +19,12 @@ namespace MyApi.Infrastructure;
 public class TenantMiddleware
 {
     private readonly RequestDelegate _next;
+    private readonly ILogger<TenantMiddleware> _logger;
 
-    public TenantMiddleware(RequestDelegate next)
+    public TenantMiddleware(RequestDelegate next, ILogger<TenantMiddleware> logger)
     {
         _next = next;
+        _logger = logger;
     }
 
     public async Task InvokeAsync(HttpContext context)
@@ -31,8 +33,9 @@ public class TenantMiddleware
 
         if (!string.IsNullOrEmpty(tenant))
         {
-            // Store tenant in HttpContext.Items so the scoped DbContext factory can read it
             context.Items["Tenant"] = tenant;
+            _logger.LogWarning("🏢 TENANT-MIDDLEWARE: Request {Method} {Path} → tenant='{Tenant}'",
+                context.Request.Method, context.Request.Path, tenant);
         }
 
         await _next(context);
