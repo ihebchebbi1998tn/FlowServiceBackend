@@ -1,5 +1,6 @@
 using MyApi.Data;
 using MyApi.Configuration;
+using MyApi.Infrastructure;
 using MyApi.Modules.Auth.Services;
 using MyApi.Modules.Users.Services;
 using MyApi.Modules.Roles.Services;
@@ -41,6 +42,9 @@ builder.Services.AddControllers()
         options.JsonSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
         options.JsonSerializerOptions.DictionaryKeyPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
     });
+
+// Required for tenant resolution in scoped DbContext factory
+builder.Services.AddHttpContextAccessor();
 
 // Read DATABASE_URL from environment or fallback
 var rawConnection = Environment.GetEnvironmentVariable("DATABASE_URL") ??
@@ -113,24 +117,47 @@ var connStringBuilder = new NpgsqlConnectionStringBuilder(connectionString)
 };
 connectionString = connStringBuilder.ToString();
 
-// Register DbContext with optimized connection pooling
+// ── Multi-tenant DbContext registration ──
+// The factory is a singleton (caches connection strings).
+// ApplicationDbContext is scoped: resolved per-request using the X-Tenant header.
+// When no tenant header → uses the default connection string (zero overhead).
+builder.Services.AddSingleton<ITenantDbContextFactory, TenantDbContextFactory>();
+
+// Register DbContext options for the DEFAULT connection (used when no tenant header)
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
 {
     options.UseNpgsql(connectionString, npgsqlOptions =>
     {
-        // ✅ OPTIMIZATION 5: Optimize connection pooling (5-10% improvement)
         npgsqlOptions.EnableRetryOnFailure(3, TimeSpan.FromSeconds(10), null);
     });
     if (builder.Environment.IsDevelopment())
     {
-        // ✅ Disable sensitive data logging in production (5-10% improvement)
         options.EnableSensitiveDataLogging();
         options.EnableDetailedErrors();
     }
 });
 
+// Override the default scoped ApplicationDbContext with tenant-aware resolution.
+// If X-Tenant header is present AND maps to a specific DB, a new context is created.
+// Otherwise, the default EF-registered context is returned (fast path).
+builder.Services.AddScoped<ApplicationDbContext>(sp =>
+{
+    var httpContextAccessor = sp.GetRequiredService<IHttpContextAccessor>();
+    var tenant = httpContextAccessor.HttpContext?.Items["Tenant"] as string;
+
+    // Fast path: no tenant → use default DI-registered context (no extra allocation)
+    if (string.IsNullOrEmpty(tenant))
+    {
+        var options = sp.GetRequiredService<DbContextOptions<ApplicationDbContext>>();
+        return new ApplicationDbContext(options);
+    }
+
+    // Tenant path: resolve via factory (connection string is cached)
+    var factory = sp.GetRequiredService<ITenantDbContextFactory>();
+    return factory.CreateDbContext(tenant);
+});
+
 // Allow services to depend on the base DbContext type (maps to ApplicationDbContext)
-// This prevents DI failures if a service constructor requests DbContext instead of ApplicationDbContext.
 builder.Services.AddScoped<DbContext>(sp => sp.GetRequiredService<ApplicationDbContext>());
 
 // JWT Authentication
@@ -544,6 +571,9 @@ if (builder.Environment.IsDevelopment() || !string.IsNullOrEmpty(Environment.Get
 {
     app.UseHttpsRedirection();
 }
+
+// Multi-tenant middleware: reads X-Tenant header and stores tenant in HttpContext
+app.UseMiddleware<TenantMiddleware>();
 
 app.UseAuthentication();
 app.UseAuthorization();
