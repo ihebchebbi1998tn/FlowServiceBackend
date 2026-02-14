@@ -42,6 +42,12 @@ namespace MyApi.Modules.Dashboards.Models
 
         public DateTime? SharedAt { get; set; }
 
+        /// <summary>JSONB snapshot of CRM data at share time</summary>
+        [Column(TypeName = "jsonb")]
+        public string? SnapshotData { get; set; }
+
+        public DateTime? SnapshotAt { get; set; }
+
         [MaxLength(200)]
         public string? CreatedBy { get; set; }
 

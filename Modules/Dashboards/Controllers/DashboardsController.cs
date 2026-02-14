@@ -192,7 +192,7 @@ namespace MyApi.Modules.Dashboards.Controllers
 
         // ─── POST /api/Dashboards/{id}/share ───────────────────────
         [HttpPost("{id:int}/share")]
-        public async Task<IActionResult> GenerateShareLink(int id)
+        public async Task<IActionResult> GenerateShareLink(int id, [FromBody] ShareDashboardRequest? request)
         {
             await using var db = _dbFactory.CreateDbContext(GetTenant());
             var dashboard = await db.Dashboards
@@ -206,9 +206,17 @@ namespace MyApi.Modules.Dashboards.Controllers
                 dashboard.ShareToken = Guid.NewGuid().ToString("N")[..16];
                 dashboard.IsPublic = true;
                 dashboard.SharedAt = DateTime.UtcNow;
-                dashboard.UpdatedAt = DateTime.UtcNow;
-                await db.SaveChangesAsync();
             }
+
+            // Store data snapshot if provided
+            if (request?.DataSnapshot != null)
+            {
+                dashboard.SnapshotData = JsonSerializer.Serialize(request.DataSnapshot, _jsonOpts);
+                dashboard.SnapshotAt = DateTime.UtcNow;
+            }
+
+            dashboard.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
 
             var baseUrl = $"{Request.Scheme}://{Request.Host}";
             var result = new SharedDashboardInfoDto
@@ -235,6 +243,8 @@ namespace MyApi.Modules.Dashboards.Controllers
             dashboard.ShareToken = null;
             dashboard.IsPublic = false;
             dashboard.SharedAt = null;
+            dashboard.SnapshotData = null;
+            dashboard.SnapshotAt = null;
             dashboard.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync();
 
@@ -272,6 +282,10 @@ namespace MyApi.Modules.Dashboards.Controllers
                 GridSettings = dashboard.GridSettings != null
                     ? JsonSerializer.Deserialize<object>(dashboard.GridSettings, _jsonOpts)
                     : null,
+                DataSnapshot = dashboard.SnapshotData != null
+                    ? JsonSerializer.Deserialize<object>(dashboard.SnapshotData, _jsonOpts)
+                    : null,
+                SnapshotAt = dashboard.SnapshotAt,
             };
 
             return Ok(result);

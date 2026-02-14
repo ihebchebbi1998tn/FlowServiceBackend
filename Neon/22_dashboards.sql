@@ -19,7 +19,9 @@ CREATE TABLE IF NOT EXISTS "Dashboards" (
     "CreatedBy"       VARCHAR(200),
     "CreatedAt"       TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     "UpdatedAt"       TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-    "IsDeleted"       BOOLEAN NOT NULL DEFAULT FALSE
+    "IsDeleted"       BOOLEAN NOT NULL DEFAULT FALSE,
+    "SnapshotData"    JSONB,
+    "SnapshotAt"      TIMESTAMP WITH TIME ZONE
 );
 
 -- Index for fast public token lookups

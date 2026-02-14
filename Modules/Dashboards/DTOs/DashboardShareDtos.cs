@@ -15,6 +15,13 @@ namespace MyApi.Modules.Dashboards.DTOs
         public string? Description { get; set; }
         public object? Widgets { get; set; }
         public object? GridSettings { get; set; }
+        public object? DataSnapshot { get; set; }
+        public DateTime? SnapshotAt { get; set; }
+    }
+
+    public class ShareDashboardRequest
+    {
+        public Dictionary<string, object>? DataSnapshot { get; set; }
     }
 
     public class DashboardDto
