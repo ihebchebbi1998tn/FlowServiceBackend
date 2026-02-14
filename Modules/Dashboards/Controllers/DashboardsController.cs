@@ -43,12 +43,12 @@ namespace MyApi.Modules.Dashboards.Controllers
             IsDefault = d.IsDefault,
             IsShared = d.IsShared,
             SharedWithRoles = d.SharedWithRoles != null
-                ? JsonSerializer.Deserialize<object>(d.SharedWithRoles)
+                ? JsonSerializer.Deserialize<object>(d.SharedWithRoles, _jsonOpts)
                 : null,
             CreatedBy = int.TryParse(d.CreatedBy, out var uid) ? uid : 0,
-            Widgets = JsonSerializer.Deserialize<object>(d.Widgets) ?? new object[] { },
+            Widgets = JsonSerializer.Deserialize<object>(d.Widgets, _jsonOpts) ?? new object[] { },
             GridSettings = d.GridSettings != null
-                ? JsonSerializer.Deserialize<object>(d.GridSettings)
+                ? JsonSerializer.Deserialize<object>(d.GridSettings, _jsonOpts)
                 : null,
             CreatedAt = d.CreatedAt.ToString("o"),
             UpdatedAt = d.UpdatedAt.ToString("o"),
@@ -242,11 +242,17 @@ namespace MyApi.Modules.Dashboards.Controllers
         }
 
         // ─── GET /api/Dashboards/public/{token} ───────────────────
+        // NOTE: This endpoint uses the DEFAULT database (no tenant header from
+        // anonymous visitors). If multi-tenant sharing is needed, encode tenant
+        // in the share token or URL path.
         [AllowAnonymous]
         [HttpGet("public/{token}")]
         public async Task<IActionResult> GetByShareToken(string token)
         {
-            await using var db = _dbFactory.CreateDbContext(GetTenant());
+            // Anonymous callers won't send X-Tenant — use default connection
+            var tenant = Request.Headers.TryGetValue("X-Tenant", out var t) ? t.ToString() : "";
+            await using var db = _dbFactory.CreateDbContext(tenant);
+
             var dashboard = await db.Dashboards
                 .AsNoTracking()
                 .FirstOrDefaultAsync(d =>
@@ -255,17 +261,16 @@ namespace MyApi.Modules.Dashboards.Controllers
                     !d.IsDeleted);
 
             if (dashboard == null)
-                return NotFound(ApiResponse<object>.ErrorResponse(
-                    "Dashboard not found or link expired"));
+                return NotFound(new { message = "Dashboard not found or link expired" });
 
             var result = new PublicDashboardDto
             {
                 Id = dashboard.Id,
                 Name = dashboard.Name,
                 Description = dashboard.Description,
-                Widgets = JsonSerializer.Deserialize<object>(dashboard.Widgets),
+                Widgets = JsonSerializer.Deserialize<object>(dashboard.Widgets, _jsonOpts),
                 GridSettings = dashboard.GridSettings != null
-                    ? JsonSerializer.Deserialize<object>(dashboard.GridSettings)
+                    ? JsonSerializer.Deserialize<object>(dashboard.GridSettings, _jsonOpts)
                     : null,
             };
 
