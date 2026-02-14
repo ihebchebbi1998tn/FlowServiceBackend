@@ -156,6 +156,9 @@ namespace MyApi.Data
         public DbSet<DynamicForm> DynamicForms { get; set; }
         public DbSet<DynamicFormResponse> DynamicFormResponses { get; set; }
 
+        // Dashboards Module
+        public DbSet<MyApi.Modules.Dashboards.Models.Dashboard> Dashboards { get; set; }
+
         // Entity Form Documents (shared - for offers/sales)
         public DbSet<MyApi.Modules.Shared.Models.EntityFormDocument> EntityFormDocuments { get; set; }
 
