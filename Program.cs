@@ -151,8 +151,13 @@ builder.Services.AddScoped<ApplicationDbContext>(sp =>
         var factory = sp.GetRequiredService<ITenantDbContextFactory>();
         var ctx = factory.CreateDbContext(tenant);
         var tenantLogger = sp.GetRequiredService<ILogger<TenantDbContextFactory>>();
-        tenantLogger.LogInformation("🏢 Request scoped DbContext created for tenant '{Tenant}'", tenant);
+        tenantLogger.LogWarning("🏢 TENANT-DB-SWITCH: DbContext created for tenant '{Tenant}' — using tenant-specific database", tenant);
         return ctx;
+    }
+    else
+    {
+        var defaultLogger = sp.GetRequiredService<ILogger<TenantDbContextFactory>>();
+        defaultLogger.LogWarning("🏢 TENANT-DB-SWITCH: No tenant detected — using DEFAULT database");
     }
 
     // Default path: use pre-built options
