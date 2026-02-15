@@ -14,12 +14,14 @@ namespace MyApi.Modules.Auth.Controllers
         private readonly IAuthService _authService;
         private readonly ILogger<AuthController> _logger;
         private readonly ISystemLogService _systemLogService;
+        private readonly IConfiguration _configuration;
 
-        public AuthController(IAuthService authService, ILogger<AuthController> logger, ISystemLogService systemLogService)
+        public AuthController(IAuthService authService, ILogger<AuthController> logger, ISystemLogService systemLogService, IConfiguration configuration)
         {
             _authService = authService;
             _logger = logger;
             _systemLogService = systemLogService;
+            _configuration = configuration;
         }
 
         /// <summary>
@@ -44,6 +46,61 @@ namespace MyApi.Modules.Auth.Controllers
                     SignupAllowed = true, 
                     Message = "Error checking admin status" 
                 });
+            }
+        }
+
+        /// <summary>
+        /// Get public OAuth configuration for a provider (no auth required).
+        /// Returns clientId, authUrl, scopes, and redirectUri so the login page
+        /// can initialize Google/Microsoft sign-in buttons before the user is logged in.
+        /// </summary>
+        /// <param name="provider">OAuth provider name: "google" or "microsoft"</param>
+        [HttpGet("oauth-config/{provider}")]
+        [AllowAnonymous]
+        public IActionResult GetOAuthConfig(string provider)
+        {
+            try
+            {
+                var section = provider.ToLower() switch
+                {
+                    "google"    => _configuration.GetSection("OAuth:Google"),
+                    "microsoft" => _configuration.GetSection("OAuth:Microsoft"),
+                    _           => null
+                };
+
+                if (section == null || string.IsNullOrEmpty(section["ClientId"]))
+                {
+                    _logger.LogWarning("OAuth config requested for unconfigured provider: {Provider}", provider);
+                    return NotFound(new { message = $"OAuth provider '{provider}' is not configured." });
+                }
+
+                object result = provider.ToLower() switch
+                {
+                    "google" => new
+                    {
+                        provider    = "google",
+                        clientId    = section["ClientId"],
+                        authUrl     = "https://accounts.google.com/o/oauth2/v2/auth",
+                        scopes      = new[] { "openid", "email", "profile" },
+                        redirectUri = section["RedirectUri"] ?? "https://api.flowentra.app/oauth/google/callback"
+                    },
+                    "microsoft" => new
+                    {
+                        provider    = "microsoft",
+                        clientId    = section["ClientId"],
+                        authUrl     = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+                        scopes      = new[] { "openid", "email", "profile", "User.Read" },
+                        redirectUri = section["RedirectUri"] ?? "https://api.flowentra.app/oauth/microsoft/callback"
+                    },
+                    _ => null
+                };
+
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving OAuth config for provider: {Provider}", provider);
+                return StatusCode(500, new { message = "Error retrieving OAuth configuration" });
             }
         }
 
