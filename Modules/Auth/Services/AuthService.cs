@@ -374,6 +374,20 @@ namespace MyApi.Modules.Auth.Services
                 }
                 
                 _logger.LogInformation("Creating new admin user object for email: {Email}", signupDto.Email);
+                
+                // Reset the MainAdminUsers Id sequence so the first admin always gets Id=1
+                // This handles cases where previous entries were deleted but the sequence advanced
+                try
+                {
+                    await _context.Database.ExecuteSqlRawAsync(
+                        "SELECT setval('\"MainAdminUsers_Id_seq\"', 1, false)");
+                    _logger.LogInformation("MainAdminUsers Id sequence reset to 1 for first admin signup");
+                }
+                catch (Exception seqEx)
+                {
+                    _logger.LogWarning(seqEx, "Could not reset MainAdminUsers sequence (non-critical)");
+                }
+                
                 var newUser = new MainAdminUser
                 {
                     Email = signupDto.Email.ToLower(),
