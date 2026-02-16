@@ -110,7 +110,10 @@ namespace MyApi.Infrastructure.Caching
             var value = await factory();
 
             // Set cache with expiration
-            var cacheOptions = new MemoryCacheEntryOptions();
+            var cacheOptions = new MemoryCacheEntryOptions
+            {
+                Size = 1  // Each entry counts as 1 toward SizeLimit
+            };
 
             if (expiration.HasValue)
             {
@@ -160,7 +163,10 @@ namespace MyApi.Infrastructure.Caching
         /// </summary>
         public void Set<T>(string key, T value, TimeSpan? expiration = null)
         {
-            var options = new MemoryCacheEntryOptions();
+            var options = new MemoryCacheEntryOptions
+            {
+                Size = 1  // Each entry counts as 1 toward SizeLimit
+            };
 
             if (expiration.HasValue)
             {

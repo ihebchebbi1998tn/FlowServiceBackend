@@ -32,6 +32,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Npgsql;
 using System.Text;
+using System.IO.Compression;
+using MyApi.Infrastructure.Caching;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -42,6 +44,30 @@ builder.Services.AddControllers()
         options.JsonSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
         options.JsonSerializerOptions.DictionaryKeyPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
     });
+
+// ✅ PERFORMANCE: Response Compression (gzip/brotli) — reduces payload sizes 60-80%
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+    options.MimeTypes = Microsoft.AspNetCore.ResponseCompression.ResponseCompressionDefaults.MimeTypes
+        .Concat(new[] { "application/json", "text/plain", "text/html" });
+});
+builder.Services.Configure<BrotliCompressionProviderOptions>(options =>
+{
+    options.Level = CompressionLevel.Fastest;
+});
+builder.Services.Configure<GzipCompressionProviderOptions>(options =>
+{
+    options.Level = CompressionLevel.Optimal;
+});
+
+// ✅ PERFORMANCE: In-Memory Cache for lookups, tags, roles, and hot data
+builder.Services.AddMemoryCache(options =>
+{
+    options.SizeLimit = 10_000;  // Max 10k cache entries — prevents unbounded growth
+});
+builder.Services.AddSingleton<ICacheService, CacheService>();
+builder.Services.AddSingleton<CacheInvalidationHelper>();
 
 // Required for tenant resolution in scoped DbContext factory
 builder.Services.AddHttpContextAccessor();
@@ -128,6 +154,10 @@ builder.Services.AddSingleton(sp =>
     optionsBuilder.UseNpgsql(connectionString, npgsqlOptions =>
     {
         npgsqlOptions.EnableRetryOnFailure(3, TimeSpan.FromSeconds(10), null);
+        // ✅ PERFORMANCE: Command timeout for long queries (15s default is too aggressive for reports)
+        npgsqlOptions.CommandTimeout(30);
+        // ✅ PERFORMANCE: Split queries prevent cartesian explosion on multi-Include queries
+        npgsqlOptions.UseQuerySplittingBehavior(QuerySplittingBehavior.SplitQuery);
     });
     if (builder.Environment.IsDevelopment())
     {
@@ -150,14 +180,10 @@ builder.Services.AddScoped<ApplicationDbContext>(sp =>
         // Tenant path: resolve via factory (connection string is cached)
         var factory = sp.GetRequiredService<ITenantDbContextFactory>();
         var ctx = factory.CreateDbContext(tenant);
+        // ✅ PERFORMANCE: Downgraded from Warning→Debug — fires on EVERY request
         var tenantLogger = sp.GetRequiredService<ILogger<TenantDbContextFactory>>();
-        tenantLogger.LogWarning("🏢 TENANT-DB-SWITCH: DbContext created for tenant '{Tenant}' — using tenant-specific database", tenant);
+        tenantLogger.LogDebug("🏢 TENANT-DB-SWITCH: DbContext created for tenant '{Tenant}'", tenant);
         return ctx;
-    }
-    else
-    {
-        var defaultLogger = sp.GetRequiredService<ILogger<TenantDbContextFactory>>();
-        defaultLogger.LogWarning("🏢 TENANT-DB-SWITCH: No tenant detected — using DEFAULT database");
     }
 
     // Default path: use pre-built options
@@ -532,6 +558,10 @@ using (var scope = app.Services.CreateScope())
 }
 
 // Middleware pipeline
+
+// ✅ PERFORMANCE: Response compression MUST be first in pipeline
+app.UseResponseCompression();
+
 app.UseSwaggerDocumentation(builder.Configuration);
 
 // ✅ CORS MUST be BEFORE static files so uploads get Access-Control-Allow-Origin headers

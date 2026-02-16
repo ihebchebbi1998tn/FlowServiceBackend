@@ -70,7 +70,12 @@ public class TenantDbContextFactory : ITenantDbContextFactory
 
         var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseNpgsql(connStr, npgsql =>
-                npgsql.EnableRetryOnFailure(3, TimeSpan.FromSeconds(10), null));
+            {
+                npgsql.EnableRetryOnFailure(3, TimeSpan.FromSeconds(10), null);
+                // ✅ PERFORMANCE: Prevent cartesian explosion on multi-Include queries
+                npgsql.UseQuerySplittingBehavior(QuerySplittingBehavior.SplitQuery);
+                npgsql.CommandTimeout(30);
+            });
 
         if (_isDevelopment)
         {

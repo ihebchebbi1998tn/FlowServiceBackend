@@ -34,7 +34,8 @@ public class TenantMiddleware
         if (!string.IsNullOrEmpty(tenant))
         {
             context.Items["Tenant"] = tenant;
-            _logger.LogWarning("🏢 TENANT-MIDDLEWARE: Request {Method} {Path} → tenant='{Tenant}'",
+            // ✅ PERFORMANCE: Downgraded from Warning→Debug to reduce log volume at scale
+            _logger.LogDebug("🏢 TENANT-MIDDLEWARE: Request {Method} {Path} → tenant='{Tenant}'",
                 context.Request.Method, context.Request.Path, tenant);
         }
 
