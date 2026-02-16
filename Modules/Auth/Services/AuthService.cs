@@ -3,6 +3,7 @@ using MyApi.Modules.Auth.DTOs;
 using MyApi.Modules.Auth.Models;
 using MyApi.Modules.Users.Models;
 using MyApi.Modules.Users.DTOs;
+using MyApi.Modules.WorkflowEngine.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
@@ -37,12 +38,18 @@ namespace MyApi.Modules.Auth.Services
         private readonly ApplicationDbContext _context;
         private readonly IConfiguration _configuration;
         private readonly ILogger<AuthService> _logger;
+        private readonly IDefaultWorkflowSeeder _workflowSeeder;
 
-        public AuthService(ApplicationDbContext context, IConfiguration configuration, ILogger<AuthService> logger)
+        public AuthService(
+            ApplicationDbContext context, 
+            IConfiguration configuration, 
+            ILogger<AuthService> logger,
+            IDefaultWorkflowSeeder workflowSeeder)
         {
             _context = context;
             _configuration = configuration;
             _logger = logger;
+            _workflowSeeder = workflowSeeder;
         }
 
         public async Task<AuthResponseDto> LoginAsync(LoginRequestDto loginDto)
@@ -450,6 +457,10 @@ namespace MyApi.Modules.Auth.Services
 
                 _logger.LogInformation("Saving token updates to database for email: {Email}", signupDto.Email);
                 await _context.SaveChangesAsync();
+
+                // Seed default workflow for fresh admin user
+                _logger.LogInformation("Seeding default workflow for new admin: {Email}", signupDto.Email);
+                await _workflowSeeder.SeedDefaultWorkflowAsync(signupDto.Email);
 
                 _logger.LogInformation("Admin user registration completed successfully for email: {Email}", signupDto.Email);
                 return new AuthResponseDto

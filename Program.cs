@@ -317,6 +317,7 @@ builder.Services.AddScoped<IWorkflowApprovalService, WorkflowApprovalService>();
 builder.Services.AddScoped<IWorkflowNotificationService, WorkflowNotificationService>();
 builder.Services.AddScoped<IWorkflowNodeExecutor, WorkflowNodeExecutor>();
 builder.Services.AddScoped<IWorkflowGraphExecutor, WorkflowGraphExecutor>();
+builder.Services.AddScoped<IDefaultWorkflowSeeder, DefaultWorkflowSeeder>();
 
 // Business Workflow Service (handles cascade operations between entities)
 builder.Services.AddScoped<IBusinessWorkflowService, BusinessWorkflowService>();
