@@ -1,0 +1,209 @@
+{
+  "common": {
+    "welcomeTitle": "Bienvenue",
+    "getStarted": "Commencer",
+    "next": "Suivant",
+    "previous": "Précédent",
+    "finish": "Terminer",
+    "skip": "Passer",
+    "save": "Enregistrer",
+    "cancel": "Annuler"
+  },
+  "tour": {
+    "buttons": {
+      "back": "Retour",
+      "close": "Fermer",
+      "finish": "Terminer",
+      "next": "Suivant",
+      "nextWithProgress": "Suivant (Étape {step} sur {steps})",
+      "skip": "Passer la visite",
+      "of": "sur"
+    },
+    "welcome": {
+      "title": "Bienvenue sur FlowService! 👋",
+      "content": "Laissez-nous vous faire une visite complète de toutes les fonctionnalités. Cela vous aidera à comprendre chaque bouton, action et flux de travail de la plateforme. Vous pouvez passer à tout moment et relancer depuis votre menu profil."
+    },
+    "mobileMenu": {
+      "title": "Menu de navigation 📱",
+      "content": "Appuyez sur cette icône de menu pour accéder à tous les modules: Espace de travail, CRM, Service et Paramètres système. Chaque section contient des outils pour gérer efficacement votre entreprise."
+    },
+    "sidebar": {
+      "title": "Barre de navigation 📌",
+      "content": "Votre hub de navigation principal! Tous les modules sont organisés en sections: Espace de travail (contacts, articles), CRM (offres, ventes, tâches), Service (dispatches, ordres de service), et Système (paramètres, utilisateurs). Cliquez pour explorer."
+    },
+    "header": {
+      "title": "En-tête du tableau de bord ⚡",
+      "content": "Votre centre de contrôle pour les actions rapides. Accédez à la recherche, créez de nouveaux éléments, consultez les notifications, obtenez de l'aide et gérez votre compte. L'en-tête reste visible lors de la navigation."
+    },
+    "globalSearch": {
+      "title": "Recherche globale 🔍",
+      "content": "Trouvez tout instantanément! Recherchez parmi les contacts, offres, ventes, ordres de service, articles et plus. Appuyez sur Ctrl+K (Cmd+K sur Mac) pour ouvrir la recherche de n'importe où. Les résultats apparaissent en temps réel."
+    },
+    "quickCreate": {
+      "title": "Bouton de création rapide ➕",
+      "content": "Créez de nouveaux éléments en un clic! Ce bouton ouvre un menu pour ajouter rapidement: Contacts, Offres, Ventes, Ordres de service, Articles et plus. Pas besoin de quitter votre vue actuelle."
+    },
+    "notifications": {
+      "title": "Cloche de notifications 🔔",
+      "content": "Restez informé! Recevez des alertes pour: nouvelles tâches assignées, changements de statut, messages de collègues et mises à jour système importantes. Cliquez pour voir les détails ou tout marquer comme lu."
+    },
+    "askAi": {
+      "title": "Assistant IA 🤖",
+      "content": "Obtenez de l'aide instantanée! Posez des questions sur FlowService en langage naturel. L'IA comprend toute la plateforme et peut vous guider pour: créer des offres, gérer les ordres de service, utiliser le dispatcher, comprendre les flux de statut, et plus encore. Disponible en français et anglais!"
+    },
+    "userMenu": {
+      "title": "Menu de votre compte 👤",
+      "content": "Accédez aux paramètres de profil, changez le thème (mode clair/sombre), consultez vos préférences, relancez cette visite et déconnectez-vous. Vos initiales apparaissent ici pour une identification rapide."
+    },
+    "kpiCards": {
+      "title": "Cartes indicateurs KPI 📊",
+      "content": "Métriques commerciales en temps réel! Voyez le chiffre d'affaires mensuel, total des contacts, offres actives, ventes réalisées et alertes d'inventaire. Cliquez sur une carte pour naviguer vers ce module."
+    },
+    "salesChart": {
+      "title": "Graphique des ventes 📈",
+      "content": "Répartition visuelle des ventes par statut: En cours (actives), Clôturées (terminées) et Annulées. Cliquez sur 'Voir tout' pour la liste complète et gérer les ventes individuelles."
+    },
+    "offersChart": {
+      "title": "Graphique pipeline des offres 🎯",
+      "content": "Suivez les offres à travers les étapes: Brouillon → Envoyée → Négociation → Acceptée/Rejetée. Cela aide à identifier les blocages et optimiser le taux de conversion. Cliquez 'Voir tout' pour la liste complète."
+    },
+    "crmSection": {
+      "title": "Module CRM 💼",
+      "content": "Vos outils de relation client! Comprend: Offres (devis aux clients), Ventes (commandes confirmées), Tâches (gestion des todo), et Temps & Dépenses (suivi du travail facturable). Cliquez pour développer et explorer."
+    },
+    "serviceSection": {
+      "title": "Module Service 🔧",
+      "content": "Gestion des services terrain! Comprend: Ordres de service (travail à effectuer), Dispatches (travaux planifiés), Dispatcher (interface de planification), et Installations (suivi des équipements). Parfait pour les équipes terrain."
+    },
+    "systemSection": {
+      "title": "Paramètres système ⚙️",
+      "content": "Zone de configuration admin! Gérez: Utilisateurs & Rôles (contrôle d'accès), Lookups (valeurs des listes), Workflows (automatisation), Formulaires dynamiques (listes de contrôle personnalisées), et Paramètres système (préférences entreprise). Réservé aux administrateurs."
+    },
+    "dynamicFormsModule": {
+      "title": "Module Formulaires Dynamiques 📋",
+      "content": "Créez des formulaires, listes de contrôle et sondages personnalisés sans code! Construisez des formulaires bilingues (Anglais/Français) avec plus de 15 types de champs incluant texte, listes déroulantes, signatures, évaluations et plus. Parfait pour les inspections, retours clients et listes de conformité."
+    },
+    "dynamicFormsBuilder": {
+      "title": "Interface du Constructeur 🛠️",
+      "content": "Le constructeur a 3 colonnes: Palette de Champs (glisser les types), Canevas (organiser votre formulaire), et Propriétés (configurer chaque champ). Glissez les champs de la palette vers le canevas, puis configurez les libellés, validations et logique conditionnelle dans le panneau des propriétés."
+    },
+    "dynamicFormsFeatures": {
+      "title": "Fonctionnalités Avancées ✨",
+      "content": "Fonctionnalités puissantes: Formulaires multi-pages (sauts de page pour longues listes), Logique Conditionnelle (afficher/masquer selon les réponses), Signatures Numériques (capture à l'écran), Évaluations Étoiles, et Export PDF. Les formulaires suivent un cycle: Brouillon → Publié → Archivé."
+    },
+    "helpButton": {
+      "title": "Aide et support ❓",
+      "content": "Obtenez de l'aide à tout moment! Accédez: FAQ (questions fréquentes), Assistant IA (réponses instantanées), Tickets support (contacter l'équipe), et Documentation. Vous pouvez aussi relancer cette visite ici."
+    },
+    "offersModule": {
+      "title": "Aperçu du module Offres 📝",
+      "content": "Créez et gérez les devis pour vos clients. Une offre contient: info client, lignes d'articles/services, tarification, remises et dates de validité. Les offres peuvent être converties en ventes une fois acceptées."
+    },
+    "offersAddButton": {
+      "title": "Ajouter une nouvelle offre ➕",
+      "content": "Cliquez ce bouton pour créer une nouvelle offre. Vous entrerez: détails client, sélection d'articles/services, quantités et prix, remises, et période de validité. Enregistrez en brouillon ou envoyez directement."
+    },
+    "offersStatusChange": {
+      "title": "Flux de statut des offres 🔄",
+      "content": "Les offres suivent ce flux: Brouillon (édition) → Envoyée (au client) → Négociation (discussions) → Acceptée ✓ ou Rejetée ✗. Utilisez le menu déroulant pour mettre à jour. Les offres acceptées peuvent être converties en Ventes."
+    },
+    "offersConvertToSale": {
+      "title": "Convertir offre en vente ✅",
+      "content": "Quand un client accepte une offre, cliquez 'Convertir en Vente' pour créer une Commande. Cela copie tous les détails automatiquement. Si des services sont inclus, un Ordre de Service est aussi généré avec les travaux à planifier."
+    },
+    "offersDelete": {
+      "title": "Supprimer une offre 🗑️",
+      "content": "Supprimez les offres non désirées avec le bouton supprimer. Seules les offres en brouillon peuvent être supprimées. Les offres envoyées ou acceptées sont archivées pour garder l'historique. Un dialogue de confirmation évite les suppressions accidentelles."
+    },
+    "offersEdit": {
+      "title": "Modifier une offre ✏️",
+      "content": "Modifiez les détails de l'offre: ajouter/supprimer des lignes, ajuster les prix, changer les remises, mettre à jour les infos client ou modifier les conditions. Seules les offres en brouillon sont entièrement modifiables."
+    },
+    "salesModule": {
+      "title": "Aperçu du module Ventes 💰",
+      "content": "Gérez les commandes confirmées des offres acceptées. Suivez le statut des paiements, générez des factures, surveillez les livraisons et consultez l'historique complet. Chaque vente est liée à son offre d'origine."
+    },
+    "salesStatusChange": {
+      "title": "Flux de statut des ventes 🔄",
+      "content": "Les ventes progressent: Créée → En cours → Partiellement facturée → Entièrement facturée → Clôturée. Utilisez le menu déroulant pour mettre à jour. Les ventes annulées sont gardées pour les rapports mais exclues des listes actives."
+    },
+    "salesInvoice": {
+      "title": "Générer une facture 🧾",
+      "content": "Créez des factures depuis les commandes. Vous pouvez facturer totalement ou partiellement (facturation fractionnée). Le système suit: numéro de facture, montant, date et statut de paiement. Exportez en PDF pour les clients."
+    },
+    "salesViewDetails": {
+      "title": "Voir les détails de vente 👁️",
+      "content": "Cliquez sur une vente pour voir toutes les informations: détails client, lignes d'articles, tarification, ordres de service liés, factures générées, historique des paiements et chronologie d'activité. Tout en un seul endroit."
+    },
+    "serviceOrdersModule": {
+      "title": "Aperçu des ordres de service 🔧",
+      "content": "Suivez le travail à effectuer. Les ordres de service sont créés quand les ventes incluent des services. Ils contiennent des travaux qui sont planifiés et assignés aux techniciens via les dispatches."
+    },
+    "serviceOrdersAddJob": {
+      "title": "Ajouter un travail à l'ordre ➕",
+      "content": "Créez des travaux dans un ordre de service. Chaque travail représente une intervention à un endroit précis. Entrez: description, durée estimée, compétences requises, et liaison avec l'installation/équipement si applicable."
+    },
+    "serviceOrdersStatusChange": {
+      "title": "Statut des ordres de service 🔄",
+      "content": "Les ordres progressent: Ouvert (nouveau) → En cours (travaux planifiés) → Terminé (tous travaux faits) → Clôturé (finalisé). Le statut se met à jour automatiquement selon l'avancement des travaux. Modification manuelle possible."
+    },
+    "dispatchModule": {
+      "title": "Aperçu des Dispatches 📅",
+      "content": "Planifiez et suivez le travail terrain. Un dispatch est créé quand un travail est assigné à un technicien avec une date/heure précise. Les techniciens voient leurs dispatches dans les Tâches quotidiennes et mettent à jour en temps réel."
+    },
+    "dispatchSchedule": {
+      "title": "Planifier un dispatch 📆",
+      "content": "Assignez des travaux aux techniciens: sélectionnez le travail, choisissez un technicien, définissez date/heure et confirmez. Utilisez l'interface Dispatcher pour le glisser-déposer. Considérez la disponibilité et les compétences."
+    },
+    "dispatchStatusChange": {
+      "title": "Mises à jour de statut dispatch 🔄",
+      "content": "Les dispatches progressent: Planifié → En route → Sur site → En cours → Terminé. Les techniciens mettent à jour depuis le mobile. Les managers voient la progression en temps réel sur le tableau dispatcher."
+    },
+    "dispatchTimeLogging": {
+      "title": "Enregistrer temps et dépenses ⏱️",
+      "content": "Suivez le travail facturable sur les dispatches. Enregistrez: heures début/fin, temps de trajet, déductions de pause et matériaux utilisés. Ajoutez des dépenses avec reçus. Tout est lié à l'ordre de service pour facturation."
+    },
+    "dispatchNotes": {
+      "title": "Ajouter notes et pièces jointes 📎",
+      "content": "Documentez le travail effectué: ajoutez des notes, téléchargez des photos (avant/après), joignez des documents et enregistrez les signatures client. Toutes les informations sont sauvegardées dans l'historique du dispatch et de l'ordre."
+    },
+    "contactsModule": {
+      "title": "Gestion des contacts 👥",
+      "content": "Votre base de données clients! Stockez: entreprises et individus, coordonnées, adresses, historique de communication, offres/ventes liées et notes. Filtrez par type (Personne/Entreprise) ou favoris."
+    },
+    "contactsAddButton": {
+      "title": "Ajouter un nouveau contact ➕",
+      "content": "Créez des contacts pour clients, fournisseurs ou partenaires. Entrez: nom, type (personne/entreprise), email, téléphone, adresse et champs personnalisés. Liez les contacts aux entreprises parentes pour la hiérarchie."
+    },
+    "contactsEdit": {
+      "title": "Modifier les détails du contact ✏️",
+      "content": "Mettez à jour les informations de contact à tout moment. Les modifications sont enregistrées dans l'historique d'activité. Fusionnez les doublons, mettez à jour les adresses, ajoutez des numéros ou modifiez les champs personnalisés."
+    },
+    "contactsDelete": {
+      "title": "Supprimer un contact 🗑️",
+      "content": "Supprimez les contacts obsolètes. Les contacts avec des offres, ventes ou ordres de service liés ne peuvent pas être supprimés (archivez-les). Un dialogue de confirmation montre les éléments liés avant suppression."
+    },
+    "articlesModule": {
+      "title": "Articles et inventaire 📦",
+      "content": "Gérez votre catalogue de produits et services. Les articles sont ajoutés aux offres et ventes. Suivez: niveaux de stock, tarification, catégories et fournisseurs. Définissez des alertes de réapprovisionnement."
+    },
+    "articlesAddButton": {
+      "title": "Ajouter un nouvel article ➕",
+      "content": "Créez des articles pour matériaux ou services. Entrez: nom, code, description, type (Matériau/Service), prix unitaire, prix de revient et catégorie. Les matériaux peuvent avoir un suivi de stock activé."
+    },
+    "articlesEdit": {
+      "title": "Modifier les détails de l'article ✏️",
+      "content": "Modifiez les informations d'article: mettez à jour les prix, changez les descriptions, ajustez les niveaux de stock ou mettez à jour les infos fournisseur. Les changements de prix n'affectent pas les offres/ventes existantes."
+    },
+    "articlesStockAdjust": {
+      "title": "Ajuster les niveaux de stock 📊",
+      "content": "Corrigez les comptages d'inventaire: ajoutez le stock reçu, retirez les articles endommagés ou effectuez des inventaires cycliques. Chaque ajustement nécessite une raison et est enregistré pour l'audit."
+    },
+    "complete": {
+      "title": "Visite terminée! 🎉",
+      "content": "Vous connaissez maintenant toutes les fonctionnalités clés! N'oubliez pas: utilisez Création rapide (➕) pour des actions rapides, Recherche globale (🔍) pour tout trouver, et Aide (❓) en cas de besoin. Relancez cette visite depuis votre menu profil. Bon travail!"
+    },
+    "replayTour": "Relancer la visite",
+    "replayTourDesc": "Revoir la visite guidée"
+  }
+}

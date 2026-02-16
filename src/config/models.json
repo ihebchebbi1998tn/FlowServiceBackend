@@ -1,0 +1,41 @@
+{
+  "models": [
+    {
+      "id": "primary",
+      "name": "LLaMA 3.1 8B",
+      "model": "meta-llama/llama-3.1-8b-instruct:free",
+      "apiKey": "YOUR_API_KEY",
+      "apiUrl": "https://openrouter.ai/api/v1/chat/completions",
+      "enabled": true,
+      "priority": 10,
+      "role": "responder"
+    },
+    {
+      "id": "fallback",
+      "name": "Mistral 7B",
+      "model": "mistralai/mistral-7b-instruct:free",
+      "apiKey": "YOUR_API_KEY",
+      "apiUrl": "https://openrouter.ai/api/v1/chat/completions",
+      "enabled": true,
+      "priority": 9,
+      "role": "fallback"
+    },
+    {
+      "id": "analyzer",
+      "name": "LLaMA 3.2 3B",
+      "model": "meta-llama/llama-3.2-3b-instruct:free",
+      "apiKey": "YOUR_API_KEY",
+      "apiUrl": "https://openrouter.ai/api/v1/chat/completions",
+      "enabled": true,
+      "priority": 1,
+      "role": "analyzer"
+    }
+  ],
+  "defaultModel": "primary",
+  "analyzerModel": "analyzer",
+  "fallbackChain": ["fallback"],
+  "visionModels": [],
+  "fallbackEnabled": true,
+  "timeout": 20000,
+  "maxRetries": 1
+}
