@@ -28,6 +28,7 @@ using MyApi.Modules.UserAiSettings.Services;
 using MyApi.Modules.WebsiteBuilder.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Npgsql;
@@ -61,6 +62,10 @@ builder.Services.Configure<GzipCompressionProviderOptions>(options =>
     options.Level = CompressionLevel.Optimal;
 });
 
+// Logging setup (must be before any logger usage)
+var startupLoggerFactory = LoggerFactory.Create(lb => lb.AddConsole());
+var startupLogger = startupLoggerFactory.CreateLogger("Startup");
+
 // ✅ PERFORMANCE: Distributed Cache — Redis when available, in-memory fallback
 var redisUrl = Environment.GetEnvironmentVariable("REDIS_URL");
 if (!string.IsNullOrEmpty(redisUrl))
@@ -72,7 +77,7 @@ if (!string.IsNullOrEmpty(redisUrl))
         options.InstanceName = "flowentra:";
     });
     builder.Services.AddSingleton<ICacheService, RedisCacheService>();
-    logger.LogInformation("✅ Cache backend: Redis ({RedisUrl})", redisUrl[..Math.Min(40, redisUrl.Length)] + "...");
+    startupLogger.LogInformation("✅ Cache backend: Redis ({RedisUrl})", redisUrl[..Math.Min(40, redisUrl.Length)] + "...");
 }
 else
 {
@@ -82,7 +87,7 @@ else
         options.SizeLimit = 10_000;
     });
     builder.Services.AddSingleton<ICacheService, MemoryCacheService>();
-    logger.LogInformation("⚠️ Cache backend: In-Memory (set REDIS_URL for distributed caching)");
+    startupLogger.LogInformation("⚠️ Cache backend: In-Memory (set REDIS_URL for distributed caching)");
 }
 builder.Services.AddSingleton<CacheInvalidationHelper>();
 
@@ -95,9 +100,8 @@ var rawConnection = Environment.GetEnvironmentVariable("DATABASE_URL") ??
 
 string? connectionString = null;
 
-// Logging setup
-var logger = LoggerFactory.Create(builder => builder.AddConsole()).CreateLogger("Startup");
-logger.LogInformation($"Raw connection: {rawConnection?.Substring(0, Math.Min(80, rawConnection?.Length ?? 0))}...");
+// Use the startup logger created earlier
+startupLogger.LogInformation($"Raw connection: {rawConnection?.Substring(0, Math.Min(80, rawConnection?.Length ?? 0))}...");
 
 if (!string.IsNullOrEmpty(rawConnection))
 {
@@ -131,11 +135,11 @@ if (!string.IsNullOrEmpty(rawConnection))
             }
 
             connectionString = npgBuilder.ToString();
-            logger.LogInformation("✅ Successfully built connection string from DATABASE_URL");
+            startupLogger.LogInformation("✅ Successfully built connection string from DATABASE_URL");
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "❌ Failed to parse DATABASE_URL, falling back to raw connection");
+            startupLogger.LogError(ex, "❌ Failed to parse DATABASE_URL, falling back to raw connection");
             connectionString = rawConnection;
         }
     }

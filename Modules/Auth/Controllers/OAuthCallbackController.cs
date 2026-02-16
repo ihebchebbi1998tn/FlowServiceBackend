@@ -7,7 +7,7 @@ namespace MyApi.Modules.Auth.Controllers
 {
     /// <summary>
     /// Handles OAuth provider redirects (GET requests from Google/Microsoft).
-    /// Google/Microsoft redirect here with ?code=...&state=... after user consent.
+    /// Google/Microsoft redirect here with ?code=...&amp;state=... after user consent.
     /// This controller exchanges the code for tokens, resolves the user,
     /// and redirects back to the frontend with auth data.
     /// </summary>
@@ -44,7 +44,7 @@ namespace MyApi.Modules.Auth.Controllers
         // ═══════════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// GET /oauth/google/callback?code=...&state=...&scope=...
+        /// GET /oauth/google/callback?code=...&amp;state=...&amp;scope=...
         /// Called by Google after user grants consent.
         /// </summary>
         [HttpGet("google/callback")]
@@ -108,7 +108,7 @@ namespace MyApi.Modules.Auth.Controllers
         // ═══════════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// GET /oauth/microsoft/callback?code=...&state=...
+        /// GET /oauth/microsoft/callback?code=...&amp;state=...
         /// Called by Microsoft after user grants consent.
         /// </summary>
         [HttpGet("microsoft/callback")]

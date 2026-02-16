@@ -74,7 +74,7 @@ namespace MyApi.Modules.Auth.Controllers
                     return NotFound(new { message = $"OAuth provider '{provider}' is not configured." });
                 }
 
-                object result = provider.ToLower() switch
+                object? result = provider.ToLower() switch
                 {
                     "google" => new
                     {
