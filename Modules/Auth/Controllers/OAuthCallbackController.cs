@@ -7,7 +7,7 @@ namespace MyApi.Modules.Auth.Controllers
 {
     /// <summary>
     /// Handles OAuth provider redirects (GET requests from Google/Microsoft).
-    /// Google redirects here with ?code=...&state=... after user consent.
+    /// Google/Microsoft redirect here with ?code=...&state=... after user consent.
     /// This controller exchanges the code for tokens, resolves the user,
     /// and redirects back to the frontend with auth data.
     /// </summary>
@@ -39,10 +39,13 @@ namespace MyApi.Modules.Auth.Controllers
             _logger = logger;
         }
 
+        // ═══════════════════════════════════════════════════════════════════════
+        //  GOOGLE CALLBACK
+        // ═══════════════════════════════════════════════════════════════════════
+
         /// <summary>
         /// GET /oauth/google/callback?code=...&state=...&scope=...
         /// Called by Google after user grants consent.
-        /// Exchanges code → tokens → email, then logs user in and redirects to frontend.
         /// </summary>
         [HttpGet("google/callback")]
         public async Task<IActionResult> GoogleCallback(
@@ -50,7 +53,6 @@ namespace MyApi.Modules.Auth.Controllers
             [FromQuery] string? state,
             [FromQuery] string? error)
         {
-            // ── Handle denial / errors from Google ──
             if (!string.IsNullOrEmpty(error))
             {
                 _logger.LogWarning("Google OAuth error: {Error}", error);
@@ -65,11 +67,10 @@ namespace MyApi.Modules.Auth.Controllers
 
             try
             {
-                // ── 1. Exchange authorization code for Google tokens ──
-                var googleSection = _configuration.GetSection("OAuth:Google");
-                var clientId = googleSection["ClientId"];
-                var clientSecret = googleSection["ClientSecret"];
-                var redirectUri = googleSection["RedirectUri"]
+                var section = _configuration.GetSection("OAuth:Google");
+                var clientId = section["ClientId"];
+                var clientSecret = section["ClientSecret"];
+                var redirectUri = section["RedirectUri"]
                     ?? $"{Request.Scheme}://{Request.Host}/oauth/google/callback";
 
                 if (string.IsNullOrEmpty(clientId) || string.IsNullOrEmpty(clientSecret))
@@ -78,16 +79,14 @@ namespace MyApi.Modules.Auth.Controllers
                     return Redirect($"{FrontendOrigin}/login?oauth_error=provider_not_configured");
                 }
 
-                var tokenResponse = await ExchangeGoogleCodeAsync(code, clientId, clientSecret, redirectUri);
+                var tokenResponse = await ExchangeCodeAsync(
+                    code, clientId, clientSecret, redirectUri,
+                    "https://oauth2.googleapis.com/token");
 
                 if (tokenResponse == null)
-                {
                     return Redirect($"{FrontendOrigin}/login?oauth_error=token_exchange_failed");
-                }
 
-                // ── 2. Get user info from Google ──
                 var userInfo = await GetGoogleUserInfoAsync(tokenResponse.AccessToken);
-
                 if (userInfo == null || string.IsNullOrEmpty(userInfo.Email))
                 {
                     _logger.LogWarning("Could not retrieve email from Google user info");
@@ -95,31 +94,7 @@ namespace MyApi.Modules.Auth.Controllers
                 }
 
                 _logger.LogInformation("Google OAuth callback for email: {Email}", userInfo.Email);
-
-                // ── 3. Authenticate via existing OAuthLoginAsync ──
-                var authResponse = await _authService.OAuthLoginAsync(userInfo.Email);
-
-                if (!authResponse.Success)
-                {
-                    // User doesn't exist yet — redirect to signup with pre-filled data
-                    var signupParams = $"oauth_provider=google"
-                        + $"&email={Uri.EscapeDataString(userInfo.Email)}"
-                        + $"&first_name={Uri.EscapeDataString(userInfo.FirstName ?? "")}"
-                        + $"&last_name={Uri.EscapeDataString(userInfo.LastName ?? "")}"
-                        + $"&profile_picture={Uri.EscapeDataString(userInfo.Picture ?? "")}";
-
-                    return Redirect($"{FrontendOrigin}/signup?{signupParams}");
-                }
-
-                // ── 4. Redirect to frontend with tokens ──
-                // Using fragment (#) so tokens aren't sent to server in referer headers
-                var fragment = $"access_token={Uri.EscapeDataString(authResponse.AccessToken ?? "")}"
-                    + $"&refresh_token={Uri.EscapeDataString(authResponse.RefreshToken ?? "")}"
-                    + $"&expires_at={Uri.EscapeDataString(authResponse.ExpiresAt?.ToString("o") ?? "")}"
-                    + $"&user_id={authResponse.User?.Id}"
-                    + $"&email={Uri.EscapeDataString(authResponse.User?.Email ?? "")}";
-
-                return Redirect($"{FrontendOrigin}/oauth/callback#{fragment}");
+                return await CompleteOAuthLogin(userInfo, "google");
             }
             catch (Exception ex)
             {
@@ -128,10 +103,108 @@ namespace MyApi.Modules.Auth.Controllers
             }
         }
 
-        // ─── Google Token Exchange ───────────────────────────────────────────
+        // ═══════════════════════════════════════════════════════════════════════
+        //  MICROSOFT CALLBACK
+        // ═══════════════════════════════════════════════════════════════════════
 
-        private async Task<GoogleTokenResponse?> ExchangeGoogleCodeAsync(
-            string code, string clientId, string clientSecret, string redirectUri)
+        /// <summary>
+        /// GET /oauth/microsoft/callback?code=...&state=...
+        /// Called by Microsoft after user grants consent.
+        /// </summary>
+        [HttpGet("microsoft/callback")]
+        public async Task<IActionResult> MicrosoftCallback(
+            [FromQuery] string? code,
+            [FromQuery] string? state,
+            [FromQuery] string? error,
+            [FromQuery(Name = "error_description")] string? errorDescription)
+        {
+            if (!string.IsNullOrEmpty(error))
+            {
+                _logger.LogWarning("Microsoft OAuth error: {Error} — {Description}", error, errorDescription);
+                return Redirect($"{FrontendOrigin}/login?oauth_error={Uri.EscapeDataString(error)}");
+            }
+
+            if (string.IsNullOrEmpty(code))
+            {
+                _logger.LogWarning("Microsoft OAuth callback received without code");
+                return Redirect($"{FrontendOrigin}/login?oauth_error=missing_code");
+            }
+
+            try
+            {
+                var section = _configuration.GetSection("OAuth:Microsoft");
+                var clientId = section["ClientId"];
+                var clientSecret = section["ClientSecret"];
+                var redirectUri = section["RedirectUri"]
+                    ?? $"{Request.Scheme}://{Request.Host}/oauth/microsoft/callback";
+
+                if (string.IsNullOrEmpty(clientId) || string.IsNullOrEmpty(clientSecret))
+                {
+                    _logger.LogError("Microsoft OAuth is not configured (missing ClientId/ClientSecret)");
+                    return Redirect($"{FrontendOrigin}/login?oauth_error=provider_not_configured");
+                }
+
+                var tokenResponse = await ExchangeCodeAsync(
+                    code, clientId, clientSecret, redirectUri,
+                    "https://login.microsoftonline.com/common/oauth2/v2.0/token");
+
+                if (tokenResponse == null)
+                    return Redirect($"{FrontendOrigin}/login?oauth_error=token_exchange_failed");
+
+                var userInfo = await GetMicrosoftUserInfoAsync(tokenResponse.AccessToken);
+                if (userInfo == null || string.IsNullOrEmpty(userInfo.Email))
+                {
+                    _logger.LogWarning("Could not retrieve email from Microsoft user info");
+                    return Redirect($"{FrontendOrigin}/login?oauth_error=email_not_found");
+                }
+
+                _logger.LogInformation("Microsoft OAuth callback for email: {Email}", userInfo.Email);
+                return await CompleteOAuthLogin(userInfo, "microsoft");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error processing Microsoft OAuth callback");
+                return Redirect($"{FrontendOrigin}/login?oauth_error=internal_error");
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════
+        //  SHARED: Complete login & redirect
+        // ═══════════════════════════════════════════════════════════════════════
+
+        private async Task<IActionResult> CompleteOAuthLogin(OAuthUserInfo userInfo, string provider)
+        {
+            var authResponse = await _authService.OAuthLoginAsync(userInfo.Email!);
+
+            if (!authResponse.Success)
+            {
+                // User doesn't exist — redirect to signup with pre-filled data
+                var signupParams = $"oauth_provider={provider}"
+                    + $"&email={Uri.EscapeDataString(userInfo.Email ?? "")}"
+                    + $"&first_name={Uri.EscapeDataString(userInfo.FirstName ?? "")}"
+                    + $"&last_name={Uri.EscapeDataString(userInfo.LastName ?? "")}"
+                    + $"&profile_picture={Uri.EscapeDataString(userInfo.Picture ?? "")}";
+
+                return Redirect($"{FrontendOrigin}/signup?{signupParams}");
+            }
+
+            // Redirect with tokens in fragment (# keeps them out of server logs / referer headers)
+            var fragment = $"access_token={Uri.EscapeDataString(authResponse.AccessToken ?? "")}"
+                + $"&refresh_token={Uri.EscapeDataString(authResponse.RefreshToken ?? "")}"
+                + $"&expires_at={Uri.EscapeDataString(authResponse.ExpiresAt?.ToString("o") ?? "")}"
+                + $"&user_id={authResponse.User?.Id}"
+                + $"&email={Uri.EscapeDataString(authResponse.User?.Email ?? "")}"
+                + $"&provider={provider}";
+
+            return Redirect($"{FrontendOrigin}/oauth/callback#{fragment}");
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════
+        //  SHARED: Token Exchange (Google & Microsoft use the same OAuth2 flow)
+        // ═══════════════════════════════════════════════════════════════════════
+
+        private async Task<OAuthTokenResponse?> ExchangeCodeAsync(
+            string code, string clientId, string clientSecret, string redirectUri, string tokenEndpoint)
         {
             var client = _httpClientFactory.CreateClient();
 
@@ -144,17 +217,17 @@ namespace MyApi.Modules.Auth.Controllers
                 ["grant_type"] = "authorization_code"
             });
 
-            var response = await client.PostAsync("https://oauth2.googleapis.com/token", body);
+            var response = await client.PostAsync(tokenEndpoint, body);
             var json = await response.Content.ReadAsStringAsync();
 
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogError("Google token exchange failed: {Status} {Body}", response.StatusCode, json);
+                _logger.LogError("Token exchange failed at {Endpoint}: {Status} {Body}", tokenEndpoint, response.StatusCode, json);
                 return null;
             }
 
             var tokenData = JsonSerializer.Deserialize<JsonElement>(json);
-            return new GoogleTokenResponse
+            return new OAuthTokenResponse
             {
                 AccessToken = tokenData.GetProperty("access_token").GetString() ?? "",
                 RefreshToken = tokenData.TryGetProperty("refresh_token", out var rt) ? rt.GetString() : null,
@@ -162,16 +235,17 @@ namespace MyApi.Modules.Auth.Controllers
             };
         }
 
-        // ─── Google User Info ────────────────────────────────────────────────
+        // ═══════════════════════════════════════════════════════════════════════
+        //  PROVIDER-SPECIFIC: User Info
+        // ═══════════════════════════════════════════════════════════════════════
 
-        private async Task<GoogleUserInfo?> GetGoogleUserInfoAsync(string accessToken)
+        private async Task<OAuthUserInfo?> GetGoogleUserInfoAsync(string accessToken)
         {
             var client = _httpClientFactory.CreateClient();
             client.DefaultRequestHeaders.Authorization =
                 new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
 
             var response = await client.GetAsync("https://www.googleapis.com/oauth2/v2/userinfo");
-
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogError("Failed to get Google user info: {Status}", response.StatusCode);
@@ -181,7 +255,7 @@ namespace MyApi.Modules.Auth.Controllers
             var json = await response.Content.ReadAsStringAsync();
             var data = JsonSerializer.Deserialize<JsonElement>(json);
 
-            return new GoogleUserInfo
+            return new OAuthUserInfo
             {
                 Email = data.TryGetProperty("email", out var e) ? e.GetString() : null,
                 FirstName = data.TryGetProperty("given_name", out var fn) ? fn.GetString() : null,
@@ -190,16 +264,49 @@ namespace MyApi.Modules.Auth.Controllers
             };
         }
 
-        // ─── Internal DTOs ───────────────────────────────────────────────────
+        private async Task<OAuthUserInfo?> GetMicrosoftUserInfoAsync(string accessToken)
+        {
+            var client = _httpClientFactory.CreateClient();
+            client.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
 
-        private class GoogleTokenResponse
+            var response = await client.GetAsync("https://graph.microsoft.com/v1.0/me");
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogError("Failed to get Microsoft user info: {Status}", response.StatusCode);
+                return null;
+            }
+
+            var json = await response.Content.ReadAsStringAsync();
+            var data = JsonSerializer.Deserialize<JsonElement>(json);
+
+            // Microsoft Graph returns mail or userPrincipalName for email
+            var email = data.TryGetProperty("mail", out var mail) ? mail.GetString() : null;
+            if (string.IsNullOrEmpty(email))
+                email = data.TryGetProperty("userPrincipalName", out var upn) ? upn.GetString() : null;
+
+            return new OAuthUserInfo
+            {
+                Email = email,
+                FirstName = data.TryGetProperty("givenName", out var fn) ? fn.GetString() : null,
+                LastName = data.TryGetProperty("surname", out var ln) ? ln.GetString() : null,
+                // Microsoft Graph photo requires a separate call; skip for now
+                Picture = null,
+            };
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════
+        //  INTERNAL DTOs
+        // ═══════════════════════════════════════════════════════════════════════
+
+        private class OAuthTokenResponse
         {
             public string AccessToken { get; set; } = "";
             public string? RefreshToken { get; set; }
             public string? IdToken { get; set; }
         }
 
-        private class GoogleUserInfo
+        private class OAuthUserInfo
         {
             public string? Email { get; set; }
             public string? FirstName { get; set; }
