@@ -408,16 +408,31 @@ namespace MyApi.Modules.WorkflowEngine.Services
             else if (node.Type.Contains("switch"))
             {
                 var selectedCase = result.SelectedCase?.ToLower() ?? "default";
+                var matchedCase = false;
 
                 foreach (var edge in outgoingEdges)
                 {
                     var handle = edge.SourceHandle?.ToLower() ?? "";
                     var label = edge.Label?.ToLower() ?? "";
 
-                    if (handle == selectedCase || label == selectedCase || 
-                        handle == "default" || label == "default")
+                    // Match the specific case handle (handle ID = case value)
+                    if (handle == selectedCase || label == selectedCase)
                     {
                         nextNodes.Add(edge.Target);
+                        matchedCase = true;
+                    }
+                }
+
+                // Only follow default if no specific case matched
+                if (!matchedCase)
+                {
+                    foreach (var edge in outgoingEdges)
+                    {
+                        var handle = edge.SourceHandle?.ToLower() ?? "";
+                        if (handle == "default")
+                        {
+                            nextNodes.Add(edge.Target);
+                        }
                     }
                 }
             }
