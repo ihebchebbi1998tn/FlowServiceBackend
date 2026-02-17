@@ -56,15 +56,28 @@ namespace MyApi.Modules.Auth.Controllers
             if (!string.IsNullOrEmpty(error))
             {
                 _logger.LogWarning("Google OAuth error: {Error}", error);
+                // If this was an email-connect flow, redirect to /oauth/callback with error
+                if (IsEmailConnectFlow(state))
+                    return Redirect($"{FrontendOrigin}/oauth/callback?error={Uri.EscapeDataString(error)}");
                 return Redirect($"{FrontendOrigin}/login?oauth_error={Uri.EscapeDataString(error)}");
             }
 
             if (string.IsNullOrEmpty(code))
             {
                 _logger.LogWarning("Google OAuth callback received without code");
+                if (IsEmailConnectFlow(state))
+                    return Redirect($"{FrontendOrigin}/oauth/callback?error=missing_code");
                 return Redirect($"{FrontendOrigin}/login?oauth_error=missing_code");
             }
 
+            // ── Email/Calendar connect flow: just forward the code to the frontend ──
+            if (IsEmailConnectFlow(state))
+            {
+                _logger.LogInformation("Email-connect OAuth flow detected, forwarding code to frontend");
+                return Redirect($"{FrontendOrigin}/oauth/callback?code={Uri.EscapeDataString(code)}");
+            }
+
+            // ── Auth login flow: exchange code for tokens and create session ──
             try
             {
                 var section = _configuration.GetSection("OAuth:Google");
@@ -121,15 +134,27 @@ namespace MyApi.Modules.Auth.Controllers
             if (!string.IsNullOrEmpty(error))
             {
                 _logger.LogWarning("Microsoft OAuth error: {Error} — {Description}", error, errorDescription);
+                if (IsEmailConnectFlow(state))
+                    return Redirect($"{FrontendOrigin}/oauth/callback?error={Uri.EscapeDataString(error)}");
                 return Redirect($"{FrontendOrigin}/login?oauth_error={Uri.EscapeDataString(error)}");
             }
 
             if (string.IsNullOrEmpty(code))
             {
                 _logger.LogWarning("Microsoft OAuth callback received without code");
+                if (IsEmailConnectFlow(state))
+                    return Redirect($"{FrontendOrigin}/oauth/callback?error=missing_code");
                 return Redirect($"{FrontendOrigin}/login?oauth_error=missing_code");
             }
 
+            // ── Email/Calendar connect flow: just forward the code to the frontend ──
+            if (IsEmailConnectFlow(state))
+            {
+                _logger.LogInformation("Email-connect OAuth flow detected, forwarding code to frontend");
+                return Redirect($"{FrontendOrigin}/oauth/callback?code={Uri.EscapeDataString(code)}");
+            }
+
+            // ── Auth login flow ──
             try
             {
                 var section = _configuration.GetSection("OAuth:Microsoft");
@@ -167,6 +192,18 @@ namespace MyApi.Modules.Auth.Controllers
                 return Redirect($"{FrontendOrigin}/login?oauth_error=internal_error");
             }
         }
+
+        // ═══════════════════════════════════════════════════════════════════════
+        //  HELPER: Detect email-connect vs auth-login flow via state prefix
+        // ═══════════════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// Returns true if the OAuth state parameter indicates an email/calendar
+        /// connect flow (state starts with "email:"). In this case, the backend
+        /// should NOT exchange the code — just forward it to the frontend.
+        /// </summary>
+        private static bool IsEmailConnectFlow(string? state) =>
+            !string.IsNullOrEmpty(state) && state.StartsWith("email:", StringComparison.OrdinalIgnoreCase);
 
         // ═══════════════════════════════════════════════════════════════════════
         //  SHARED: Complete login & redirect
