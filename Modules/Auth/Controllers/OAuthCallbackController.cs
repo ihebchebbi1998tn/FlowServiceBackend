@@ -21,11 +21,14 @@ namespace MyApi.Modules.Auth.Controllers
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly ILogger<OAuthCallbackController> _logger;
 
+        // Base domain for tenant subdomains
+        private const string BaseDomain = "flowentra.app";
+
         // Default frontend origin — override via env var FRONTEND_ORIGIN
         private string FrontendOrigin =>
             Environment.GetEnvironmentVariable("FRONTEND_ORIGIN")
             ?? _configuration["Frontend:Origin"]
-            ?? "https://flowentra.app";
+            ?? $"https://{BaseDomain}";
 
         public OAuthCallbackController(
             IAuthService authService,
@@ -56,9 +59,8 @@ namespace MyApi.Modules.Auth.Controllers
             if (!string.IsNullOrEmpty(error))
             {
                 _logger.LogWarning("Google OAuth error: {Error}", error);
-                // If this was an email-connect flow, redirect to /oauth/callback with error
                 if (IsEmailConnectFlow(state))
-                    return Redirect($"{FrontendOrigin}/oauth/callback?error={Uri.EscapeDataString(error)}");
+                    return Redirect($"{GetEmailConnectRedirectOrigin(state)}/oauth/callback?error={Uri.EscapeDataString(error)}");
                 return Redirect($"{FrontendOrigin}/login?oauth_error={Uri.EscapeDataString(error)}");
             }
 
@@ -66,15 +68,16 @@ namespace MyApi.Modules.Auth.Controllers
             {
                 _logger.LogWarning("Google OAuth callback received without code");
                 if (IsEmailConnectFlow(state))
-                    return Redirect($"{FrontendOrigin}/oauth/callback?error=missing_code");
+                    return Redirect($"{GetEmailConnectRedirectOrigin(state)}/oauth/callback?error=missing_code");
                 return Redirect($"{FrontendOrigin}/login?oauth_error=missing_code");
             }
 
-            // ── Email/Calendar connect flow: just forward the code to the frontend ──
+            // ── Email/Calendar connect flow: just forward the code to the tenant frontend ──
             if (IsEmailConnectFlow(state))
             {
-                _logger.LogInformation("Email-connect OAuth flow detected, forwarding code to frontend");
-                return Redirect($"{FrontendOrigin}/oauth/callback?code={Uri.EscapeDataString(code)}");
+                var origin = GetEmailConnectRedirectOrigin(state);
+                _logger.LogInformation("Email-connect OAuth flow detected, redirecting code to {Origin}", origin);
+                return Redirect($"{origin}/oauth/callback?code={Uri.EscapeDataString(code)}");
             }
 
             // ── Auth login flow: exchange code for tokens and create session ──
@@ -135,7 +138,7 @@ namespace MyApi.Modules.Auth.Controllers
             {
                 _logger.LogWarning("Microsoft OAuth error: {Error} — {Description}", error, errorDescription);
                 if (IsEmailConnectFlow(state))
-                    return Redirect($"{FrontendOrigin}/oauth/callback?error={Uri.EscapeDataString(error)}");
+                    return Redirect($"{GetEmailConnectRedirectOrigin(state)}/oauth/callback?error={Uri.EscapeDataString(error)}");
                 return Redirect($"{FrontendOrigin}/login?oauth_error={Uri.EscapeDataString(error)}");
             }
 
@@ -143,15 +146,16 @@ namespace MyApi.Modules.Auth.Controllers
             {
                 _logger.LogWarning("Microsoft OAuth callback received without code");
                 if (IsEmailConnectFlow(state))
-                    return Redirect($"{FrontendOrigin}/oauth/callback?error=missing_code");
+                    return Redirect($"{GetEmailConnectRedirectOrigin(state)}/oauth/callback?error=missing_code");
                 return Redirect($"{FrontendOrigin}/login?oauth_error=missing_code");
             }
 
-            // ── Email/Calendar connect flow: just forward the code to the frontend ──
+            // ── Email/Calendar connect flow: just forward the code to the tenant frontend ──
             if (IsEmailConnectFlow(state))
             {
-                _logger.LogInformation("Email-connect OAuth flow detected, forwarding code to frontend");
-                return Redirect($"{FrontendOrigin}/oauth/callback?code={Uri.EscapeDataString(code)}");
+                var origin = GetEmailConnectRedirectOrigin(state);
+                _logger.LogInformation("Email-connect OAuth flow detected, redirecting code to {Origin}", origin);
+                return Redirect($"{origin}/oauth/callback?code={Uri.EscapeDataString(code)}");
             }
 
             // ── Auth login flow ──
@@ -194,16 +198,56 @@ namespace MyApi.Modules.Auth.Controllers
         }
 
         // ═══════════════════════════════════════════════════════════════════════
-        //  HELPER: Detect email-connect vs auth-login flow via state prefix
+        //  HELPER: Detect email-connect flow & resolve tenant origin from state
         // ═══════════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// Returns true if the OAuth state parameter indicates an email/calendar
-        /// connect flow (state starts with "email:"). In this case, the backend
-        /// should NOT exchange the code — just forward it to the frontend.
+        /// Returns true if the OAuth state indicates an email/calendar connect flow.
+        /// State format: "email:{tenant}:{uuid}"
         /// </summary>
         private static bool IsEmailConnectFlow(string? state) =>
             !string.IsNullOrEmpty(state) && state.StartsWith("email:", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Resolves the frontend origin for an email-connect redirect.
+        /// Extracts the tenant from state "email:{tenant}:{uuid}" and builds
+        /// https://{tenant}.flowentra.app. Falls back to the default FrontendOrigin.
+        /// Validates tenant name to prevent open redirect attacks.
+        /// </summary>
+        private string GetEmailConnectRedirectOrigin(string? state)
+        {
+            if (string.IsNullOrEmpty(state)) return FrontendOrigin;
+
+            var parts = state.Split(':');
+            // Expected: ["email", "{tenant}", "{uuid}"]
+            if (parts.Length < 3 || string.IsNullOrWhiteSpace(parts[1])) return FrontendOrigin;
+
+            var tenant = parts[1].Trim().ToLower();
+
+            // "_default" means no tenant (bare domain)
+            if (tenant == "_default") return FrontendOrigin;
+
+            // Validate tenant: only alphanumeric + hyphens (prevent open redirect)
+            if (!System.Text.RegularExpressions.Regex.IsMatch(tenant, @"^[a-z0-9\-]+$"))
+            {
+                _logger.LogWarning("Invalid tenant in OAuth state: {Tenant}", tenant);
+                return FrontendOrigin;
+            }
+
+            // Optional allowlist via env var ALLOWED_TENANTS (comma-separated)
+            var allowed = Environment.GetEnvironmentVariable("ALLOWED_TENANTS");
+            if (!string.IsNullOrEmpty(allowed))
+            {
+                var allowedList = allowed.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                if (!allowedList.Contains(tenant, StringComparer.OrdinalIgnoreCase))
+                {
+                    _logger.LogWarning("Tenant {Tenant} not in ALLOWED_TENANTS list", tenant);
+                    return FrontendOrigin;
+                }
+            }
+
+            return $"https://{tenant}.{BaseDomain}";
+        }
 
         // ═══════════════════════════════════════════════════════════════════════
         //  SHARED: Complete login & redirect
