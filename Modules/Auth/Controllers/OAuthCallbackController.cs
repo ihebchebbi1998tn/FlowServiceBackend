@@ -80,6 +80,14 @@ namespace MyApi.Modules.Auth.Controllers
                 return Redirect($"{origin}/oauth/callback?code={Uri.EscapeDataString(code)}");
             }
 
+            // ── Combined login + email/calendar flow: forward code to frontend for API processing ──
+            if (IsLoginEmailFlow(state))
+            {
+                var origin = GetEmailConnectRedirectOrigin(state);
+                _logger.LogInformation("Combined login+email OAuth flow detected, redirecting code to {Origin}", origin);
+                return Redirect($"{origin}/oauth/callback?code={Uri.EscapeDataString(code)}");
+            }
+
             // ── Auth login flow: exchange code for tokens and create session ──
             try
             {
@@ -198,7 +206,7 @@ namespace MyApi.Modules.Auth.Controllers
         }
 
         // ═══════════════════════════════════════════════════════════════════════
-        //  HELPER: Detect email-connect flow & resolve tenant origin from state
+        //  HELPER: Detect email-connect flow & combined login+email flow
         // ═══════════════════════════════════════════════════════════════════════
 
         /// <summary>
@@ -209,9 +217,17 @@ namespace MyApi.Modules.Auth.Controllers
             !string.IsNullOrEmpty(state) && state.StartsWith("email:", StringComparison.OrdinalIgnoreCase);
 
         /// <summary>
-        /// Resolves the frontend origin for an email-connect redirect.
-        /// Extracts the tenant from state "email:{tenant}:{uuid}" and builds
-        /// https://{tenant}.flowentra.app. Falls back to the default FrontendOrigin.
+        /// Returns true if the OAuth state indicates a combined login + email/calendar flow.
+        /// State format: "login_email:{tenant}:{uuid}"
+        /// The frontend initiated Google Sign-In with email+calendar scopes combined.
+        /// </summary>
+        private static bool IsLoginEmailFlow(string? state) =>
+            !string.IsNullOrEmpty(state) && state.StartsWith("login_email:", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Resolves the frontend origin for an email-connect or combined login+email redirect.
+        /// Extracts the tenant from state "email:{tenant}:{uuid}" or "login_email:{tenant}:{uuid}"
+        /// and builds https://{tenant}.flowentra.app. Falls back to the default FrontendOrigin.
         /// Validates tenant name to prevent open redirect attacks.
         /// </summary>
         private string GetEmailConnectRedirectOrigin(string? state)
@@ -219,10 +235,12 @@ namespace MyApi.Modules.Auth.Controllers
             if (string.IsNullOrEmpty(state)) return FrontendOrigin;
 
             var parts = state.Split(':');
-            // Expected: ["email", "{tenant}", "{uuid}"]
-            if (parts.Length < 3 || string.IsNullOrWhiteSpace(parts[1])) return FrontendOrigin;
-
-            var tenant = parts[1].Trim().ToLower();
+            // Expected: ["email"|"login_email", "{tenant}", "{uuid}"]
+            if (parts.Length < 3) return FrontendOrigin;
+            // For "login_email" prefix, tenant is at index 1 (login_email:{tenant}:{uuid})
+            var tenantIndex = 1;
+            var tenant = parts[tenantIndex]?.Trim().ToLower();
+            if (string.IsNullOrWhiteSpace(tenant)) return FrontendOrigin;
 
             // "_default" means no tenant (bare domain)
             if (tenant == "_default") return FrontendOrigin;

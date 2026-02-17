@@ -81,7 +81,14 @@ namespace MyApi.Modules.Auth.Controllers
                         provider    = "google",
                         clientId    = section["ClientId"],
                         authUrl     = "https://accounts.google.com/o/oauth2/v2/auth",
-                        scopes      = new[] { "openid", "email", "profile" },
+                        // Combined scopes: auth + Gmail + Calendar for single-consent flow
+                        scopes      = new[] {
+                            "openid", "email", "profile",
+                            "https://www.googleapis.com/auth/gmail.modify",
+                            "https://www.googleapis.com/auth/gmail.send",
+                            "https://www.googleapis.com/auth/calendar.events",
+                            "https://www.googleapis.com/auth/profile.emails.read"
+                        },
                         redirectUri = section["RedirectUri"] ?? "https://api.flowentra.app/oauth/google/callback"
                     },
                     "microsoft" => new
@@ -316,6 +323,171 @@ namespace MyApi.Modules.Auth.Controllers
                 });
             }
         }
+
+        /// <summary>
+        /// Combined OAuth login + email/calendar integration.
+        /// Exchanges the authorization code for tokens, authenticates the user,
+        /// and creates a ConnectedEmailAccount with Gmail+Calendar access.
+        /// </summary>
+        [HttpPost("oauth-login-with-email")]
+        [AllowAnonymous]
+        public async Task<IActionResult> OAuthLoginWithEmail([FromBody] OAuthLoginWithEmailRequest request)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(request?.Code))
+                {
+                    return BadRequest(new { success = false, message = "Authorization code is required" });
+                }
+
+                var provider = request.Provider?.ToLower() ?? "google";
+                var section = _configuration.GetSection($"OAuth:{char.ToUpper(provider[0])}{provider[1..]}");
+                var clientId = section["ClientId"];
+                var clientSecret = section["ClientSecret"];
+                var redirectUri = request.RedirectUri ?? section["RedirectUri"] ?? "";
+
+                if (string.IsNullOrEmpty(clientId) || string.IsNullOrEmpty(clientSecret))
+                {
+                    return BadRequest(new { success = false, message = $"OAuth provider '{provider}' is not configured." });
+                }
+
+                // Exchange code for tokens
+                using var httpClient = new HttpClient();
+                var tokenEndpoint = provider == "google"
+                    ? "https://oauth2.googleapis.com/token"
+                    : "https://login.microsoftonline.com/common/oauth2/v2.0/token";
+
+                var body = new FormUrlEncodedContent(new Dictionary<string, string>
+                {
+                    ["code"] = request.Code,
+                    ["client_id"] = clientId,
+                    ["client_secret"] = clientSecret,
+                    ["redirect_uri"] = redirectUri,
+                    ["grant_type"] = "authorization_code"
+                });
+
+                var tokenResponse = await httpClient.PostAsync(tokenEndpoint, body);
+                var tokenJson = await tokenResponse.Content.ReadAsStringAsync();
+
+                if (!tokenResponse.IsSuccessStatusCode)
+                {
+                    _logger.LogError("Token exchange failed: {Status} {Body}", tokenResponse.StatusCode, tokenJson);
+                    return BadRequest(new { success = false, message = "Failed to exchange authorization code" });
+                }
+
+                var tokenData = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(tokenJson);
+                var accessToken = tokenData.GetProperty("access_token").GetString() ?? "";
+                var refreshToken = tokenData.TryGetProperty("refresh_token", out var rt) ? rt.GetString() : null;
+                var scopes = tokenData.TryGetProperty("scope", out var sc) ? sc.GetString() : null;
+
+                // Get user info from provider
+                httpClient.DefaultRequestHeaders.Authorization =
+                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
+
+                var userInfoResponse = provider == "google"
+                    ? await httpClient.GetAsync("https://www.googleapis.com/oauth2/v2/userinfo")
+                    : await httpClient.GetAsync("https://graph.microsoft.com/v1.0/me");
+
+                if (!userInfoResponse.IsSuccessStatusCode)
+                {
+                    return BadRequest(new { success = false, message = "Failed to get user info from provider" });
+                }
+
+                var userInfoJson = await userInfoResponse.Content.ReadAsStringAsync();
+                var userInfoData = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(userInfoJson);
+
+                string? email, firstName, lastName, picture;
+                if (provider == "google")
+                {
+                    email = userInfoData.TryGetProperty("email", out var e) ? e.GetString() : null;
+                    firstName = userInfoData.TryGetProperty("given_name", out var fn) ? fn.GetString() : null;
+                    lastName = userInfoData.TryGetProperty("family_name", out var ln) ? ln.GetString() : null;
+                    picture = userInfoData.TryGetProperty("picture", out var pic) ? pic.GetString() : null;
+                }
+                else
+                {
+                    email = userInfoData.TryGetProperty("mail", out var mail) ? mail.GetString() : null;
+                    if (string.IsNullOrEmpty(email))
+                        email = userInfoData.TryGetProperty("userPrincipalName", out var upn) ? upn.GetString() : null;
+                    firstName = userInfoData.TryGetProperty("givenName", out var fn) ? fn.GetString() : null;
+                    lastName = userInfoData.TryGetProperty("surname", out var ln) ? ln.GetString() : null;
+                    picture = null;
+                }
+
+                if (string.IsNullOrEmpty(email))
+                {
+                    return BadRequest(new { success = false, message = "Could not retrieve email from provider" });
+                }
+
+                // Try to log in the user
+                var authResponse = await _authService.OAuthLoginAsync(email);
+
+                if (!authResponse.Success)
+                {
+                    // User doesn't exist — return signup needed with user info
+                    return Ok(new
+                    {
+                        success = false,
+                        needsSignup = true,
+                        message = "Account not found. Please sign up first.",
+                        userInfo = new { email, firstName, lastName, profilePictureUrl = picture }
+                    });
+                }
+
+                // User authenticated — now create ConnectedEmailAccount with the OAuth tokens
+                // This stores Gmail+Calendar tokens so the user doesn't need to connect separately
+                if (authResponse.User != null && !string.IsNullOrEmpty(refreshToken))
+                {
+                    try
+                    {
+                        // Use the EmailAccountService to create/update the connected account
+                        var emailAccountService = HttpContext.RequestServices
+                            .GetService<MyApi.Modules.EmailAccounts.Services.IEmailAccountService>();
+
+                        if (emailAccountService != null)
+                        {
+                            await emailAccountService.HandleOAuthCallbackAsync(
+                                authResponse.User.Id,
+                                new MyApi.Modules.EmailAccounts.DTOs.OAuthCallbackDto
+                                {
+                                    Provider = provider,
+                                    Code = request.Code,
+                                    RedirectUri = redirectUri,
+                                    EmailVisibility = "share_everything",
+                                    CalendarVisibility = "share_everything",
+                                });
+
+                            _logger.LogInformation(
+                                "Auto-connected email account for user {UserId} ({Email}) during combined OAuth login",
+                                authResponse.User.Id, email);
+                        }
+                    }
+                    catch (Exception emailEx)
+                    {
+                        // Don't fail the login if email account creation fails
+                        _logger.LogWarning(emailEx,
+                            "Failed to auto-connect email account during combined OAuth login for user {UserId}",
+                            authResponse.User.Id);
+                    }
+                }
+
+                _logger.LogInformation("Combined OAuth login successful: {Email}", email);
+                return Ok(new
+                {
+                    success = true,
+                    message = "Login successful with email & calendar connected",
+                    accessToken = authResponse.AccessToken,
+                    refreshToken = authResponse.RefreshToken,
+                    expiresAt = authResponse.ExpiresAt?.ToString("o"),
+                    user = authResponse.User,
+                    emailConnected = true,
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during combined OAuth login");
+                return StatusCode(500, new { success = false, message = "An internal error occurred" });
+            }
 
         /// <summary>
         /// Refresh access token using refresh token
