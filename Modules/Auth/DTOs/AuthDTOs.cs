@@ -133,22 +133,6 @@ namespace MyApi.Modules.Auth.DTOs
     }
 
     /// <summary>
-    /// Request DTO for combined OAuth login + email/calendar integration.
-    /// The frontend sends the authorization code obtained with combined scopes
-    /// (openid, email, profile, gmail, calendar).
-    /// </summary>
-    public class OAuthLoginWithEmailRequest
-    {
-        [Required]
-        public string Code { get; set; } = string.Empty;
-
-        [Required]
-        public string Provider { get; set; } = "google";
-
-        public string? RedirectUri { get; set; }
-    }
-
-    /// <summary>
     /// Response DTO for admin-exists endpoint with preferences for login page theming
     /// </summary>
     public class AdminExistsResultDto
