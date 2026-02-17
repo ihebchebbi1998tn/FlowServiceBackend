@@ -276,6 +276,31 @@ namespace MyApi.Modules.WorkflowEngine.Services
                         description = "Rule 2: Some dispatches completed",
                         config = new { newStatus = "partially_completed" }
                     }
+                },
+
+                // 7. Sale Closed → Service Order Invoiced
+                new {
+                    id = "trigger-sale-closed",
+                    type = "sale-status-trigger",
+                    position = new { x = 100, y = 950 },
+                    data = new {
+                        label = "Sale Closed",
+                        type = "sale-status-trigger",
+                        fromStatus = (string?)null,
+                        toStatus = "closed",
+                        description = "Triggers when a sale is closed"
+                    }
+                },
+                new {
+                    id = "action-so-invoiced",
+                    type = "update-service-order-status",
+                    position = new { x = 400, y = 950 },
+                    data = new {
+                        label = "Service Order → Invoiced",
+                        type = "update-service-order-status",
+                        description = "When sale is closed, mark the linked service order as invoiced",
+                        config = new { newStatus = "invoiced" }
+                    }
                 }
             };
         }
@@ -292,7 +317,8 @@ namespace MyApi.Modules.WorkflowEngine.Services
                 new { id = "edge-6", source = "trigger-dispatch-rejected", target = "action-so-back-to-planning", type = "smoothstep" },
                 new { id = "edge-7", source = "trigger-dispatch-completed", target = "condition-all-done", type = "smoothstep" },
                 new { id = "edge-8", source = "condition-all-done", target = "action-so-tech-complete", sourceHandle = "yes", type = "smoothstep", label = "YES" },
-                new { id = "edge-9", source = "condition-all-done", target = "action-so-partial", sourceHandle = "no", type = "smoothstep", label = "NO" }
+                new { id = "edge-9", source = "condition-all-done", target = "action-so-partial", sourceHandle = "no", type = "smoothstep", label = "NO" },
+                new { id = "edge-10", source = "trigger-sale-closed", target = "action-so-invoiced", type = "smoothstep" }
             };
         }
 
@@ -352,6 +378,15 @@ namespace MyApi.Modules.WorkflowEngine.Services
                     EntityType = "dispatch",
                     FromStatus = "in_progress",
                     ToStatus = "completed",
+                    IsActive = true
+                },
+                new WorkflowTrigger
+                {
+                    WorkflowId = workflowId,
+                    NodeId = "trigger-sale-closed",
+                    EntityType = "sale",
+                    FromStatus = null,
+                    ToStatus = "closed",
                     IsActive = true
                 }
             };
