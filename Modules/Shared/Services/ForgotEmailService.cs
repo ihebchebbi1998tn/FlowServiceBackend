@@ -44,6 +44,7 @@ namespace MyApi.Modules.Shared.Services
         /// <param name="recipientEmail">Email address of the user requesting password reset</param>
         /// <param name="resetLink">Full URL link to reset password (e.g., https://localhost:3000/reset-password?token=xxx)</param>
         /// <param name="recipientName">Name of the user (optional, defaults to "User")</param>
+        /// <param name="language">Email language ("en" for English, "fr" for French, defaults to "en")</param>
         /// <returns>True if email sent successfully, false otherwise</returns>
         public async Task<bool> SendPasswordResetEmailAsync(string recipientEmail, string resetLink, string recipientName = "User", string language = "en")
         {
@@ -390,6 +391,7 @@ namespace MyApi.Modules.Shared.Services
         /// <param name="recipientEmail">Email address to send OTP to</param>
         /// <param name="otpCode">6-digit OTP code</param>
         /// <param name="recipientName">Name of the user (optional)</param>
+        /// <param name="language">Email language ("en" for English, "fr" for French, defaults to "en")</param>
         /// <returns>True if email sent successfully, false otherwise</returns>
         public async Task<bool> SendOtpEmailAsync(string recipientEmail, string otpCode, string recipientName = "User", string language = "en")
         {
