@@ -214,7 +214,7 @@ namespace MyApi.Modules.Users.Controllers
         /// Update profile picture for a specific regular user
         /// </summary>
         [HttpPut("{id}/profile-picture")]
-        public async Task<IActionResult> UpdateUserProfilePicture(int id, [FromBody] UpdateProfilePictureRequestDto request)
+        public async Task<IActionResult> UpdateUserProfilePicture(int id, [FromBody] MyApi.Modules.Auth.DTOs.UpdateProfilePictureRequestDto request)
         {
             try
             {
