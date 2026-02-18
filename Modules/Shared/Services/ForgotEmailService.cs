@@ -154,8 +154,8 @@ namespace MyApi.Modules.Shared.Services
             gap: 16px;
         }}
         .logo {{
-            width: 40px;
-            height: 40px;
+            width: 70px;
+            height: 70px;
             flex-shrink: 0;
         }}
         .header-text {{
@@ -259,7 +259,7 @@ namespace MyApi.Modules.Shared.Services
             </div>
 
             <div class='content'>
-                <div class='greeting'>Bonjour {recipientName},</div>
+                <div class='greeting'>Bonjour {recipientName},</div></div>
                 
                 <div class='description'>
                     Nous avons reçu une demande de réinitialisation du mot de passe associé à votre compte Flowentra. Cliquez sur le bouton ci-dessous pour créer un nouveau mot de passe sécurisé.
@@ -335,8 +335,8 @@ namespace MyApi.Modules.Shared.Services
             gap: 16px;
         }}
         .logo {{
-            width: 40px;
-            height: 40px;
+            width: 70px;
+            height: 70px;
             flex-shrink: 0;
         }}
         .header-text {{
@@ -590,8 +590,8 @@ namespace MyApi.Modules.Shared.Services
             gap: 16px;
         }}
         .logo {{
-            width: 40px;
-            height: 40px;
+            width: 70px;
+            height: 70px;
             flex-shrink: 0;
         }}
         .header-text {{
@@ -761,8 +761,8 @@ namespace MyApi.Modules.Shared.Services
             gap: 16px;
         }}
         .logo {{
-            width: 40px;
-            height: 40px;
+            width: 70px;
+            height: 70px;
             flex-shrink: 0;
         }}
         .header-text {{
