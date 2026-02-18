@@ -154,7 +154,7 @@ namespace MyApi.Modules.RetenueSource.Controllers
         // ─── Calculation ───
 
         /// <summary>
-        /// GET /api/retenue-source/calculate?amount_paid=1000&rs_type_code=10
+        /// GET /api/retenue-source/calculate?amount_paid=1000&amp;rs_type_code=10
         /// </summary>
         [HttpGet("calculate")]
         public IActionResult CalculateRS([FromQuery] decimal amount_paid, [FromQuery] string rs_type_code = "10")

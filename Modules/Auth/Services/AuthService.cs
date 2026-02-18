@@ -1004,11 +1004,15 @@ namespace MyApi.Modules.Auth.Services
                 await _context.SaveChangesAsync();
                 _logger.LogInformation($"[FORGOT_PASSWORD] OTP saved to database for user {admin.Id}, expires at {admin.OtpExpiresAt:O}");
 
-                // Send email with OTP via ForgotEmailService
+                // Send email with OTP via ForgotEmailService (default to English, can extend with user language preference)
+                var userLanguage = "en"; // Default to English ("en" or "fr")
+                // TODO: Parse language from admin.PreferencesJson if available
+                
                 var emailSent = await _forgotEmailService.SendOtpEmailAsync(
                     admin.Email, 
                     otp, 
-                    admin.FirstName
+                    admin.FirstName,
+                    userLanguage
                 );
 
                 if (!emailSent)
@@ -1096,7 +1100,7 @@ namespace MyApi.Modules.Auth.Services
                     };
                 }
 
-                var timeRemainingSeconds = admin.OtpExpiresAt.Value.Subtract(DateTime.UtcNow).TotalSeconds;
+                var timeRemainingSeconds = admin.OtpExpiresAt!.Value.Subtract(DateTime.UtcNow).TotalSeconds;
                 _logger.LogInformation($"[VERIFY_OTP] OTP still valid for user {admin.Id}. {timeRemainingSeconds:F0} seconds remaining.");
 
                 // Verify OTP matches
