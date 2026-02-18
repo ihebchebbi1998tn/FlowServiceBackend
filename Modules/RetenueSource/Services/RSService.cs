@@ -4,6 +4,7 @@ using MyApi.Modules.RetenueSource.DTOs;
 using MyApi.Modules.RetenueSource.Models;
 using MyApi.Modules.Documents.Models;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Xml;
 
 namespace MyApi.Modules.RetenueSource.Services
@@ -88,17 +89,33 @@ namespace MyApi.Modules.RetenueSource.Services
 
         public async Task<RSRecordDto> CreateRSRecordAsync(CreateRSRecordDto dto, string userId)
         {
-            // Validate
-            if (string.IsNullOrWhiteSpace(dto.InvoiceNumber))
-                throw new ArgumentException("Invoice number is required");
+            // ─── CRITICAL COMPLIANCE VALIDATIONS ───
+            
+            // 1. CRITICAL: Tax ID Format Validation (Matricule Fiscal)
             if (string.IsNullOrWhiteSpace(dto.SupplierTaxId))
                 throw new ArgumentException("Supplier Tax ID (Matricule Fiscal) is required");
+            if (!Regex.IsMatch(dto.SupplierTaxId, @"^\d{10,15}$"))
+                throw new ArgumentException("Invalid Matricule Fiscal format: must be 10-15 digits");
+
+            // 2. CRITICAL: Date Validations
+            if (dto.PaymentDate > DateTime.UtcNow.Date)
+                throw new ArgumentException("Payment date cannot be in the future");
+            if (dto.InvoiceDate > dto.PaymentDate)
+                throw new ArgumentException("Invoice date cannot be after payment date");
+
+            // 3. Standard Validations
+            if (string.IsNullOrWhiteSpace(dto.InvoiceNumber))
+                throw new ArgumentException("Invoice number is required");
             if (dto.InvoiceAmount <= 0)
                 throw new ArgumentException("Invoice amount must be positive");
             if (dto.AmountPaid <= 0)
                 throw new ArgumentException("Amount paid must be positive");
             if (!RS_RATES.ContainsKey(dto.RSTypeCode))
                 throw new ArgumentException($"Unknown RS type code: {dto.RSTypeCode}");
+
+            // 4. MEDIUM PRIORITY: Supplier Type & Treaty Validations
+            if (dto.IsExemptByTreaty && string.IsNullOrWhiteSpace(dto.TreatyCode))
+                throw new ArgumentException("Treaty code is required when exemption by treaty is claimed");
 
             var rsAmount = CalculateRSAmountInternal(dto.AmountPaid, dto.RSTypeCode);
 
@@ -110,6 +127,25 @@ namespace MyApi.Modules.RetenueSource.Services
                 r.EntityType == dto.EntityType);
             if (duplicate)
                 throw new InvalidOperationException("Duplicate RS entry for this invoice and payment date");
+
+            // ─── CRITICAL COMPLIANCE: Calculate Declaration Deadline ───
+            // Tunisia requirement: Declaration must be filed by 20th of month following payment
+            var paymentNextMonth = dto.PaymentDate.AddMonths(1);
+            var declarationDeadline = new DateTime(paymentNextMonth.Year, paymentNextMonth.Month, 20);
+            var isOverdue = DateTime.UtcNow > declarationDeadline;
+            var daysLate = isOverdue ? (int)(DateTime.UtcNow - declarationDeadline).TotalDays : 0;
+            
+            // CRITICAL COMPLIANCE: Calculate penalty for late declaration
+            // Tunisia: Typically 5% of RS amount per month late (simplified approach)
+            decimal penaltyAmount = 0m;
+            if (isOverdue && daysLate > 0)
+            {
+                // 5% per month or part thereof
+                int monthsLate = (daysLate / 30) + (daysLate % 30 > 0 ? 1 : 0);
+                penaltyAmount = rsAmount * 0.05m * monthsLate;
+                _logger.LogWarning("RS Record {Invoice} is overdue by {DaysLate} days, penalty: {Penalty} TND",
+                    dto.InvoiceNumber, daysLate, penaltyAmount);
+            }
 
             var record = new RSRecord
             {
@@ -132,6 +168,20 @@ namespace MyApi.Modules.RetenueSource.Services
                 Notes = dto.Notes,
                 Status = "pending",
                 TEJExported = false,
+                
+                // ─── CRITICAL COMPLIANCE FIELDS ───
+                DeclarationDeadline = declarationDeadline,
+                IsOverdue = isOverdue,
+                DaysLate = daysLate,
+                PenaltyAmount = penaltyAmount,
+                
+                // ─── MEDIUM PRIORITY COMPLIANCE FIELDS ───
+                SupplierType = dto.SupplierType,
+                IsExemptByTreaty = dto.IsExemptByTreaty,
+                TreatyCode = dto.TreatyCode,
+                TEJTransmissionStatus = "pending",
+                
+                // ─── AUDIT TRAIL ───
                 CreatedAt = DateTime.UtcNow,
                 CreatedBy = userId
             };
@@ -175,6 +225,13 @@ namespace MyApi.Modules.RetenueSource.Services
                 record.RSAmount = CalculateRSAmountInternal(record.AmountPaid, record.RSTypeCode);
             }
 
+            // ─── Update Compliance Fields ───
+            if (dto.SupplierType != null) record.SupplierType = dto.SupplierType;
+            if (dto.IsExemptByTreaty.HasValue) record.IsExemptByTreaty = dto.IsExemptByTreaty.Value;
+            if (dto.TreatyCode != null) record.TreatyCode = dto.TreatyCode;
+            if (dto.TEJAcceptanceNumber != null) record.TEJAcceptanceNumber = dto.TEJAcceptanceNumber;
+            if (dto.TEJTransmissionStatus != null) record.TEJTransmissionStatus = dto.TEJTransmissionStatus;
+
             record.ModifiedAt = DateTime.UtcNow;
             record.ModifiedBy = userId;
 
@@ -214,6 +271,37 @@ namespace MyApi.Modules.RetenueSource.Services
 
         // ─── TEJ Export ───
 
+        /// <summary>
+        /// CRITICAL COMPLIANCE: Validate all records meet Tunisia tax authority requirements before export
+        /// </summary>
+        private void ValidateComplianceBeforeExport(List<RSRecord> records)
+        {
+            var complianceErrors = new List<string>();
+
+            foreach (var record in records)
+            {
+                // Check for overdue records
+                if (record.IsOverdue)
+                    complianceErrors.Add($"Invoice {record.InvoiceNumber}: Past declaration deadline by {record.DaysLate} days (penalty: {record.PenaltyAmount:F2} TND)");
+
+                // Check declaration deadline is set
+                if (record.DeclarationDeadline == null)
+                    complianceErrors.Add($"Invoice {record.InvoiceNumber}: Declaration deadline not calculated");
+
+                // Warn if supplier type not classified (medium priority, not blocking)
+                if (string.IsNullOrEmpty(record.SupplierType))
+                    _logger.LogWarning("RS Record {Invoice}: Supplier type not classified", record.InvoiceNumber);
+            }
+
+            // Block export if critical compliance issues found
+            if (complianceErrors.Count > 0)
+            {
+                throw new InvalidOperationException($"Compliance validation failed:\n{string.Join("\n", complianceErrors)}");
+            }
+
+            _logger.LogInformation("Compliance validation passed for {Count} records", records.Count);
+        }
+
         public async Task<TEJExportResponseDto> ExportTEJAsync(TEJExportRequestDto request, string userId)
         {
             var records = await _db.RSRecords
@@ -225,6 +313,17 @@ namespace MyApi.Modules.RetenueSource.Services
 
             if (records.Count == 0)
                 throw new InvalidOperationException("No pending RS records found for the selected month");
+
+            // ─── CRITICAL: Validate all records comply before export ───
+            try
+            {
+                ValidateComplianceBeforeExport(records);
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogError(ex, "Export blocked: Compliance validation failed for {Month}/{Year}", request.Month, request.Year);
+                throw new InvalidOperationException($"Cannot export: {ex.Message}");
+            }
 
             // Determine declarant
             var declarant = request.Declarant ?? new TEJDeclarantDto
@@ -389,32 +488,96 @@ namespace MyApi.Modules.RetenueSource.Services
             using (var writer = XmlWriter.Create(ms, settings))
             {
                 writer.WriteStartDocument();
+                
+                // Root element with metadata attributes
                 writer.WriteStartElement("Declaration");
+                writer.WriteAttributeString("Version", "2.0");
+                writer.WriteAttributeString("TransmissionDateTime", DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"));
+                writer.WriteAttributeString("DeclarationPeriod", $"{records.First().PaymentDate.Year}-{records.First().PaymentDate.Month:D2}");
 
-                // Declarant
+                // ─── Declaration Header ───
+                writer.WriteStartElement("DeclarationHeader");
+                writer.WriteElementString("DeclarationType", "RETENUE_A_LA_SOURCE");
+                writer.WriteElementString("TaxYear", records.First().PaymentDate.Year.ToString());
+                writer.WriteElementString("DeclarationMonth", records.First().PaymentDate.Month.ToString());
+                writer.WriteElementString("TotalRecords", records.Count.ToString());
+                writer.WriteElementString("TotalWithheldAmount", records.Sum(r => r.RSAmount).ToString("F2"));
+                writer.WriteElementString("CurrentDateTime", DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss"));
+                writer.WriteEndElement(); // DeclarationHeader
+
+                // ─── Declarant (Enhanced) ───
                 writer.WriteStartElement("Declarant");
                 writer.WriteElementString("Name", declarant.Name);
                 writer.WriteElementString("TaxID", declarant.TaxId);
+                writer.WriteElementString("Country", "TN"); // Tunisia
                 writer.WriteElementString("Address", declarant.Address);
-                writer.WriteEndElement();
+                writer.WriteElementString("Email", declarant.Email ?? "");
+                writer.WriteElementString("Phone", declarant.Phone ?? "");
+                writer.WriteElementString("ActivityCode", ""); // Could be mapped from entity
+                writer.WriteEndElement(); // Declarant
 
-                // Beneficiaries
+                // ─── Beneficiaries (Enhanced) ───
                 writer.WriteStartElement("Beneficiaries");
+                
+                decimal totalAmount = 0;
+                decimal totalRSAmount = 0;
+                
                 foreach (var r in records)
                 {
+                    totalAmount += r.AmountPaid;
+                    totalRSAmount += r.RSAmount;
+
                     writer.WriteStartElement("Beneficiary");
+                    
+                    // Basic Info
                     writer.WriteElementString("Name", r.SupplierName);
                     writer.WriteElementString("TaxID", r.SupplierTaxId);
                     writer.WriteElementString("Address", r.SupplierAddress ?? "");
-                    writer.WriteElementString("InvoiceNumber", r.InvoiceNumber);
-                    writer.WriteElementString("InvoiceDate", r.InvoiceDate.ToString("yyyy-MM-dd"));
-                    writer.WriteElementString("PaymentDate", r.PaymentDate.ToString("yyyy-MM-dd"));
-                    writer.WriteElementString("PaymentAmount", r.AmountPaid.ToString("F2"));
-                    writer.WriteElementString("RSAmount", r.RSAmount.ToString("F2"));
-                    writer.WriteElementString("RSTypeCode", r.RSTypeCode);
-                    writer.WriteEndElement();
+                    writer.WriteElementString("Country", "TN"); // Default to Tunisia
+                    
+                    // Invoice Details
+                    writer.WriteStartElement("Invoice");
+                    writer.WriteElementString("Number", r.InvoiceNumber);
+                    writer.WriteElementString("Date", r.InvoiceDate.ToString("yyyy-MM-dd"));
+                    writer.WriteElementString("Amount", r.InvoiceAmount.ToString("F2"));
+                    writer.WriteEndElement(); // Invoice
+
+                    // Payment Details
+                    writer.WriteStartElement("Payment");
+                    writer.WriteElementString("Date", r.PaymentDate.ToString("yyyy-MM-dd"));
+                    writer.WriteElementString("Amount", r.AmountPaid.ToString("F2"));
+                    writer.WriteEndElement(); // Payment
+
+                    // Withholding Details
+                    writer.WriteStartElement("Withholding");
+                    writer.WriteElementString("TypeCode", r.RSTypeCode);
+                    writer.WriteElementString("Rate", GetRSRate(r.RSTypeCode).ToString("F2"));
+                    writer.WriteElementString("Amount", r.RSAmount.ToString("F2"));
+                    writer.WriteElementString("Stage", "FINAL"); // Could be provisional/advance/final
+                    writer.WriteElementString("IsPartial", "false"); // Could reference IsPartialWithholding if model has it
+                    writer.WriteEndElement(); // Withholding
+
+                    // Compliance Metadata
+                    writer.WriteStartElement("Compliance");
+                    writer.WriteElementString("RecordID", r.Id.ToString());
+                    writer.WriteElementString("CreatedDate", r.CreatedAt.ToString("yyyy-MM-dd"));
+                    writer.WriteElementString("Status", r.Status ?? "PENDING");
+                    writer.WriteElementString("Notes", r.Notes ?? "");
+                    writer.WriteEndElement(); // Compliance
+
+                    writer.WriteEndElement(); // Beneficiary
                 }
-                writer.WriteEndElement();
+                
+                writer.WriteEndElement(); // Beneficiaries
+
+                // ─── Summary Statistics ───
+                writer.WriteStartElement("Summary");
+                writer.WriteElementString("RecordCount", records.Count.ToString());
+                writer.WriteElementString("TotalPaymentAmount", totalAmount.ToString("F2"));
+                writer.WriteElementString("TotalWithheldAmount", totalRSAmount.ToString("F2"));
+                decimal avgRate = records.Count > 0 ? (totalRSAmount / totalAmount) * 100 : 0;
+                writer.WriteElementString("AverageWithholdingRate", avgRate.ToString("F2"));
+                writer.WriteEndElement(); // Summary
 
                 writer.WriteEndElement(); // Declaration
                 writer.WriteEndDocument();
@@ -471,6 +634,11 @@ namespace MyApi.Modules.RetenueSource.Services
             return doc.Id;
         }
 
+        private decimal GetRSRate(string typeCode)
+        {
+            return RS_RATES.ContainsKey(typeCode) ? RS_RATES[typeCode] : 0m;
+        }
+
         private static RSRecordDto MapToDto(RSRecord r) => new()
         {
             Id = r.Id,
@@ -494,6 +662,21 @@ namespace MyApi.Modules.RetenueSource.Services
             TEJExported = r.TEJExported,
             TEJFileName = r.TEJFileName,
             Notes = r.Notes,
+            
+            // CRITICAL COMPLIANCE FIELDS
+            DeclarationDeadline = r.DeclarationDeadline,
+            IsOverdue = r.IsOverdue,
+            DaysLate = r.DaysLate,
+            PenaltyAmount = r.PenaltyAmount,
+            
+            // MEDIUM PRIORITY COMPLIANCE FIELDS
+            SupplierType = r.SupplierType,
+            IsExemptByTreaty = r.IsExemptByTreaty,
+            TreatyCode = r.TreatyCode,
+            TEJAcceptanceNumber = r.TEJAcceptanceNumber,
+            TEJTransmissionStatus = r.TEJTransmissionStatus,
+            
+            // AUDIT TRAIL
             CreatedAt = r.CreatedAt,
             CreatedBy = r.CreatedBy,
             ModifiedAt = r.ModifiedAt,

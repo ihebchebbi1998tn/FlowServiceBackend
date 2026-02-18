@@ -95,6 +95,64 @@ namespace MyApi.Modules.RetenueSource.Models
         [MaxLength(255)]
         public string? TEJFileName { get; set; }
 
+        /// <summary>
+        /// COMPLIANCE CRITICAL: Declaration deadline (20th of month following payment)
+        /// </summary>
+        [Column("DeclarationDeadline")]
+        public DateTime? DeclarationDeadline { get; set; }
+
+        /// <summary>
+        /// COMPLIANCE CRITICAL: Is this record past declaration deadline?
+        /// </summary>
+        [Column("IsOverdue")]
+        public bool IsOverdue { get; set; } = false;
+
+        /// <summary>
+        /// COMPLIANCE CRITICAL: Days past deadline (for penalty calculation)
+        /// </summary>
+        [Column("DaysLate")]
+        public int DaysLate { get; set; } = 0;
+
+        /// <summary>
+        /// COMPLIANCE CRITICAL: Penalty amount for late declaration (Tunisia requirement)
+        /// </summary>
+        [Column("PenaltyAmount", TypeName = "decimal(15,2)")]
+        public decimal PenaltyAmount { get; set; } = 0m;
+
+        /// <summary>
+        /// COMPLIANCE MEDIUM: Supplier classification (individual/company/non_resident)
+        /// </summary>
+        [Column("SupplierType")]
+        [MaxLength(20)]
+        public string? SupplierType { get; set; } // individual, company, non_resident
+
+        /// <summary>
+        /// COMPLIANCE MEDIUM: Is this supplier exempt by bilateral treaty (EU-TN, AGTC, etc)?
+        /// </summary>
+        [Column("IsExemptByTreaty")]
+        public bool IsExemptByTreaty { get; set; } = false;
+
+        /// <summary>
+        /// COMPLIANCE MEDIUM: Treaty code if exempt (e.g., "EU-TN", "AGTC")
+        /// </summary>
+        [Column("TreatyCode")]
+        [MaxLength(20)]
+        public string? TreatyCode { get; set; }
+
+        /// <summary>
+        /// COMPLIANCE MEDIUM: TEJ acceptance number from tax authority
+        /// </summary>
+        [Column("TEJAcceptanceNumber")]
+        [MaxLength(255)]
+        public string? TEJAcceptanceNumber { get; set; }
+
+        /// <summary>
+        /// COMPLIANCE MEDIUM: TEJ transmission status (pending/accepted/rejected)
+        /// </summary>
+        [Column("TEJTransmissionStatus")]
+        [MaxLength(20)]
+        public string TEJTransmissionStatus { get; set; } = "pending"; // pending, accepted, rejected
+
         [Column("Notes")]
         [MaxLength(1000)]
         public string? Notes { get; set; }

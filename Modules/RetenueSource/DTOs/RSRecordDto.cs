@@ -28,6 +28,21 @@ namespace MyApi.Modules.RetenueSource.DTOs
         public bool TEJExported { get; set; }
         public string? TEJFileName { get; set; }
         public string? Notes { get; set; }
+        
+        // ─── CRITICAL COMPLIANCE FIELDS ───
+        public DateTime? DeclarationDeadline { get; set; }
+        public bool IsOverdue { get; set; }
+        public int DaysLate { get; set; }
+        public decimal PenaltyAmount { get; set; }
+        
+        // ─── MEDIUM PRIORITY COMPLIANCE FIELDS ───
+        public string? SupplierType { get; set; }  // individual, company, non_resident
+        public bool IsExemptByTreaty { get; set; }
+        public string? TreatyCode { get; set; }
+        public string? TEJAcceptanceNumber { get; set; }
+        public string TEJTransmissionStatus { get; set; } = "pending"; // pending, accepted, rejected
+        
+        // ─── AUDIT TRAIL ───
         public DateTime CreatedAt { get; set; }
         public string CreatedBy { get; set; } = string.Empty;
         public DateTime? ModifiedAt { get; set; }
@@ -54,6 +69,11 @@ namespace MyApi.Modules.RetenueSource.DTOs
         public string PayerTaxId { get; set; } = string.Empty;
         public string? PayerAddress { get; set; }
         public string? Notes { get; set; }
+        
+        // ─── MEDIUM PRIORITY COMPLIANCE FIELDS ───
+        public string? SupplierType { get; set; }  // individual, company, non_resident
+        public bool IsExemptByTreaty { get; set; } = false;
+        public string? TreatyCode { get; set; }
     }
 
     // ─── Update Request ───
@@ -74,6 +94,13 @@ namespace MyApi.Modules.RetenueSource.DTOs
         public string? PayerAddress { get; set; }
         public string? Notes { get; set; }
         public string? Status { get; set; }
+        
+        // ─── COMPLIANCE FIELDS (Updateable) ───
+        public string? SupplierType { get; set; }
+        public bool? IsExemptByTreaty { get; set; }
+        public string? TreatyCode { get; set; }
+        public string? TEJAcceptanceNumber { get; set; }
+        public string? TEJTransmissionStatus { get; set; }
     }
 
     // ─── TEJ Export Request ───
