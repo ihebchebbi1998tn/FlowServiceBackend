@@ -471,11 +471,11 @@ namespace MyApi.Modules.Users.Controllers
 
                 var (success, message, resetToken) = await _userService.VerifyOtpAsync(request.Email, request.OtpCode);
 
-                return Ok(new ApiResponse<MyApi.Modules.Auth.DTOs.PasswordResetResponseDto>
+                return Ok(new ApiResponse<VerifyOtpResponseDto>
                 {
                     Success = success,
                     Message = message,
-                    Data = new MyApi.Modules.Auth.DTOs.PasswordResetResponseDto
+                    Data = new VerifyOtpResponseDto
                     {
                         Success = success,
                         Message = message,
