@@ -511,8 +511,10 @@ namespace MyApi.Modules.RetenueSource.Services
                 writer.WriteElementString("TaxID", declarant.TaxId);
                 writer.WriteElementString("Country", "TN"); // Tunisia
                 writer.WriteElementString("Address", declarant.Address);
-                writer.WriteElementString("Email", declarant.Email ?? "");
-                writer.WriteElementString("Phone", declarant.Phone ?? "");
+                if (!string.IsNullOrEmpty(declarant.Email))
+                    writer.WriteElementString("Email", declarant.Email);
+                if (!string.IsNullOrEmpty(declarant.Phone))
+                    writer.WriteElementString("Phone", declarant.Phone);
                 writer.WriteElementString("ActivityCode", ""); // Could be mapped from entity
                 writer.WriteEndElement(); // Declarant
 
