@@ -393,20 +393,18 @@ namespace MyApi.Modules.Auth.Controllers
 
                 var emailLower = request.Email.ToLower();
 
-                // Check MainAdminUsers
-                var adminExists = await _context.MainAdminUsers
-                    .AnyAsync(u => u.Email.ToLower() == emailLower && u.IsActive);
-
-                if (adminExists)
+                // Check MainAdminUsers first
+                var adminUser = await _authService.GetUserByEmailAsync(request.Email);
+                if (adminUser != null)
                 {
                     return Ok(new { exists = true, message = "Admin user found" });
                 }
 
-                // Check regular Users
-                var userExists = await _context.Users
-                    .AnyAsync(u => u.Email.ToLower() == emailLower && u.IsActive && !u.IsDeleted);
+                // Check regular Users table
+                var regularUser = await _context.Users
+                    .FirstOrDefaultAsync(u => u.Email.ToLower() == emailLower && u.IsActive && !u.IsDeleted);
 
-                if (userExists)
+                if (regularUser != null)
                 {
                     return Ok(new { exists = true, message = "User found" });
                 }
