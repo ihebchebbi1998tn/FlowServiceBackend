@@ -4,6 +4,7 @@ using MyApi.Modules.Shared.Services;
 using MyApi.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 
 namespace MyApi.Modules.Auth.Controllers
