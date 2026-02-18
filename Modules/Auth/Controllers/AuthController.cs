@@ -373,10 +373,8 @@ namespace MyApi.Modules.Auth.Controllers
         }
 
         /// <summary>
-        /// Verify OTP code sent to email
+        /// Check if an email exists in either MainAdminUsers or Users table
         /// </summary>
-        /// <param name="request">Email and OTP code</param>
-        /// <returns>Reset token if OTP is valid</returns>
         [HttpPost("check-email-exists")]
         [AllowAnonymous]
         public async Task<ActionResult<object>> CheckEmailExists([FromBody] ForgotPasswordRequestDto request)
@@ -388,8 +386,27 @@ namespace MyApi.Modules.Auth.Controllers
                     return BadRequest(new { exists = false, message = "Email is required" });
                 }
 
-                var admin = await _authService.GetUserByEmailAsync(request.Email);
-                return Ok(new { exists = admin != null });
+                var emailLower = request.Email.ToLower();
+
+                // Check MainAdminUsers
+                var adminExists = await _context.MainAdminUsers
+                    .AnyAsync(u => u.Email.ToLower() == emailLower && u.IsActive);
+
+                if (adminExists)
+                {
+                    return Ok(new { exists = true, message = "Admin user found" });
+                }
+
+                // Check regular Users
+                var userExists = await _context.Users
+                    .AnyAsync(u => u.Email.ToLower() == emailLower && u.IsActive && !u.IsDeleted);
+
+                if (userExists)
+                {
+                    return Ok(new { exists = true, message = "User found" });
+                }
+
+                return Ok(new { exists = false, message = "Email not found" });
             }
             catch (Exception ex)
             {

@@ -965,17 +965,20 @@ namespace MyApi.Modules.Auth.Services
         {
             try
             {
+                _logger.LogInformation($"[FORGOT_PASSWORD] ========== METHOD STARTED ==========");
                 _logger.LogInformation($"[FORGOT_PASSWORD] Starting password reset request for email: {request.Email}");
 
-                var emailLower = request.Email.ToLower();
+                var emailLower = request.Email.ToLower().Trim();
+                _logger.LogInformation($"[FORGOT_PASSWORD] Normalized email: {emailLower}");
 
                 // First check MainAdminUsers
+                _logger.LogInformation($"[FORGOT_PASSWORD] STEP 1: Checking MainAdminUsers table...");
                 var admin = await _context.MainAdminUsers
                     .FirstOrDefaultAsync(u => u.Email.ToLower() == emailLower);
 
                 if (admin != null)
                 {
-                    _logger.LogInformation($"[FORGOT_PASSWORD] Admin user found with ID: {admin.Id}, Email: {admin.Email}");
+                    _logger.LogInformation($"[FORGOT_PASSWORD] ✓ Admin user found with ID: {admin.Id}, Email: {admin.Email}");
 
                     // Clear any existing OTP first
                     if (!string.IsNullOrEmpty(admin.OtpCode))
@@ -997,8 +1000,8 @@ namespace MyApi.Modules.Auth.Services
                     await _context.SaveChangesAsync();
                     _logger.LogInformation($"[FORGOT_PASSWORD] OTP saved to database for admin user {admin.Id}, expires at {admin.OtpExpiresAt:O}");
 
-                    // Send email with OTP via ForgotEmailService (default to English, can extend with user language preference)
-                    var userLanguage = "en"; // Default to English ("en" or "fr")
+                    // Send email with OTP via ForgotEmailService
+                    var userLanguage = "en"; 
                     
                     var emailSent = await _forgotEmailService.SendOtpEmailAsync(
                         admin.Email, 
@@ -1009,7 +1012,7 @@ namespace MyApi.Modules.Auth.Services
 
                     if (!emailSent)
                     {
-                        _logger.LogWarning($"[FORGOT_PASSWORD] CRITICAL: Failed to send OTP email to {request.Email}, but OTP was stored in database. Email service returned false.");
+                        _logger.LogWarning($"[FORGOT_PASSWORD] Failed to send OTP email to {request.Email}, but OTP was stored in database.");
                     }
 
                     _logger.LogInformation($"[FORGOT_PASSWORD] OTP email sent successfully to {request.Email}");
@@ -1021,13 +1024,33 @@ namespace MyApi.Modules.Auth.Services
                     };
                 }
 
-                // If not found in MainAdminUsers, check regular Users table
+                _logger.LogInformation($"[FORGOT_PASSWORD] ✗ Admin NOT found, moving to Users table");
+                _logger.LogInformation($"[FORGOT_PASSWORD] STEP 2: Checking Users table for email: {emailLower}");
+
+                // Count all users to verify DbSet is accessible
+                var totalUsersCount = await _context.Users.CountAsync();
+                _logger.LogInformation($"[FORGOT_PASSWORD] Total users in database: {totalUsersCount}");
+
+                // If not found in MainAdminUsers, check regular Users table - be less restrictive first to diagnose
+                _logger.LogInformation($"[FORGOT_PASSWORD] STEP 2A: Getting ALL users with email (no filters)...");
+                var allUsersWithEmail = await _context.Users
+                    .Where(u => u.Email.ToLower() == emailLower)
+                    .ToListAsync();
+
+                _logger.LogInformation($"[FORGOT_PASSWORD] Found {allUsersWithEmail.Count} total users with email {emailLower}");
+
+                foreach (var debugUser in allUsersWithEmail)
+                {
+                    _logger.LogInformation($"[FORGOT_PASSWORD] DEBUG - User: ID={debugUser.Id}, Email={debugUser.Email}, IsActive={debugUser.IsActive}, IsDeleted={debugUser.IsDeleted}");
+                }
+
+                _logger.LogInformation($"[FORGOT_PASSWORD] STEP 2B: Getting users with IsActive=true AND IsDeleted=false...");
                 var regularUser = await _context.Users
                     .FirstOrDefaultAsync(u => u.Email.ToLower() == emailLower && u.IsActive && !u.IsDeleted);
 
                 if (regularUser != null)
                 {
-                    _logger.LogInformation($"[FORGOT_PASSWORD] Regular user found with ID: {regularUser.Id}, Email: {regularUser.Email}");
+                    _logger.LogInformation($"[FORGOT_PASSWORD] ✓ Regular user found with ID: {regularUser.Id}, Email: {regularUser.Email}");
 
                     // Clear any existing OTP first
                     if (!string.IsNullOrEmpty(regularUser.OtpCode))
@@ -1048,10 +1071,10 @@ namespace MyApi.Modules.Auth.Services
                     regularUser.ModifyUser = "system";
 
                     await _context.SaveChangesAsync();
-                    _logger.LogInformation($"[FORGOT_PASSWORD] OTP saved to database for regular user {regularUser.Id}, expires at {regularUser.OtpExpiresAt:O}");
+                    _logger.LogInformation($"[FORGOT_PASSWORD] ✓ OTP saved to database for regular user {regularUser.Id}, expires at {regularUser.OtpExpiresAt:O}");
 
                     // Send email with OTP via ForgotEmailService
-                    var userLanguage = "en"; // Default to English ("en" or "fr")
+                    var userLanguage = "en"; 
                     
                     var emailSent = await _forgotEmailService.SendOtpEmailAsync(
                         regularUser.Email, 
@@ -1062,10 +1085,10 @@ namespace MyApi.Modules.Auth.Services
 
                     if (!emailSent)
                     {
-                        _logger.LogWarning($"[FORGOT_PASSWORD] CRITICAL: Failed to send OTP email to {request.Email}, but OTP was stored in database. Email service returned false.");
+                        _logger.LogWarning($"[FORGOT_PASSWORD] Failed to send OTP email to {request.Email}, but OTP was stored in database.");
                     }
 
-                    _logger.LogInformation($"[FORGOT_PASSWORD] OTP email sent successfully to {request.Email}");
+                    _logger.LogInformation($"[FORGOT_PASSWORD] ✓ OTP email sent successfully to {request.Email}");
 
                     return new AuthResponseDto
                     {
@@ -1075,8 +1098,13 @@ namespace MyApi.Modules.Auth.Services
                 }
 
                 // Email not found in either table
-                _logger.LogInformation($"[FORGOT_PASSWORD] Email not found in database: {request.Email}");
-                // Don't disclose if email exists for security
+                _logger.LogError($"[FORGOT_PASSWORD] ✗✗✗ EMAIL NOT FOUND IN ANY TABLE ✗✗✗");
+                _logger.LogError($"[FORGOT_PASSWORD] Searched email: {emailLower}");
+                _logger.LogError($"[FORGOT_PASSWORD] Total users count: {totalUsersCount}");
+                _logger.LogError($"[FORGOT_PASSWORD] Users with that email (all statuses): {allUsersWithEmail.Count}");
+                _logger.LogError($"[FORGOT_PASSWORD] Users with that email (IsActive=true, IsDeleted=false): 0");
+                _logger.LogInformation($"[FORGOT_PASSWORD] ========== METHOD ENDING ==========");
+                
                 return new AuthResponseDto
                 {
                     Success = true,
