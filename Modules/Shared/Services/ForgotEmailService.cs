@@ -128,120 +128,171 @@ namespace MyApi.Modules.Shared.Services
             box-sizing: border-box;
         }}
         body {{
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', sans-serif;
-            background-color: #f5f5f5;
-            color: #333;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', sans-serif;
+            background-color: #f8f9fa;
+            color: #1a1a1a;
+            line-height: 1.6;
+        }}
+        .wrapper {{
+            width: 100%;
+            background-color: #f8f9fa;
+            padding: 40px 0;
         }}
         .container {{
-            max-width: 600px;
-            margin: 40px auto;
+            max-width: 580px;
+            margin: 0 auto;
             background-color: #ffffff;
             border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
             overflow: hidden;
         }}
         .header {{
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            padding: 40px 20px;
-            text-align: center;
-            color: white;
+            padding: 32px 40px;
+            border-bottom: 1px solid #e8e8e8;
+            display: flex;
+            align-items: center;
+            gap: 16px;
         }}
-        .header h1 {{
-            font-size: 28px;
-            margin-bottom: 5px;
+        .logo {{
+            width: 40px;
+            height: 40px;
+            flex-shrink: 0;
+        }}
+        .header-text {{
+            flex: 1;
+        }}
+        .header-text h1 {{
+            font-size: 20px;
+            font-weight: 600;
+            color: #1a1a1a;
+            margin: 0;
         }}
         .content {{
-            padding: 40px 30px;
+            padding: 40px;
         }}
-        .content h2 {{
-            color: #333;
-            font-size: 22px;
-            margin-bottom: 20px;
-        }}
-        .content p {{
-            color: #666;
+        .greeting {{
             font-size: 16px;
-            line-height: 1.6;
+            font-weight: 600;
+            color: #1a1a1a;
             margin-bottom: 20px;
         }}
-        .reset-button {{
+        .description {{
+            font-size: 14px;
+            color: #555555;
+            line-height: 1.8;
+            margin-bottom: 32px;
+        }}
+        .cta-button {{
             display: inline-block;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background-color: #003d7a;
             color: white;
-            padding: 14px 40px;
+            padding: 12px 32px;
             text-decoration: none;
             border-radius: 6px;
             font-weight: 600;
-            margin: 30px 0;
-            transition: transform 0.2s;
-        }}
-        .reset-button:hover {{
-            transform: translateY(-2px);
-        }}
-        .warning {{
-            background-color: #fff3cd;
-            border-left: 4px solid #ffc107;
-            padding: 15px;
-            margin: 20px 0;
-            border-radius: 4px;
             font-size: 14px;
-            color: #856404;
+            text-align: center;
+            margin: 24px 0;
+            transition: background-color 0.2s;
         }}
-        .link-container {{
+        .cta-button:hover {{
+            background-color: #002d5e;
+        }}
+        .link-section {{
+            margin: 24px 0;
+            padding: 16px;
             background-color: #f8f9fa;
-            padding: 15px;
-            border-radius: 4px;
-            margin: 20px 0;
-            word-break: break-all;
+            border-radius: 6px;
+            border-left: 4px solid #003d7a;
+        }}
+        .link-label {{
             font-size: 12px;
+            color: #888888;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }}
+        .link-text {{
+            font-size: 12px;
+            color: #003d7a;
+            word-break: break-all;
+            font-family: 'Courier New', monospace;
+        }}
+        .warning-box {{
+            background-color: #fff8e6;
+            border-left: 4px solid #f0ad4e;
+            padding: 16px;
+            border-radius: 6px;
+            margin: 24px 0;
+            font-size: 13px;
+            color: #7d6608;
+            line-height: 1.6;
+        }}
+        .warning-box strong {{
+            display: block;
+            margin-bottom: 8px;
         }}
         .footer {{
+            padding: 32px 40px;
             background-color: #f8f9fa;
-            padding: 30px;
+            border-top: 1px solid #e8e8e8;
             text-align: center;
-            color: #999;
-            font-size: 12px;
-            border-top: 1px solid #e0e0e0;
         }}
-        .footer p {{
-            margin: 5px 0;
+        .footer-text {{
+            font-size: 12px;
+            color: #888888;
+            margin: 4px 0;
+            line-height: 1.6;
+        }}
+        .divider {{
+            height: 1px;
+            background-color: #e8e8e8;
+            margin: 16px 0;
         }}
     </style>
 </head>
 <body>
-    <div class='container'>
-        <div class='header'>
-            <h1>🔐 Réinitialisation du mot de passe</h1>
-            <p>FlowService</p>
-        </div>
-
-        <div class='content'>
-            <h2>Bonjour {recipientName},</h2>
-
-            <p>Nous avons reçu une demande de réinitialisation du mot de passe associé à votre compte FlowService. Cliquez sur le bouton ci-dessous pour créer un nouveau mot de passe:</p>
-
-            <center>
-                <a href='{resetLink}' class='reset-button'>Réinitialiser le mot de passe</a>
-            </center>
-
-            <p style='text-align: center; color: #999; font-size: 14px;'>Ou copiez et collez ce lien dans votre navigateur:</p>
-            <div class='link-container'>
-                <a href='{resetLink}' style='color: #667eea; text-decoration: none;'>{resetLink}</a>
+    <div class='wrapper'>
+        <div class='container'>
+            <div class='header'>
+                <img src='https://www.flowentra.io/assets/flowentra-logo-C6CB7Ftw.png' alt='Flowentra' class='logo' />
+                <div class='header-text'>
+                    <h1>Flowentra</h1>
+                </div>
             </div>
 
-            <div class='warning'>
-                <strong>⏱️ Important:</strong> Ce lien expire dans 1 heure pour des raisons de sécurité. Si vous n'avez pas demandé une réinitialisation de mot de passe, veuillez ignorer cet email.
+            <div class='content'>
+                <div class='greeting'>Bonjour {recipientName},</div>
+                
+                <div class='description'>
+                    Nous avons reçu une demande de réinitialisation du mot de passe associé à votre compte Flowentra. Cliquez sur le bouton ci-dessous pour créer un nouveau mot de passe sécurisé.
+                </div>
+
+                <center>
+                    <a href='{resetLink}' class='cta-button'>Réinitialiser mon mot de passe</a>
+                </center>
+
+                <div class='link-section'>
+                    <div class='link-label'>Ou copiez ce lien:</div>
+                    <div class='link-text'>{resetLink}</div>
+                </div>
+
+                <div class='warning-box'>
+                    <strong>⏱️ Expiration:</strong> Ce lien reste valide pendant 1 heure. Pour des raisons de sécurité, n'hésitez pas à le supprimer et à demander un nouveau code si vous ne l'utilisez pas immédiatement.
+                </div>
+
+                <div style='font-size: 13px; color: #555555; margin-top: 24px; line-height: 1.8;'>
+                    <strong>Pour votre sécurité :</strong><br/>
+                    Ne partagez jamais ce lien avec quiconque. L'équipe Flowentra ne vous demandera jamais votre mot de passe par email.
+                </div>
             </div>
 
-            <p style='font-size: 14px;'>
-                Pour votre sécurité, ne partagez jamais ce lien avec quiconque. L'équipe d'assistance FlowService ne vous demandera jamais votre mot de passe.
-            </p>
-        </div>
-
-        <div class='footer'>
-            <p><strong>FlowService™</strong> | Gestion professionnelle des flux de travail</p>
-            <p>© {DateTime.Now.Year} FlowService. Tous les droits réservés.</p>
-            <p>Ceci est un message automatisé. Veuillez ne pas répondre à cet email.</p>
+            <div class='footer'>
+                <div class='footer-text'><strong>Flowentra™</strong> | Gestion intelligente des workflows</div>
+                <div class='divider'></div>
+                <div class='footer-text'>© {DateTime.Now.Year} Flowentra. Tous les droits réservés.</div>
+                <div class='footer-text' style='margin-top: 12px; font-size: 11px;'>Ceci est un message automatisé. Veuillez ne pas répondre à cet email.</div>
+            </div>
         </div>
     </div>
 </body>
@@ -264,120 +315,171 @@ namespace MyApi.Modules.Shared.Services
             box-sizing: border-box;
         }}
         body {{
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', sans-serif;
-            background-color: #f5f5f5;
-            color: #333;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', sans-serif;
+            background-color: #f8f9fa;
+            color: #1a1a1a;
+            line-height: 1.6;
+        }}
+        .wrapper {{
+            width: 100%;
+            background-color: #f8f9fa;
+            padding: 40px 0;
         }}
         .container {{
-            max-width: 600px;
-            margin: 40px auto;
+            max-width: 580px;
+            margin: 0 auto;
             background-color: #ffffff;
             border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
             overflow: hidden;
         }}
         .header {{
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            padding: 40px 20px;
-            text-align: center;
-            color: white;
+            padding: 32px 40px;
+            border-bottom: 1px solid #e8e8e8;
+            display: flex;
+            align-items: center;
+            gap: 16px;
         }}
-        .header h1 {{
-            font-size: 28px;
-            margin-bottom: 5px;
+        .logo {{
+            width: 40px;
+            height: 40px;
+            flex-shrink: 0;
+        }}
+        .header-text {{
+            flex: 1;
+        }}
+        .header-text h1 {{
+            font-size: 20px;
+            font-weight: 600;
+            color: #1a1a1a;
+            margin: 0;
         }}
         .content {{
-            padding: 40px 30px;
+            padding: 40px;
         }}
-        .content h2 {{
-            color: #333;
-            font-size: 22px;
-            margin-bottom: 20px;
-        }}
-        .content p {{
-            color: #666;
+        .greeting {{
             font-size: 16px;
-            line-height: 1.6;
+            font-weight: 600;
+            color: #1a1a1a;
             margin-bottom: 20px;
         }}
-        .reset-button {{
+        .description {{
+            font-size: 14px;
+            color: #555555;
+            line-height: 1.8;
+            margin-bottom: 32px;
+        }}
+        .cta-button {{
             display: inline-block;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background-color: #003d7a;
             color: white;
-            padding: 14px 40px;
+            padding: 12px 32px;
             text-decoration: none;
             border-radius: 6px;
             font-weight: 600;
-            margin: 30px 0;
-            transition: transform 0.2s;
-        }}
-        .reset-button:hover {{
-            transform: translateY(-2px);
-        }}
-        .warning {{
-            background-color: #fff3cd;
-            border-left: 4px solid #ffc107;
-            padding: 15px;
-            margin: 20px 0;
-            border-radius: 4px;
             font-size: 14px;
-            color: #856404;
+            text-align: center;
+            margin: 24px 0;
+            transition: background-color 0.2s;
         }}
-        .link-container {{
+        .cta-button:hover {{
+            background-color: #002d5e;
+        }}
+        .link-section {{
+            margin: 24px 0;
+            padding: 16px;
             background-color: #f8f9fa;
-            padding: 15px;
-            border-radius: 4px;
-            margin: 20px 0;
-            word-break: break-all;
+            border-radius: 6px;
+            border-left: 4px solid #003d7a;
+        }}
+        .link-label {{
             font-size: 12px;
+            color: #888888;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }}
+        .link-text {{
+            font-size: 12px;
+            color: #003d7a;
+            word-break: break-all;
+            font-family: 'Courier New', monospace;
+        }}
+        .warning-box {{
+            background-color: #fff8e6;
+            border-left: 4px solid #f0ad4e;
+            padding: 16px;
+            border-radius: 6px;
+            margin: 24px 0;
+            font-size: 13px;
+            color: #7d6608;
+            line-height: 1.6;
+        }}
+        .warning-box strong {{
+            display: block;
+            margin-bottom: 8px;
         }}
         .footer {{
+            padding: 32px 40px;
             background-color: #f8f9fa;
-            padding: 30px;
+            border-top: 1px solid #e8e8e8;
             text-align: center;
-            color: #999;
-            font-size: 12px;
-            border-top: 1px solid #e0e0e0;
         }}
-        .footer p {{
-            margin: 5px 0;
+        .footer-text {{
+            font-size: 12px;
+            color: #888888;
+            margin: 4px 0;
+            line-height: 1.6;
+        }}
+        .divider {{
+            height: 1px;
+            background-color: #e8e8e8;
+            margin: 16px 0;
         }}
     </style>
 </head>
 <body>
-    <div class='container'>
-        <div class='header'>
-            <h1>🔐 Password Reset Request</h1>
-            <p>FlowService</p>
-        </div>
-
-        <div class='content'>
-            <h2>Hello {recipientName},</h2>
-
-            <p>We received a request to reset the password associated with your FlowService account. Click the button below to create a new password:</p>
-
-            <center>
-                <a href='{resetLink}' class='reset-button'>Reset Password</a>
-            </center>
-
-            <p style='text-align: center; color: #999; font-size: 14px;'>Or copy and paste this link in your browser:</p>
-            <div class='link-container'>
-                <a href='{resetLink}' style='color: #667eea; text-decoration: none;'>{resetLink}</a>
+    <div class='wrapper'>
+        <div class='container'>
+            <div class='header'>
+                <img src='https://www.flowentra.io/assets/flowentra-logo-C6CB7Ftw.png' alt='Flowentra' class='logo' />
+                <div class='header-text'>
+                    <h1>Flowentra</h1>
+                </div>
             </div>
 
-            <div class='warning'>
-                <strong>⏱️ Important:</strong> This link will expire in 1 hour for security reasons. If you didn't request a password reset, please ignore this email and your account will remain secure.
+            <div class='content'>
+                <div class='greeting'>Hello {recipientName},</div>
+                
+                <div class='description'>
+                    We received a request to reset the password associated with your Flowentra account. Click the button below to create a new secure password.
+                </div>
+
+                <center>
+                    <a href='{resetLink}' class='cta-button'>Reset My Password</a>
+                </center>
+
+                <div class='link-section'>
+                    <div class='link-label'>Or copy this link:</div>
+                    <div class='link-text'>{resetLink}</div>
+                </div>
+
+                <div class='warning-box'>
+                    <strong>⏱️ Expires in 1 hour:</strong> For security reasons, this link will expire after 1 hour. Don't hesitate to ignore it and request a new code if you won't use it right away.
+                </div>
+
+                <div style='font-size: 13px; color: #555555; margin-top: 24px; line-height: 1.8;'>
+                    <strong>For your security:</strong><br/>
+                    Never share this link with anyone. The Flowentra team will never ask for your password via email.
+                </div>
             </div>
 
-            <p style='font-size: 14px;'>
-                For your security, never share this link with anyone. FlowService support will never ask for your password.
-            </p>
-        </div>
-
-        <div class='footer'>
-            <p><strong>FlowService™</strong> | Professional Workflow Management</p>
-            <p>© {DateTime.Now.Year} FlowService. All rights reserved.</p>
-            <p>This is an automated message. Please do not reply to this email.</p>
+            <div class='footer'>
+                <div class='footer-text'><strong>Flowentra™</strong> | Intelligent Workflow Management</div>
+                <div class='divider'></div>
+                <div class='footer-text'>© {DateTime.Now.Year} Flowentra. All rights reserved.</div>
+                <div class='footer-text' style='margin-top: 12px; font-size: 11px;'>This is an automated message. Please do not reply to this email.</div>
+            </div>
         </div>
     </div>
 </body>
@@ -475,111 +577,161 @@ namespace MyApi.Modules.Shared.Services
             box-sizing: border-box;
         }}
         body {{
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', sans-serif;
-            background-color: #f5f5f5;
-            color: #333;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', sans-serif;
+            background-color: #f8f9fa;
+            color: #1a1a1a;
+            line-height: 1.6;
+        }}
+        .wrapper {{
+            width: 100%;
+            background-color: #f8f9fa;
+            padding: 40px 0;
         }}
         .container {{
-            max-width: 600px;
-            margin: 40px auto;
+            max-width: 580px;
+            margin: 0 auto;
             background-color: #ffffff;
             border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
             overflow: hidden;
         }}
         .header {{
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            padding: 40px 20px;
-            text-align: center;
-            color: white;
+            padding: 32px 40px;
+            border-bottom: 1px solid #e8e8e8;
+            display: flex;
+            align-items: center;
+            gap: 16px;
         }}
-        .header h1 {{
-            font-size: 28px;
-            margin-bottom: 5px;
+        .logo {{
+            width: 40px;
+            height: 40px;
+            flex-shrink: 0;
+        }}
+        .header-text {{
+            flex: 1;
+        }}
+        .header-text h1 {{
+            font-size: 20px;
+            font-weight: 600;
+            color: #1a1a1a;
+            margin: 0;
         }}
         .content {{
-            padding: 40px 30px;
+            padding: 40px;
         }}
-        .content h2 {{
-            color: #333;
-            font-size: 22px;
-            margin-bottom: 20px;
-        }}
-        .content p {{
-            color: #666;
+        .greeting {{
             font-size: 16px;
-            line-height: 1.6;
+            font-weight: 600;
+            color: #1a1a1a;
             margin-bottom: 20px;
         }}
-        .otp-box {{
-            background: #f8f9fa;
-            border: 2px dashed #667eea;
-            padding: 30px;
+        .description {{
+            font-size: 14px;
+            color: #555555;
+            line-height: 1.8;
+            margin-bottom: 32px;
+        }}
+        .otp-container {{
+            background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
+            border: 2px solid #e8e8e8;
             border-radius: 8px;
+            padding: 32px;
             text-align: center;
-            margin: 30px 0;
+            margin: 32px 0;
+        }}
+        .otp-label {{
+            font-size: 12px;
+            color: #888888;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 16px;
+            font-weight: 600;
         }}
         .otp-code {{
             font-size: 48px;
-            font-weight: bold;
-            color: #667eea;
-            letter-spacing: 8px;
+            font-weight: 700;
+            color: #003d7a;
+            letter-spacing: 12px;
             font-family: 'Courier New', monospace;
-            margin: 20px 0;
+            margin: 16px 0;
+            word-spacing: 8px;
         }}
-        .otp-warning {{
-            background-color: #fff3cd;
-            border-left: 4px solid #ffc107;
-            padding: 15px;
-            margin: 20px 0;
-            border-radius: 4px;
-            font-size: 14px;
-            color: #856404;
+        .otp-note {{
+            font-size: 13px;
+            color: #888888;
+            margin-top: 12px;
+        }}
+        .warning-box {{
+            background-color: #fff8e6;
+            border-left: 4px solid #f0ad4e;
+            padding: 16px;
+            border-radius: 6px;
+            margin: 24px 0;
+            font-size: 13px;
+            color: #7d6608;
+            line-height: 1.6;
+        }}
+        .warning-box strong {{
+            display: block;
+            margin-bottom: 8px;
         }}
         .footer {{
+            padding: 32px 40px;
             background-color: #f8f9fa;
-            padding: 30px;
+            border-top: 1px solid #e8e8e8;
             text-align: center;
-            color: #999;
-            font-size: 12px;
-            border-top: 1px solid #e0e0e0;
         }}
-        .footer p {{
-            margin: 5px 0;
+        .footer-text {{
+            font-size: 12px;
+            color: #888888;
+            margin: 4px 0;
+            line-height: 1.6;
+        }}
+        .divider {{
+            height: 1px;
+            background-color: #e8e8e8;
+            margin: 16px 0;
         }}
     </style>
 </head>
 <body>
-    <div class='container'>
-        <div class='header'>
-            <h1>🔐 Réinitialisation du mot de passe</h1>
-            <p>FlowService</p>
-        </div>
-
-        <div class='content'>
-            <h2>Bonjour {recipientName},</h2>
-
-            <p>Vous avez demandé la réinitialisation du mot de passe de votre compte FlowService. Utilisez le code ci-dessous pour continuer:</p>
-
-            <div class='otp-box'>
-                <p style='color: #999; font-size: 14px; margin-bottom: 10px;'>Votre code de vérification</p>
-                <div class='otp-code'>{otpCode}</div>
-                <p style='color: #999; font-size: 12px;'>Entrez ce code sur la page de réinitialisation du mot de passe</p>
+    <div class='wrapper'>
+        <div class='container'>
+            <div class='header'>
+                <img src='https://www.flowentra.io/assets/flowentra-logo-C6CB7Ftw.png' alt='Flowentra' class='logo' />
+                <div class='header-text'>
+                    <h1>Flowentra</h1>
+                </div>
             </div>
 
-            <div class='otp-warning'>
-                <strong>⏱️ Important:</strong> Ce code expire dans 5 minutes. Ne partagez ce code avec personne.
+            <div class='content'>
+                <div class='greeting'>Bonjour {recipientName},</div>
+                
+                <div class='description'>
+                    Vous avez demandé la réinitialisation du mot de passe de votre compte Flowentra. Veuillez entrer le code de vérification ci-dessous.
+                </div>
+
+                <div class='otp-container'>
+                    <div class='otp-label'>Votre code de vérification</div>
+                    <div class='otp-code'>{otpCode}</div>
+                    <div class='otp-note'>Ce code expire dans 5 minutes</div>
+                </div>
+
+                <div class='warning-box'>
+                    <strong>⏱️ Validité:</strong> Ce code n'est valable que 5 minutes. Ne partagez jamais ce code avec quiconque.
+                </div>
+
+                <div style='font-size: 13px; color: #555555; line-height: 1.8;'>
+                    Si vous n'avez pas demandé une réinitialisation de mot de passe, vous pouvez ignorer ce message. Votre mot de passe restera inchangé.
+                </div>
             </div>
 
-            <p style='font-size: 14px;'>
-                Si vous n'avez pas demandé une réinitialisation de mot de passe, veuillez ignorer cet email et votre mot de passe restera inchangé.
-            </p>
-        </div>
-
-        <div class='footer'>
-            <p><strong>FlowService™</strong> | Gestion professionnelle des flux de travail</p>
-            <p>© {DateTime.Now.Year} FlowService. Tous les droits réservés.</p>
-            <p>Ceci est un message automatisé. Veuillez ne pas répondre à cet email.</p>
+            <div class='footer'>
+                <div class='footer-text'><strong>Flowentra™</strong> | Gestion intelligente des workflows</div>
+                <div class='divider'></div>
+                <div class='footer-text'>© {DateTime.Now.Year} Flowentra. Tous les droits réservés.</div>
+                <div class='footer-text' style='margin-top: 12px; font-size: 11px;'>Ceci est un message automatisé. Veuillez ne pas répondre à cet email.</div>
+            </div>
         </div>
     </div>
 </body>
@@ -602,111 +754,161 @@ namespace MyApi.Modules.Shared.Services
             box-sizing: border-box;
         }}
         body {{
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', sans-serif;
-            background-color: #f5f5f5;
-            color: #333;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', sans-serif;
+            background-color: #f8f9fa;
+            color: #1a1a1a;
+            line-height: 1.6;
+        }}
+        .wrapper {{
+            width: 100%;
+            background-color: #f8f9fa;
+            padding: 40px 0;
         }}
         .container {{
-            max-width: 600px;
-            margin: 40px auto;
+            max-width: 580px;
+            margin: 0 auto;
             background-color: #ffffff;
             border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
             overflow: hidden;
         }}
         .header {{
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            padding: 40px 20px;
-            text-align: center;
-            color: white;
+            padding: 32px 40px;
+            border-bottom: 1px solid #e8e8e8;
+            display: flex;
+            align-items: center;
+            gap: 16px;
         }}
-        .header h1 {{
-            font-size: 28px;
-            margin-bottom: 5px;
+        .logo {{
+            width: 40px;
+            height: 40px;
+            flex-shrink: 0;
+        }}
+        .header-text {{
+            flex: 1;
+        }}
+        .header-text h1 {{
+            font-size: 20px;
+            font-weight: 600;
+            color: #1a1a1a;
+            margin: 0;
         }}
         .content {{
-            padding: 40px 30px;
+            padding: 40px;
         }}
-        .content h2 {{
-            color: #333;
-            font-size: 22px;
-            margin-bottom: 20px;
-        }}
-        .content p {{
-            color: #666;
+        .greeting {{
             font-size: 16px;
-            line-height: 1.6;
+            font-weight: 600;
+            color: #1a1a1a;
             margin-bottom: 20px;
         }}
-        .otp-box {{
-            background: #f8f9fa;
-            border: 2px dashed #667eea;
-            padding: 30px;
+        .description {{
+            font-size: 14px;
+            color: #555555;
+            line-height: 1.8;
+            margin-bottom: 32px;
+        }}
+        .otp-container {{
+            background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
+            border: 2px solid #e8e8e8;
             border-radius: 8px;
+            padding: 32px;
             text-align: center;
-            margin: 30px 0;
+            margin: 32px 0;
+        }}
+        .otp-label {{
+            font-size: 12px;
+            color: #888888;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 16px;
+            font-weight: 600;
         }}
         .otp-code {{
             font-size: 48px;
-            font-weight: bold;
-            color: #667eea;
-            letter-spacing: 8px;
+            font-weight: 700;
+            color: #003d7a;
+            letter-spacing: 12px;
             font-family: 'Courier New', monospace;
-            margin: 20px 0;
+            margin: 16px 0;
+            word-spacing: 8px;
         }}
-        .otp-warning {{
-            background-color: #fff3cd;
-            border-left: 4px solid #ffc107;
-            padding: 15px;
-            margin: 20px 0;
-            border-radius: 4px;
-            font-size: 14px;
-            color: #856404;
+        .otp-note {{
+            font-size: 13px;
+            color: #888888;
+            margin-top: 12px;
+        }}
+        .warning-box {{
+            background-color: #fff8e6;
+            border-left: 4px solid #f0ad4e;
+            padding: 16px;
+            border-radius: 6px;
+            margin: 24px 0;
+            font-size: 13px;
+            color: #7d6608;
+            line-height: 1.6;
+        }}
+        .warning-box strong {{
+            display: block;
+            margin-bottom: 8px;
         }}
         .footer {{
+            padding: 32px 40px;
             background-color: #f8f9fa;
-            padding: 30px;
+            border-top: 1px solid #e8e8e8;
             text-align: center;
-            color: #999;
-            font-size: 12px;
-            border-top: 1px solid #e0e0e0;
         }}
-        .footer p {{
-            margin: 5px 0;
+        .footer-text {{
+            font-size: 12px;
+            color: #888888;
+            margin: 4px 0;
+            line-height: 1.6;
+        }}
+        .divider {{
+            height: 1px;
+            background-color: #e8e8e8;
+            margin: 16px 0;
         }}
     </style>
 </head>
 <body>
-    <div class='container'>
-        <div class='header'>
-            <h1>🔐 Password Reset Request</h1>
-            <p>FlowService</p>
-        </div>
-
-        <div class='content'>
-            <h2>Hello {recipientName},</h2>
-
-            <p>You requested to reset your FlowService account password. Use the code below to proceed:</p>
-
-            <div class='otp-box'>
-                <p style='color: #999; font-size: 14px; margin-bottom: 10px;'>Your verification code</p>
-                <div class='otp-code'>{otpCode}</div>
-                <p style='color: #999; font-size: 12px;'>Enter this code on the password reset page</p>
+    <div class='wrapper'>
+        <div class='container'>
+            <div class='header'>
+                <img src='https://www.flowentra.io/assets/flowentra-logo-C6CB7Ftw.png' alt='Flowentra' class='logo' />
+                <div class='header-text'>
+                    <h1>Flowentra</h1>
+                </div>
             </div>
 
-            <div class='otp-warning'>
-                <strong>⏱️ Important:</strong> This code will expire in 5 minutes. Do not share this code with anyone.
+            <div class='content'>
+                <div class='greeting'>Hello {recipientName},</div>
+                
+                <div class='description'>
+                    You requested to reset your Flowentra account password. Please enter the verification code below.
+                </div>
+
+                <div class='otp-container'>
+                    <div class='otp-label'>Your Verification Code</div>
+                    <div class='otp-code'>{otpCode}</div>
+                    <div class='otp-note'>This code expires in 5 minutes</div>
+                </div>
+
+                <div class='warning-box'>
+                    <strong>⏱️ Valid for 5 minutes:</strong> Never share this code with anyone. Flowentra will never ask you for this code via email.
+                </div>
+
+                <div style='font-size: 13px; color: #555555; line-height: 1.8;'>
+                    If you didn't request a password reset, you can safely ignore this message. Your password will remain unchanged.
+                </div>
             </div>
 
-            <p style='font-size: 14px;'>
-                If you didn't request a password reset, please ignore this email and your password will remain unchanged.
-            </p>
-        </div>
-
-        <div class='footer'>
-            <p><strong>FlowService™</strong> | Professional Workflow Management</p>
-            <p>© {DateTime.Now.Year} FlowService. All rights reserved.</p>
-            <p>This is an automated message. Please do not reply to this email.</p>
+            <div class='footer'>
+                <div class='footer-text'><strong>Flowentra™</strong> | Intelligent Workflow Management</div>
+                <div class='divider'></div>
+                <div class='footer-text'>© {DateTime.Now.Year} Flowentra. All rights reserved.</div>
+                <div class='footer-text' style='margin-top: 12px; font-size: 11px;'>This is an automated message. Please do not reply to this email.</div>
+            </div>
         </div>
     </div>
 </body>
