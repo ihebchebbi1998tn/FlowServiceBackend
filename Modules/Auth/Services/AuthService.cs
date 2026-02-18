@@ -4,6 +4,7 @@ using MyApi.Modules.Auth.Models;
 using MyApi.Modules.Users.Models;
 using MyApi.Modules.Users.DTOs;
 using MyApi.Modules.WorkflowEngine.Services;
+using MyApi.Modules.Shared.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
