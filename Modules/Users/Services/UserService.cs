@@ -404,7 +404,7 @@ namespace MyApi.Modules.Users.Services
                 _logger.LogInformation($"[USER_FORGOT_PASSWORD] OTP request for email: {email}");
 
                 var user = await _context.Users
-                    .FirstOrDefaultAsync(u => u.Email == email && u.IsActive && !u.IsDeleted);
+                    .FirstOrDefaultAsync(u => u.Email.ToLower() == email.ToLower() && u.IsActive && !u.IsDeleted);
 
                 if (user == null)
                 {
@@ -457,7 +457,7 @@ namespace MyApi.Modules.Users.Services
                 _logger.LogInformation($"[USER_VERIFY_OTP] Verification request for email: {email}");
 
                 var user = await _context.Users
-                    .FirstOrDefaultAsync(u => u.Email == email && u.IsActive && !u.IsDeleted);
+                    .FirstOrDefaultAsync(u => u.Email.ToLower() == email.ToLower() && u.IsActive && !u.IsDeleted);
 
                 if (user == null)
                 {
