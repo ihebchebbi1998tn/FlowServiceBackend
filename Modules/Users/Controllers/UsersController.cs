@@ -409,5 +409,131 @@ namespace MyApi.Modules.Users.Controllers
                 });
             }
         }
+
+        /// <summary>
+        /// Initiates password reset by sending OTP to user's email
+        /// </summary>
+        [HttpPost("forgot-password")]
+        [AllowAnonymous]
+        public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordRequestDto request)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(request.Email))
+                {
+                    return BadRequest(new ApiResponse<object>
+                    {
+                        Success = false,
+                        Message = "Email is required"
+                    });
+                }
+
+                // Extract language from request headers or default to "en"
+                var language = HttpContext.Request.Headers["Accept-Language"].ToString().StartsWith("fr") ? "fr" : "en";
+
+                var (success, message) = await _userService.GenerateOtpAndSendEmailAsync(request.Email, language);
+
+                return Ok(new ApiResponse<object>
+                {
+                    Success = success,
+                    Message = message
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in forgot password endpoint");
+                return StatusCode(500, new ApiResponse<object>
+                {
+                    Success = false,
+                    Message = "An error occurred during password reset request"
+                });
+            }
+        }
+
+        /// <summary>
+        /// Verifies OTP and generates password reset token
+        /// </summary>
+        [HttpPost("verify-otp")]
+        [AllowAnonymous]
+        public async Task<IActionResult> VerifyOtp([FromBody] VerifyOtpRequestDto request)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.OtpCode))
+                {
+                    return BadRequest(new ApiResponse<object>
+                    {
+                        Success = false,
+                        Message = "Email and OTP code are required"
+                    });
+                }
+
+                var (success, message, resetToken) = await _userService.VerifyOtpAsync(request.Email, request.OtpCode);
+
+                return Ok(new ApiResponse<PasswordResetResponseDto>
+                {
+                    Success = success,
+                    Message = message,
+                    Data = new PasswordResetResponseDto
+                    {
+                        Success = success,
+                        Message = message,
+                        ResetToken = resetToken
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in verify OTP endpoint");
+                return StatusCode(500, new ApiResponse<object>
+                {
+                    Success = false,
+                    Message = "An error occurred during OTP verification"
+                });
+            }
+        }
+
+        /// <summary>
+        /// Resets user password using reset token
+        /// </summary>
+        [HttpPost("reset-password")]
+        [AllowAnonymous]
+        public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequestDto request)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(request.ResetToken) || 
+                    string.IsNullOrWhiteSpace(request.NewPassword) || 
+                    string.IsNullOrWhiteSpace(request.ConfirmPassword))
+                {
+                    return BadRequest(new ApiResponse<object>
+                    {
+                        Success = false,
+                        Message = "Reset token and passwords are required"
+                    });
+                }
+
+                var (success, message) = await _userService.ResetPasswordAsync(
+                    request.ResetToken,
+                    request.NewPassword,
+                    request.ConfirmPassword
+                );
+
+                return Ok(new ApiResponse<object>
+                {
+                    Success = success,
+                    Message = message
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in reset password endpoint");
+                return StatusCode(500, new ApiResponse<object>
+                {
+                    Success = false,
+                    Message = "An error occurred during password reset"
+                });
+            }
+        }
     }
 }

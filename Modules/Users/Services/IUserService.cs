@@ -14,5 +14,21 @@ namespace MyApi.Modules.Users.Services
         Task<bool> UserExistsAsync(string email);
         Task<UserResponseDto?> UpdateUserProfilePictureAsync(int id, string? profilePictureUrl, string modifiedByUser);
         Task<CheckEmailResponseDto> CheckEmailExistsAsync(string email, int? excludeUserId = null);
+
+        // Password Reset / OTP Methods
+        /// <summary>
+        /// Generates an OTP code and sends it to user's email for password reset
+        /// </summary>
+        Task<(bool Success, string Message)> GenerateOtpAndSendEmailAsync(string email, string language = "en");
+
+        /// <summary>
+        /// Verifies OTP code and generates a password reset token
+        /// </summary>
+        Task<(bool Success, string Message, string? ResetToken)> VerifyOtpAsync(string email, string otpCode);
+
+        /// <summary>
+        /// Resets user password using reset token
+        /// </summary>
+        Task<(bool Success, string Message)> ResetPasswordAsync(string resetToken, string newPassword, string confirmPassword);
     }
 }

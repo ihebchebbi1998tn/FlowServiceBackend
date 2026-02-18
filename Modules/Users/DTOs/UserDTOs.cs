@@ -85,4 +85,44 @@ namespace MyApi.Modules.Users.DTOs
         public bool Exists { get; set; }
         public string? Source { get; set; } // "admin" or "user"
     }
+
+    // Password Reset DTOs
+    public class ForgotPasswordRequestDto
+    {
+        [Required]
+        [EmailAddress]
+        public string Email { get; set; } = string.Empty;
+    }
+
+    public class VerifyOtpRequestDto
+    {
+        [Required]
+        [EmailAddress]
+        public string Email { get; set; } = string.Empty;
+
+        [Required]
+        [StringLength(6, MinimumLength = 6)]
+        public string OtpCode { get; set; } = string.Empty;
+    }
+
+    public class ResetPasswordRequestDto
+    {
+        [Required]
+        public string ResetToken { get; set; } = string.Empty;
+
+        [Required]
+        [StringLength(100, MinimumLength = 8, ErrorMessage = "New password must be at least 8 characters")]
+        public string NewPassword { get; set; } = string.Empty;
+
+        [Required]
+        [Compare("NewPassword", ErrorMessage = "Password confirmation does not match")]
+        public string ConfirmPassword { get; set; } = string.Empty;
+    }
+
+    public class PasswordResetResponseDto
+    {
+        public bool Success { get; set; }
+        public string Message { get; set; } = string.Empty;
+        public string? ResetToken { get; set; }
+    }
 }

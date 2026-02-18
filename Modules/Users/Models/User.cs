@@ -89,6 +89,17 @@ namespace MyApi.Modules.Users.Models
         [MaxLength(500)]
         public string? ProfilePictureUrl { get; set; }
 
+        // Password Reset Fields (OTP & Reset Token)
+        [MaxLength(6)]
+        public string? OtpCode { get; set; }
+
+        public DateTime? OtpExpiresAt { get; set; }
+
+        [MaxLength(500)]
+        public string? PasswordResetToken { get; set; }
+
+        public DateTime? PasswordResetTokenExpiresAt { get; set; }
+
         // Navigation properties
         public virtual ICollection<UserRole> UserRoles { get; set; } = new List<UserRole>();
         public virtual ICollection<UserSkill> UserSkills { get; set; } = new List<UserSkill>();
