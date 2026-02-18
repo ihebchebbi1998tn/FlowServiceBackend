@@ -857,9 +857,6 @@ namespace MyApi.Modules.Shared.Services
         <div class='container'>
             <div class='header'>
                 <img src='https://www.flowentra.io/assets/flowentra-logo-C6CB7Ftw.png' alt='Flowentra' class='logo' />
-                <div class='header-text'>
-                    <h1>Flowentra</h1>
-                </div>
             </div>
 
             <div class='content'>
@@ -873,10 +870,6 @@ namespace MyApi.Modules.Shared.Services
                     <div class='otp-label'>Your Verification Code</div>
                     <div class='otp-code'>{otpCode}</div>
                     <div class='otp-note'>This code expires in 5 minutes</div>
-                </div>
-
-                <div class='warning-box'>
-                    <strong>⏱️ Valid for 5 minutes:</strong> Never share this code with anyone. Flowentra will never ask you for this code via email.
                 </div>
 
                 <div style='font-size: 13px; color: #555555; line-height: 1.8;'>
