@@ -377,6 +377,32 @@ namespace MyApi.Modules.Auth.Controllers
         /// </summary>
         /// <param name="request">Email and OTP code</param>
         /// <returns>Reset token if OTP is valid</returns>
+        [HttpPost("check-email-exists")]
+        [AllowAnonymous]
+        public async Task<ActionResult<object>> CheckEmailExists([FromBody] ForgotPasswordRequestDto request)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(request?.Email))
+                {
+                    return BadRequest(new { exists = false, message = "Email is required" });
+                }
+
+                var admin = await _authService.GetUserByEmailAsync(request.Email);
+                return Ok(new { exists = admin != null });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error checking email existence");
+                return StatusCode(500, new { exists = false, message = "Error checking email" });
+            }
+        }
+
+        /// <summary>
+        /// Verify OTP code sent to email
+        /// </summary>
+        /// <param name="request">Email and OTP code</param>
+        /// <returns>Reset token if OTP is valid</returns>
         [HttpPost("verify-otp")]
         [AllowAnonymous]
         public async Task<ActionResult<VerifyOtpResponseDto>> VerifyOtp([FromBody] VerifyOtpRequestDto request)
