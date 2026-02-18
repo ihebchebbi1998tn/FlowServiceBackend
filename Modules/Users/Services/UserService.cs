@@ -94,21 +94,20 @@ namespace MyApi.Modules.Users.Services
         {
             try
             {
-                // ✅ PERFORMANCE: Run both checks in parallel
-                var existsInUsersTask = _context.Users
+                // Check if email exists in Users table
+                var existsInUsers = await _context.Users
                     .AnyAsync(u => u.Email.ToLower() == createDto.Email.ToLower() && !u.IsDeleted);
 
-                var existsInAdminUsersTask = _context.MainAdminUsers
-                    .AnyAsync(u => u.Email.ToLower() == createDto.Email.ToLower());
-
-                await Task.WhenAll(existsInUsersTask, existsInAdminUsersTask);
-
-                if (existsInUsersTask.Result)
+                if (existsInUsers)
                 {
                     throw new InvalidOperationException("A user with this email already exists in the Users table");
                 }
 
-                if (existsInAdminUsersTask.Result)
+                // Check if email exists in MainAdminUsers table
+                var existsInAdminUsers = await _context.MainAdminUsers
+                    .AnyAsync(u => u.Email.ToLower() == createDto.Email.ToLower());
+
+                if (existsInAdminUsers)
                 {
                     throw new InvalidOperationException("A user with this email already exists in the Admin Users table");
                 }
@@ -161,21 +160,20 @@ namespace MyApi.Modules.Users.Services
                 if (!string.IsNullOrEmpty(updateDto.Email) && 
                     updateDto.Email.ToLower() != user.Email.ToLower())
                 {
-                    // ✅ PERFORMANCE: Run both checks in parallel
-                    var existsInUsersTask = _context.Users
+                    // Check if email exists in Users table
+                    var existsInUsers = await _context.Users
                         .AnyAsync(u => u.Email.ToLower() == updateDto.Email.ToLower() && !u.IsDeleted && u.Id != id);
 
-                    var existsInAdminUsersTask = _context.MainAdminUsers
-                        .AnyAsync(u => u.Email.ToLower() == updateDto.Email.ToLower());
-
-                    await Task.WhenAll(existsInUsersTask, existsInAdminUsersTask);
-
-                    if (existsInUsersTask.Result)
+                    if (existsInUsers)
                     {
                         throw new InvalidOperationException("A user with this email already exists in the Users table");
                     }
 
-                    if (existsInAdminUsersTask.Result)
+                    // Check if email exists in MainAdminUsers table
+                    var existsInAdminUsers = await _context.MainAdminUsers
+                        .AnyAsync(u => u.Email.ToLower() == updateDto.Email.ToLower());
+
+                    if (existsInAdminUsers)
                     {
                         throw new InvalidOperationException("A user with this email already exists in the Admin Users table");
                     }
