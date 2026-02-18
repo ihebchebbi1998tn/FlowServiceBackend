@@ -1,6 +1,7 @@
 using MyApi.Modules.Auth.DTOs;
 using MyApi.Modules.Auth.Services;
 using MyApi.Modules.Shared.Services;
+using MyApi.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
@@ -16,19 +17,22 @@ namespace MyApi.Modules.Auth.Controllers
         private readonly ILogger<AuthController> _logger;
         private readonly ISystemLogService _systemLogService;
         private readonly IConfiguration _configuration;
+        private readonly ApplicationDbContext _context;
 
         public AuthController(
             IAuthService authService, 
             IForgotEmailService forgotEmailService,
             ILogger<AuthController> logger, 
             ISystemLogService systemLogService, 
-            IConfiguration configuration)
+            IConfiguration configuration,
+            ApplicationDbContext context)
         {
             _authService = authService;
             _forgotEmailService = forgotEmailService;
             _logger = logger;
             _systemLogService = systemLogService;
             _configuration = configuration;
+            _context = context;
         }
 
         /// <summary>
