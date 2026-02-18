@@ -236,6 +236,7 @@ builder.Services.AddAuthorization();
 
 // Register custom services
 builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<IForgotEmailService, ForgotEmailService>();
 builder.Services.AddScoped<IPreferencesService, PreferencesService>();
 builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<IRoleService, RoleService>();

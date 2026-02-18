@@ -12,13 +12,20 @@ namespace MyApi.Modules.Auth.Controllers
     public class AuthController : ControllerBase
     {
         private readonly IAuthService _authService;
+        private readonly IForgotEmailService _forgotEmailService;
         private readonly ILogger<AuthController> _logger;
         private readonly ISystemLogService _systemLogService;
         private readonly IConfiguration _configuration;
 
-        public AuthController(IAuthService authService, ILogger<AuthController> logger, ISystemLogService systemLogService, IConfiguration configuration)
+        public AuthController(
+            IAuthService authService, 
+            IForgotEmailService forgotEmailService,
+            ILogger<AuthController> logger, 
+            ISystemLogService systemLogService, 
+            IConfiguration configuration)
         {
             _authService = authService;
+            _forgotEmailService = forgotEmailService;
             _logger = logger;
             _systemLogService = systemLogService;
             _configuration = configuration;
@@ -313,6 +320,170 @@ namespace MyApi.Modules.Auth.Controllers
                 {
                     Success = false,
                     Message = "An internal error occurred during OAuth login"
+                });
+            }
+        }
+
+        /// <summary>
+        /// Initiate password reset - generates and sends OTP to email
+        /// </summary>
+        /// <param name="request">Request with email address</param>
+        /// <returns>Success response (doesn't disclose if email exists for security)</returns>
+        [HttpPost("forgot-password")]
+        [AllowAnonymous]
+        public async Task<ActionResult<AuthResponseDto>> ForgotPassword([FromBody] ForgotPasswordRequestDto request)
+        {
+            try
+            {
+                if (!ModelState.IsValid)
+                {
+                    return BadRequest(new AuthResponseDto
+                    {
+                        Success = false,
+                        Message = "Invalid email provided"
+                    });
+                }
+
+                var response = await _authService.ForgotPasswordAsync(request);
+                
+                // Log the attempt
+                await _systemLogService.LogInfoAsync(
+                    $"Password reset initiated for email: {request.Email}",
+                    "Auth",
+                    "forgot_password"
+                );
+
+                return Ok(response);
+            }
+            catch (Exception ex)
+            {
+                await _systemLogService.LogErrorAsync(
+                    $"Error during forgot password for email: {request.Email}",
+                    "Auth",
+                    "forgot_password",
+                    details: ex.Message
+                );
+                _logger.LogError(ex, "Error during forgot password: {Email}", request.Email);
+                return StatusCode(500, new AuthResponseDto
+                {
+                    Success = false,
+                    Message = "An error occurred during password reset initiation"
+                });
+            }
+        }
+
+        /// <summary>
+        /// Verify OTP code sent to email
+        /// </summary>
+        /// <param name="request">Email and OTP code</param>
+        /// <returns>Reset token if OTP is valid</returns>
+        [HttpPost("verify-otp")]
+        [AllowAnonymous]
+        public async Task<ActionResult<VerifyOtpResponseDto>> VerifyOtp([FromBody] VerifyOtpRequestDto request)
+        {
+            try
+            {
+                if (!ModelState.IsValid)
+                {
+                    return BadRequest(new VerifyOtpResponseDto
+                    {
+                        Success = false,
+                        Message = "Invalid email or OTP provided"
+                    });
+                }
+
+                var response = await _authService.VerifyOtpAsync(request);
+
+                if (!response.Success)
+                {
+                    await _systemLogService.LogWarningAsync(
+                        $"Failed OTP verification for email: {request.Email}",
+                        "Auth",
+                        "verify_otp",
+                        details: response.Message
+                    );
+                    return BadRequest(response);
+                }
+
+                await _systemLogService.LogInfoAsync(
+                    $"OTP verified successfully for email: {request.Email}",
+                    "Auth",
+                    "verify_otp"
+                );
+
+                return Ok(response);
+            }
+            catch (Exception ex)
+            {
+                await _systemLogService.LogErrorAsync(
+                    $"Error during OTP verification for email: {request.Email}",
+                    "Auth",
+                    "verify_otp",
+                    details: ex.Message
+                );
+                _logger.LogError(ex, "Error during OTP verification: {Email}", request.Email);
+                return StatusCode(500, new VerifyOtpResponseDto
+                {
+                    Success = false,
+                    Message = "An error occurred during OTP verification"
+                });
+            }
+        }
+
+        /// <summary>
+        /// Reset password with valid reset token
+        /// </summary>
+        /// <param name="request">Reset token and new password</param>
+        /// <returns>Success message</returns>
+        [HttpPost("reset-password")]
+        [AllowAnonymous]
+        public async Task<ActionResult<AuthResponseDto>> ResetPassword([FromBody] ResetPasswordRequestDto request)
+        {
+            try
+            {
+                if (!ModelState.IsValid)
+                {
+                    return BadRequest(new AuthResponseDto
+                    {
+                        Success = false,
+                        Message = "Invalid reset token or password provided"
+                    });
+                }
+
+                var response = await _authService.ResetPasswordAsync(request);
+
+                if (!response.Success)
+                {
+                    await _systemLogService.LogWarningAsync(
+                        "Failed password reset attempt",
+                        "Auth",
+                        "reset_password",
+                        details: response.Message
+                    );
+                    return BadRequest(response);
+                }
+
+                await _systemLogService.LogSuccessAsync(
+                    "Password reset completed successfully",
+                    "Auth",
+                    "reset_password"
+                );
+
+                return Ok(response);
+            }
+            catch (Exception ex)
+            {
+                await _systemLogService.LogErrorAsync(
+                    "Error during password reset",
+                    "Auth",
+                    "reset_password",
+                    details: ex.Message
+                );
+                _logger.LogError(ex, "Error during password reset");
+                return StatusCode(500, new AuthResponseDto
+                {
+                    Success = false,
+                    Message = "An error occurred during password reset"
                 });
             }
         }

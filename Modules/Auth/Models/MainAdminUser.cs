@@ -73,5 +73,16 @@ namespace MyApi.Modules.Auth.Models
         public DateTime? UpdatedAt { get; set; }
 
         public DateTime? LastLoginAt { get; set; }
+
+        // Forgot Password Fields
+        [MaxLength(6)]
+        public string? OtpCode { get; set; }
+
+        public DateTime? OtpExpiresAt { get; set; }
+
+        [MaxLength(500)]
+        public string? PasswordResetToken { get; set; }
+
+        public DateTime? PasswordResetTokenExpiresAt { get; set; }
     }
 }

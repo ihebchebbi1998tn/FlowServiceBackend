@@ -154,4 +154,55 @@ namespace MyApi.Modules.Auth.DTOs
         public string? Language { get; set; }
         public string? PrimaryColor { get; set; }
     }
+
+    /// <summary>
+    /// Request to initiate password reset - sends OTP email
+    /// </summary>
+    public class ForgotPasswordRequestDto
+    {
+        [Required]
+        [EmailAddress]
+        public string Email { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// Request to verify OTP code
+    /// </summary>
+    public class VerifyOtpRequestDto
+    {
+        [Required]
+        [EmailAddress]
+        public string Email { get; set; } = string.Empty;
+
+        [Required]
+        [StringLength(6, MinimumLength = 6)]
+        public string OtpCode { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// Response from OTP verification with reset token
+    /// </summary>
+    public class VerifyOtpResponseDto
+    {
+        public bool Success { get; set; }
+        public string Message { get; set; } = string.Empty;
+        public string? ResetToken { get; set; }
+    }
+
+    /// <summary>
+    /// Request to reset password with new password and reset token
+    /// </summary>
+    public class ResetPasswordRequestDto
+    {
+        [Required]
+        public string ResetToken { get; set; } = string.Empty;
+
+        [Required]
+        [MinLength(6)]
+        public string NewPassword { get; set; } = string.Empty;
+
+        [Required]
+        [MinLength(6)]
+        public string ConfirmPassword { get; set; } = string.Empty;
+    }
 }
