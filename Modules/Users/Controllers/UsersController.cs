@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using MyApi.Modules.Shared.DTOs;
 using MyApi.Modules.Users.DTOs;
 using MyApi.Modules.Users.Services;
+using MyApi.Modules.Auth.DTOs;
 using System.Security.Claims;
 
 namespace MyApi.Modules.Users.Controllers
