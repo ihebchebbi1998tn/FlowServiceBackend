@@ -57,13 +57,13 @@ namespace MyApi.Modules.Shared.Services
                 }
 
                 var email = new MimeMessage();
-                email.From.Add(new MailboxAddress("FlowService Support", SMTP_USERNAME));
+                email.From.Add(new MailboxAddress("Flowentra Support", SMTP_USERNAME));
                 email.To.Add(new MailboxAddress(recipientName, recipientEmail));
                 
                 // Generate subject based on language
                 string subject = language.ToLower() == "fr" 
-                    ? "Réinitialisez votre mot de passe - FlowService"
-                    : "Reset Your Password - FlowService";
+                    ? "Réinitialisez votre mot de passe - Flowentra"
+                    : "Reset Your Password - Flowentra";
                 
                 email.Subject = subject;
 
@@ -256,9 +256,6 @@ namespace MyApi.Modules.Shared.Services
         <div class='container'>
             <div class='header'>
                 <img src='https://www.flowentra.io/assets/flowentra-logo-C6CB7Ftw.png' alt='Flowentra' class='logo' />
-                <div class='header-text'>
-                    <h1>Flowentra</h1>
-                </div>
             </div>
 
             <div class='content'>
@@ -277,9 +274,6 @@ namespace MyApi.Modules.Shared.Services
                     <div class='link-text'>{resetLink}</div>
                 </div>
 
-                <div class='warning-box'>
-                    <strong>⏱️ Expiration:</strong> Ce lien reste valide pendant 1 heure. Pour des raisons de sécurité, n'hésitez pas à le supprimer et à demander un nouveau code si vous ne l'utilisez pas immédiatement.
-                </div>
 
                 <div style='font-size: 13px; color: #555555; margin-top: 24px; line-height: 1.8;'>
                     <strong>Pour votre sécurité :</strong><br/>
@@ -443,9 +437,6 @@ namespace MyApi.Modules.Shared.Services
         <div class='container'>
             <div class='header'>
                 <img src='https://www.flowentra.io/assets/flowentra-logo-C6CB7Ftw.png' alt='Flowentra' class='logo' />
-                <div class='header-text'>
-                    <h1>Flowentra</h1>
-                </div>
             </div>
 
             <div class='content'>
@@ -462,10 +453,6 @@ namespace MyApi.Modules.Shared.Services
                 <div class='link-section'>
                     <div class='link-label'>Or copy this link:</div>
                     <div class='link-text'>{resetLink}</div>
-                </div>
-
-                <div class='warning-box'>
-                    <strong>⏱️ Expires in 1 hour:</strong> For security reasons, this link will expire after 1 hour. Don't hesitate to ignore it and request a new code if you won't use it right away.
                 </div>
 
                 <div style='font-size: 13px; color: #555555; margin-top: 24px; line-height: 1.8;'>
@@ -506,13 +493,13 @@ namespace MyApi.Modules.Shared.Services
                 }
 
                 var email = new MimeMessage();
-                email.From.Add(new MailboxAddress("FlowService Support", SMTP_USERNAME));
+                email.From.Add(new MailboxAddress("Flowentra Support", SMTP_USERNAME));
                 email.To.Add(new MailboxAddress(recipientName, recipientEmail));
                 
                 // Generate subject based on language
                 string subject = language.ToLower() == "fr"
-                    ? "Votre code de réinitialisation - FlowService"
-                    : "Your Password Reset Code - FlowService";
+                    ? "Votre code de réinitialisation - Flowentra"
+                    : "Your Password Reset Code - Flowentra";
                 
                 email.Subject = subject;
 
@@ -699,9 +686,7 @@ namespace MyApi.Modules.Shared.Services
         <div class='container'>
             <div class='header'>
                 <img src='https://www.flowentra.io/assets/flowentra-logo-C6CB7Ftw.png' alt='Flowentra' class='logo' />
-                <div class='header-text'>
-                    <h1>Flowentra</h1>
-                </div>
+               
             </div>
 
             <div class='content'>
@@ -715,10 +700,6 @@ namespace MyApi.Modules.Shared.Services
                     <div class='otp-label'>Votre code de vérification</div>
                     <div class='otp-code'>{otpCode}</div>
                     <div class='otp-note'>Ce code expire dans 5 minutes</div>
-                </div>
-
-                <div class='warning-box'>
-                    <strong>⏱️ Validité:</strong> Ce code n'est valable que 5 minutes. Ne partagez jamais ce code avec quiconque.
                 </div>
 
                 <div style='font-size: 13px; color: #555555; line-height: 1.8;'>
