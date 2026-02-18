@@ -163,6 +163,9 @@ namespace MyApi.Modules.Auth.DTOs
         [Required]
         [EmailAddress]
         public string Email { get; set; } = string.Empty;
+
+        [MaxLength(2)]
+        public string Language { get; set; } = "en";
     }
 
     /// <summary>

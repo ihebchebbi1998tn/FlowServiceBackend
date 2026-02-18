@@ -1001,7 +1001,7 @@ namespace MyApi.Modules.Auth.Services
                     _logger.LogInformation($"[FORGOT_PASSWORD] OTP saved to database for admin user {admin.Id}, expires at {admin.OtpExpiresAt:O}");
 
                     // Send email with OTP via ForgotEmailService
-                    var userLanguage = "en"; 
+                    var userLanguage = string.IsNullOrWhiteSpace(request.Language) ? "en" : request.Language.ToLower();
                     
                     var emailSent = await _forgotEmailService.SendOtpEmailAsync(
                         admin.Email, 
@@ -1074,7 +1074,7 @@ namespace MyApi.Modules.Auth.Services
                     _logger.LogInformation($"[FORGOT_PASSWORD] ✓ OTP saved to database for regular user {regularUser.Id}, expires at {regularUser.OtpExpiresAt:O}");
 
                     // Send email with OTP via ForgotEmailService
-                    var userLanguage = "en"; 
+                    var userLanguage = string.IsNullOrWhiteSpace(request.Language) ? "en" : request.Language.ToLower();
                     
                     var emailSent = await _forgotEmailService.SendOtpEmailAsync(
                         regularUser.Email, 
