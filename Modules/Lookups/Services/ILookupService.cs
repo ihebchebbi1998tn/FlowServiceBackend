@@ -11,6 +11,13 @@ namespace MyApi.Modules.Lookups.Services
         Task<LookupItemDto?> UpdateArticleCategoryAsync(int id, UpdateLookupItemRequestDto updateDto, string modifiedByUser);
         Task<bool> DeleteArticleCategoryAsync(int id, string deletedByUser);
 
+        // Article Groups
+        Task<LookupListResponseDto> GetArticleGroupsAsync();
+        Task<LookupItemDto?> GetArticleGroupByIdAsync(int id);
+        Task<LookupItemDto> CreateArticleGroupAsync(CreateLookupItemRequestDto createDto, string createdByUser);
+        Task<LookupItemDto?> UpdateArticleGroupAsync(int id, UpdateLookupItemRequestDto updateDto, string modifiedByUser);
+        Task<bool> DeleteArticleGroupAsync(int id, string deletedByUser);
+
         // Article Statuses
         Task<LookupListResponseDto> GetArticleStatusesAsync();
         Task<LookupItemDto?> GetArticleStatusByIdAsync(int id);

@@ -20,6 +20,7 @@ namespace MyApi.Modules.Articles.DTOs
         public decimal StockQuantity { get; set; }
         public decimal? MinStockLevel { get; set; }
         public int? LocationId { get; set; }
+        public int? GroupId { get; set; }
         public string? Supplier { get; set; }
         public string Type { get; set; } = "material";
         public int? Duration { get; set; }  // Duration in minutes for services
@@ -42,6 +43,7 @@ namespace MyApi.Modules.Articles.DTOs
         public decimal StockQuantity { get; set; }
         public decimal? MinStockLevel { get; set; }
         public int? LocationId { get; set; }
+        public int? GroupId { get; set; }
         public string? Supplier { get; set; }
         public string Type { get; set; } = "material";
         public int? Duration { get; set; }  // Duration in minutes for services
@@ -59,6 +61,7 @@ namespace MyApi.Modules.Articles.DTOs
         public decimal? SalesPrice { get; set; }
         public decimal? StockQuantity { get; set; }
         public decimal? MinStockLevel { get; set; }
+        public int? GroupId { get; set; }
         public int? LocationId { get; set; }
         public string? Supplier { get; set; }
         public string? Type { get; set; }

@@ -42,6 +42,8 @@ namespace MyApi.Modules.Articles.Models
 
         public int? LocationId { get; set; }
 
+        public int? GroupId { get; set; }
+
         [MaxLength(200)]
         public string? Supplier { get; set; }
 

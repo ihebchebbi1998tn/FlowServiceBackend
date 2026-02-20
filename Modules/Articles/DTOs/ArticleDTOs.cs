@@ -20,6 +20,9 @@ namespace MyApi.Modules.Articles.DTOs
         public decimal? SellPrice { get; set; }
         public string? Supplier { get; set; }
         public string? Location { get; set; }
+        public int? LocationId { get; set; }
+        public string? Group { get; set; }
+        public int? GroupId { get; set; }
         public string? SubLocation { get; set; }
 
         public decimal? BasePrice { get; set; }
@@ -87,7 +90,9 @@ namespace MyApi.Modules.Articles.DTOs
         public decimal? SalesPrice { get; set; }
         [StringLength(200)] public string? Supplier { get; set; }
         [StringLength(200)] public string? Location { get; set; }
-        public int? LocationId { get; set; }
+        public int? LocationId { get; set; }        [StringLength(200)] public string? Group { get; set; }
+        public int? GroupId { get; set; }        [StringLength(200)] public string? Group { get; set; }
+        public int? GroupId { get; set; }
         [StringLength(200)] public string? SubLocation { get; set; }
 
         // Service
@@ -124,6 +129,7 @@ namespace MyApi.Modules.Articles.DTOs
         public int? MinStock { get; set; }
         public decimal? CostPrice { get; set; }
         public decimal? SellPrice { get; set; }
+        [StringLength(200)] public string? Group { get; set; }
         [StringLength(200)] public string? Supplier { get; set; }
         [StringLength(200)] public string? Location { get; set; }
         [StringLength(200)] public string? SubLocation { get; set; }

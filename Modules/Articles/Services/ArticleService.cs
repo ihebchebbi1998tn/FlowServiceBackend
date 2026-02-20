@@ -127,6 +127,7 @@ namespace MyApi.Modules.Articles.Services
                 StockQuantity = dto.StockQuantity,
                 MinStockLevel = dto.MinStockLevel,
                 LocationId = dto.LocationId,
+                GroupId = dto.GroupId,
                 Supplier = dto.Supplier,
                 Type = dto.Type ?? "material",
                 Duration = dto.Duration,  // Map duration for services
@@ -164,6 +165,7 @@ namespace MyApi.Modules.Articles.Services
             if (dto.StockQuantity.HasValue) article.StockQuantity = dto.StockQuantity.Value;
             if (dto.MinStockLevel.HasValue) article.MinStockLevel = dto.MinStockLevel;
             if (dto.LocationId.HasValue) article.LocationId = dto.LocationId;
+            if (dto.GroupId.HasValue) article.GroupId = dto.GroupId;
             if (dto.Supplier != null) article.Supplier = dto.Supplier;
             if (!string.IsNullOrEmpty(dto.Type)) article.Type = dto.Type;
             if (dto.Duration.HasValue) article.Duration = dto.Duration;  // Map duration for services
@@ -402,6 +404,7 @@ namespace MyApi.Modules.Articles.Services
                 StockQuantity = article.StockQuantity,
                 MinStockLevel = article.MinStockLevel,
                 LocationId = article.LocationId,
+                GroupId = article.GroupId,
                 Supplier = article.Supplier,
                 Type = article.Type ?? "material",
                 Duration = article.Duration,  // Map duration for services

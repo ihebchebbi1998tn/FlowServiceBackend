@@ -25,6 +25,13 @@ namespace MyApi.Modules.Lookups.Services
         public async Task<LookupItemDto?> UpdateArticleCategoryAsync(int id, UpdateLookupItemRequestDto updateDto, string modifiedByUser) => await UpdateLookupAsync(id, updateDto, "article-category", modifiedByUser);
         public async Task<bool> DeleteArticleCategoryAsync(int id, string deletedByUser) => await DeleteLookupAsync(id, "article-category", deletedByUser);
 
+        // Article Groups
+        public async Task<LookupListResponseDto> GetArticleGroupsAsync() => await GetLookupsByTypeAsync("article-group");
+        public async Task<LookupItemDto?> GetArticleGroupByIdAsync(int id) => await GetLookupByIdAsync(id, "article-group");
+        public async Task<LookupItemDto> CreateArticleGroupAsync(CreateLookupItemRequestDto createDto, string createdByUser) => await CreateLookupAsync(createDto, "article-group", createdByUser);
+        public async Task<LookupItemDto?> UpdateArticleGroupAsync(int id, UpdateLookupItemRequestDto updateDto, string modifiedByUser) => await UpdateLookupAsync(id, updateDto, "article-group", modifiedByUser);
+        public async Task<bool> DeleteArticleGroupAsync(int id, string deletedByUser) => await DeleteLookupAsync(id, "article-group", deletedByUser);
+
         // Article Statuses
         public async Task<LookupListResponseDto> GetArticleStatusesAsync() => await GetLookupsByTypeAsync("article-status");
         public async Task<LookupItemDto?> GetArticleStatusByIdAsync(int id) => await GetLookupByIdAsync(id, "article-status");
