@@ -97,12 +97,14 @@ namespace MyApi.Modules.Articles.Controllers
                 var userId = GetCurrentUserId();
                 var group = await _lookupService.CreateArticleGroupAsync(createDto, userId);
 
-                await _systemLogService.LogActionAsync(
-                    userId,
+                await _systemLogService.LogSuccessAsync(
+                    $"Created article group: {createDto.Name}",
+                    "Articles",
                     "CREATE",
+                    userId,
+                    GetCurrentUserName(),
                     "ArticleGroup",
-                    group.Id.ToString(),
-                    $"Created article group: {createDto.Name}");
+                    group.Id.ToString());
 
                 return CreatedAtAction(nameof(GetArticleGroupById), new { id = group.Id }, group);
             }
@@ -131,12 +133,14 @@ namespace MyApi.Modules.Articles.Controllers
                 if (group == null)
                     return NotFound(new { message = "Article group not found" });
 
-                await _systemLogService.LogActionAsync(
-                    userId,
+                await _systemLogService.LogSuccessAsync(
+                    $"Updated article group: {updateDto.Name}",
+                    "Articles",
                     "UPDATE",
+                    userId,
+                    GetCurrentUserName(),
                     "ArticleGroup",
-                    id.ToString(),
-                    $"Updated article group: {updateDto.Name}");
+                    id.ToString());
 
                 return Ok(group);
             }
@@ -162,12 +166,14 @@ namespace MyApi.Modules.Articles.Controllers
                 if (!result)
                     return NotFound(new { message = "Article group not found" });
 
-                await _systemLogService.LogActionAsync(
-                    userId,
+                await _systemLogService.LogSuccessAsync(
+                    "Deleted article group",
+                    "Articles",
                     "DELETE",
+                    userId,
+                    GetCurrentUserName(),
                     "ArticleGroup",
-                    id.ToString(),
-                    "Deleted article group");
+                    id.ToString());
 
                 return NoContent();
             }
