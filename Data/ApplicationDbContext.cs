@@ -73,6 +73,7 @@ namespace MyApi.Data
         // Articles Module (Materials & Services)
         public DbSet<Article> Articles { get; set; }
         public DbSet<ArticleCategory> ArticleCategories { get; set; }
+        public DbSet<ArticleGroup> ArticleGroups { get; set; }
         public DbSet<Location> Locations { get; set; }
         public DbSet<InventoryTransaction> InventoryTransactions { get; set; }
         public DbSet<StockTransaction> StockTransactions { get; set; }

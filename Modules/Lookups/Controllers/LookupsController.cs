@@ -101,6 +101,88 @@ namespace MyApi.Modules.Lookups.Controllers
             }
         }
 
+        // Article Groups
+        [HttpGet("article-groups")]
+        public async Task<ActionResult<LookupListResponseDto>> GetArticleGroups()
+        {
+            try
+            {
+                var result = await _lookupService.GetArticleGroupsAsync();
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving article groups");
+                return StatusCode(500, "An error occurred while retrieving article groups.");
+            }
+        }
+
+        [HttpGet("article-groups/{id}")]
+        public async Task<ActionResult<LookupItemDto>> GetArticleGroup(int id)
+        {
+            try
+            {
+                var result = await _lookupService.GetArticleGroupByIdAsync(id);
+                if (result == null)
+                    return NotFound();
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving article group with ID: {Id}", id);
+                return StatusCode(500, "An error occurred while retrieving the article group.");
+            }
+        }
+
+        [HttpPost("article-groups")]
+        public async Task<ActionResult<LookupItemDto>> CreateArticleGroup([FromBody] CreateLookupItemRequestDto createDto)
+        {
+            try
+            {
+                var result = await _lookupService.CreateArticleGroupAsync(createDto, GetCurrentUser());
+                return CreatedAtAction(nameof(GetArticleGroup), new { id = result.Id }, result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error creating article group");
+                return StatusCode(500, "An error occurred while creating the article group.");
+            }
+        }
+
+        [HttpPut("article-groups/{id}")]
+        public async Task<ActionResult<LookupItemDto>> UpdateArticleGroup(int id, [FromBody] UpdateLookupItemRequestDto updateDto)
+        {
+            try
+            {
+                var result = await _lookupService.UpdateArticleGroupAsync(id, updateDto, GetCurrentUser());
+                if (result == null)
+                    return NotFound();
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error updating article group with ID: {Id}", id);
+                return StatusCode(500, "An error occurred while updating the article group.");
+            }
+        }
+
+        [HttpDelete("article-groups/{id}")]
+        public async Task<IActionResult> DeleteArticleGroup(int id)
+        {
+            try
+            {
+                var result = await _lookupService.DeleteArticleGroupAsync(id, GetCurrentUser());
+                if (!result)
+                    return NotFound();
+                return NoContent();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error deleting article group with ID: {Id}", id);
+                return StatusCode(500, "An error occurred while deleting the article group.");
+            }
+        }
+
         // Article Statuses
         [HttpGet("article-statuses")]
         public async Task<ActionResult<LookupListResponseDto>> GetArticleStatuses()
