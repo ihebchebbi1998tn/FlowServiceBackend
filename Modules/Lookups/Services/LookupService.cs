@@ -2,20 +2,17 @@ using MyApi.Modules.Lookups.DTOs;
 using MyApi.Modules.Lookups.Models;
 using MyApi.Data;
 using Microsoft.EntityFrameworkCore;
-using MyApi.Infrastructure.Caching;
+// caching removed for Lookups service
 
 namespace MyApi.Modules.Lookups.Services
 {
     public class LookupService : ILookupService
     {
         private readonly ApplicationDbContext _context;
-        private readonly ICacheService _cache;
-        private static readonly TimeSpan LookupCacheDuration = TimeSpan.FromMinutes(30);
 
-        public LookupService(ApplicationDbContext context, ICacheService cache)
+        public LookupService(ApplicationDbContext context)
         {
             _context = context;
-            _cache = cache;
         }
 
         // Article Categories
@@ -196,21 +193,18 @@ namespace MyApi.Modules.Lookups.Services
         // Currencies
         public async Task<CurrencyListResponseDto> GetCurrenciesAsync()
         {
-            return await _cache.GetOrSetAsync("lookup_currencies", async () =>
-            {
-                var currencies = await _context.Currencies
-                    .AsNoTracking()
-                    .Where(x => !x.IsDeleted)
-                    .OrderBy(x => x.SortOrder)
-                    .ThenBy(x => x.Name)
-                    .ToListAsync();
+            var currencies = await _context.Currencies
+                .AsNoTracking()
+                .Where(x => !x.IsDeleted)
+                .OrderBy(x => x.SortOrder)
+                .ThenBy(x => x.Name)
+                .ToListAsync();
 
-                return new CurrencyListResponseDto
-                {
-                    currencies = currencies.Select(MapCurrencyToDto).ToList(),
-                    totalCount = currencies.Count
-                };
-            }, LookupCacheDuration) ?? new CurrencyListResponseDto { currencies = new(), totalCount = 0 };
+            return new CurrencyListResponseDto
+            {
+                currencies = currencies.Select(MapCurrencyToDto).ToList(),
+                totalCount = currencies.Count
+            };
         }
 
         public async Task<CurrencyDto?> GetCurrencyByIdAsync(int id)
@@ -238,7 +232,6 @@ namespace MyApi.Modules.Lookups.Services
 
             _context.Currencies.Add(entity);
             await _context.SaveChangesAsync();
-            _cache.Remove("lookup_currencies");
 
             return MapCurrencyToDto(entity);
         }
@@ -258,7 +251,6 @@ namespace MyApi.Modules.Lookups.Services
             if (updateDto.SortOrder.HasValue) entity.SortOrder = updateDto.SortOrder.Value;
 
             await _context.SaveChangesAsync();
-            _cache.Remove("lookup_currencies");
             return MapCurrencyToDto(entity);
         }
 
@@ -272,32 +264,22 @@ namespace MyApi.Modules.Lookups.Services
             entity.IsDeleted = true;
 
             await _context.SaveChangesAsync();
-            _cache.Remove("lookup_currencies");
             return true;
         }
-
-        // ═══════════════════════════════════════════════════════════════
-        // ✅ CACHED Core helper methods — all lookup reads go through cache
-        // ═══════════════════════════════════════════════════════════════
-
         private async Task<LookupListResponseDto> GetLookupsByTypeAsync(string lookupType)
         {
-            var cacheKey = $"lookup_{lookupType}";
-            return await _cache.GetOrSetAsync(cacheKey, async () =>
-            {
-                var items = await _context.LookupItems
-                    .AsNoTracking()
-                    .Where(x => x.LookupType == lookupType && !x.IsDeleted)
-                    .OrderBy(x => x.SortOrder)
-                    .ThenBy(x => x.Name)
-                    .ToListAsync();
+            var items = await _context.LookupItems
+                .AsNoTracking()
+                .Where(x => x.LookupType == lookupType && !x.IsDeleted)
+                .OrderBy(x => x.SortOrder)
+                .ThenBy(x => x.Name)
+                .ToListAsync();
 
-                return new LookupListResponseDto
-                {
-                    items = items.Select(MapToDto).ToList(),
-                    totalCount = items.Count
-                };
-            }, LookupCacheDuration) ?? new LookupListResponseDto { items = new(), totalCount = 0 };
+            return new LookupListResponseDto
+            {
+                items = items.Select(MapToDto).ToList(),
+                totalCount = items.Count
+            };
         }
 
         private async Task<LookupItemDto?> GetLookupByIdAsync(int id, string lookupType)
@@ -331,9 +313,6 @@ namespace MyApi.Modules.Lookups.Services
 
             _context.LookupItems.Add(entity);
             await _context.SaveChangesAsync();
-
-            // ✅ Invalidate cache for this lookup type
-            _cache.Remove($"lookup_{lookupType}");
 
             return MapToDto(entity);
         }
@@ -376,10 +355,6 @@ namespace MyApi.Modules.Lookups.Services
             entity.ModifiedDate = DateTime.UtcNow;
 
             await _context.SaveChangesAsync();
-
-            // ✅ Invalidate cache for this lookup type
-            _cache.Remove($"lookup_{lookupType}");
-
             return MapToDto(entity);
         }
 
@@ -396,10 +371,6 @@ namespace MyApi.Modules.Lookups.Services
             entity.ModifiedDate = DateTime.UtcNow;
 
             await _context.SaveChangesAsync();
-
-            // ✅ Invalidate cache for this lookup type
-            _cache.Remove($"lookup_{lookupType}");
-
             return true;
         }
 
