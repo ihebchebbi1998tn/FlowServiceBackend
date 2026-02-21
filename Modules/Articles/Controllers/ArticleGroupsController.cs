@@ -8,7 +8,11 @@ using MyApi.Modules.Shared.Services;
 namespace MyApi.Modules.Articles.Controllers
 {
     /// <summary>
-    /// Article Groups Controller - Manages article groups using Lookups
+    /// Article Groups Controller - Manages article groups using the generic Lookups system
+    /// 
+    /// NOTE: ArticleGroups now use the generic LookupItems table with LookupType='article-groups'
+    /// This controller is a convenience wrapper around the ILookupService for article-groups lookups.
+    /// The separate ArticleGroups table has been dropped in favor of the Lookups system.
     /// </summary>
     [Authorize]
     [ApiController]

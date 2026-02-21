@@ -42,6 +42,8 @@ namespace MyApi.Modules.Articles.Models
 
         public int? LocationId { get; set; }
 
+        // GroupId now references LookupItems where LookupType='article-groups'
+        // This allows articles to use the generic Lookups system instead of a dedicated ArticleGroups table
         public int? GroupId { get; set; }
 
         [MaxLength(200)]
