@@ -326,6 +326,9 @@ namespace MyApi.Modules.Lookups.Services
                 Value = createDto.Value
             };
 
+            // optional paid flag (used for leave types)
+            entity.IsPaid = createDto.IsPaid;
+
             _context.LookupItems.Add(entity);
             await _context.SaveChangesAsync();
 
@@ -349,6 +352,7 @@ namespace MyApi.Modules.Lookups.Services
             if (updateDto.SortOrder.HasValue) entity.SortOrder = updateDto.SortOrder.Value;
             if (updateDto.Category != null) entity.Category = updateDto.Category;
             if (updateDto.Value != null) entity.Value = updateDto.Value;
+            if (updateDto.IsPaid.HasValue) entity.IsPaid = updateDto.IsPaid.Value;
             
             // Handle IsDefault - if setting to true, unset other defaults of same type
             if (updateDto.IsDefault.HasValue)
@@ -417,6 +421,8 @@ namespace MyApi.Modules.Lookups.Services
                 Category = entity.Category,
                 Value = entity.Value,
                 LookupType = entity.LookupType
+                ,
+                IsPaid = entity.IsPaid
             };
         }
 

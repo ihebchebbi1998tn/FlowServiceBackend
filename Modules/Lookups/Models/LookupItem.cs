@@ -51,5 +51,7 @@ namespace MyApi.Modules.Lookups.Models
         public DateTime? CreatedAt { get; set; } = DateTime.UtcNow;
 
         public bool IsDefault { get; set; } = false;
+        // Indicates whether this lookup (used for leave types) is paid
+        public bool? IsPaid { get; set; } = null;
     }
 }

@@ -10,6 +10,7 @@ namespace MyApi.Modules.Lookups.DTOs
         public string? Description { get; set; }
         public string? Color { get; set; }
         public bool IsActive { get; set; }
+        public bool? IsPaid { get; set; }
         public bool IsDefault { get; set; }
         public int SortOrder { get; set; }
         public DateTime? CreatedAt { get; set; }
@@ -70,6 +71,8 @@ namespace MyApi.Modules.Lookups.DTOs
         
         [StringLength(100)]
         public string? Value { get; set; }
+        // For leave types: whether this leave is paid
+        public bool? IsPaid { get; set; }
     }
 
     public class UpdateLookupItemRequestDto
@@ -94,6 +97,8 @@ namespace MyApi.Modules.Lookups.DTOs
         
         [StringLength(100)]
         public string? Value { get; set; }
+        // For leave types: whether this leave is paid
+        public bool? IsPaid { get; set; }
     }
 
     public class CreateCurrencyRequestDto
