@@ -156,6 +156,10 @@ namespace MyApi.Data
         // PDF Settings Module (Global settings)
         public DbSet<PdfSettings> PdfSettings { get; set; }
 
+        // Numbering Module
+        public DbSet<MyApi.Modules.Numbering.Models.NumberingSettings> NumberingSettings { get; set; }
+        public DbSet<MyApi.Modules.Numbering.Models.NumberSequence> NumberSequences { get; set; }
+
 
         // Dynamic Forms Module
         public DbSet<DynamicForm> DynamicForms { get; set; }

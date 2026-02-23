@@ -15,15 +15,18 @@ namespace MyApi.Modules.ServiceOrders.Services
         private readonly ApplicationDbContext _context;
         private readonly ILogger<ServiceOrderService> _logger;
         private readonly IWorkflowTriggerService? _workflowTriggerService;
+        private readonly MyApi.Modules.Numbering.Services.INumberingService? _numberingService;
 
         public ServiceOrderService(
             ApplicationDbContext context, 
             ILogger<ServiceOrderService> logger,
-            IWorkflowTriggerService? workflowTriggerService = null)
+            IWorkflowTriggerService? workflowTriggerService = null,
+            MyApi.Modules.Numbering.Services.INumberingService? numberingService = null)
         {
             _context = context;
             _logger = logger;
             _workflowTriggerService = workflowTriggerService;
+            _numberingService = numberingService;
         }
 
         public async Task<ServiceOrderDto> CreateFromSaleAsync(int saleId, CreateServiceOrderDto createDto, string userId)
@@ -49,7 +52,7 @@ namespace MyApi.Modules.ServiceOrders.Services
                 // Get contact for geolocation data
                 var contact = await _context.Contacts.FindAsync(sale.ContactId);
 
-                var orderNumber = $"SO-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString().Substring(0, 5).ToUpper()}";
+                var orderNumber = _numberingService != null ? await _numberingService.GetNextAsync("ServiceOrder") : $"SO-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString().Substring(0, 5).ToUpper()}";
 
                 var serviceOrder = new ServiceOrder
                 {

@@ -14,17 +14,20 @@ namespace MyApi.Modules.Sales.Services
         private readonly ILogger<SaleService> _logger;
         private readonly IStockTransactionService? _stockTransactionService;
         private readonly IWorkflowTriggerService? _workflowTriggerService;
+        private readonly MyApi.Modules.Numbering.Services.INumberingService? _numberingService;
 
         public SaleService(
             ApplicationDbContext context, 
             ILogger<SaleService> logger,
             IStockTransactionService? stockTransactionService = null,
-            IWorkflowTriggerService? workflowTriggerService = null)
+            IWorkflowTriggerService? workflowTriggerService = null,
+            MyApi.Modules.Numbering.Services.INumberingService? numberingService = null)
         {
             _context = context;
             _logger = logger;
             _stockTransactionService = stockTransactionService;
             _workflowTriggerService = workflowTriggerService;
+            _numberingService = numberingService;
         }
 
         public async Task<PaginatedSaleResponse> GetSalesAsync(
@@ -130,7 +133,7 @@ namespace MyApi.Modules.Sales.Services
             var sale = new Sale
             {
                 // Id is auto-generated
-                SaleNumber = $"SALE-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString().Substring(0, 5).ToUpper()}",
+                SaleNumber = _numberingService != null ? await _numberingService.GetNextAsync("Sale") : $"SALE-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString().Substring(0, 5).ToUpper()}",
                 Title = createDto.Title,
                 Description = createDto.Description,
                 ContactId = createDto.ContactId,
@@ -224,7 +227,7 @@ namespace MyApi.Modules.Sales.Services
 
             var sale = new Sale
             {
-                SaleNumber = $"SALE-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString().Substring(0, 5).ToUpper()}",
+                SaleNumber = _numberingService != null ? await _numberingService.GetNextAsync("Sale") : $"SALE-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString().Substring(0, 5).ToUpper()}",
                 Title = offer.Title,
                 Description = offer.Description,
                 ContactId = offer.ContactId,

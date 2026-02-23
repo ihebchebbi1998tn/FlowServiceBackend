@@ -16,19 +16,22 @@ namespace MyApi.Modules.Offers.Services
         private readonly IEntityFormDocumentService _formDocumentService;
         private readonly IStockTransactionService? _stockTransactionService;
         private readonly IWorkflowTriggerService? _workflowTriggerService;
+        private readonly MyApi.Modules.Numbering.Services.INumberingService? _numberingService;
 
         public OfferService(
             ApplicationDbContext context, 
             ILogger<OfferService> logger,
             IEntityFormDocumentService formDocumentService,
             IStockTransactionService? stockTransactionService = null,
-            IWorkflowTriggerService? workflowTriggerService = null)
+            IWorkflowTriggerService? workflowTriggerService = null,
+            MyApi.Modules.Numbering.Services.INumberingService? numberingService = null)
         {
             _context = context;
             _logger = logger;
             _formDocumentService = formDocumentService;
             _stockTransactionService = stockTransactionService;
             _workflowTriggerService = workflowTriggerService;
+            _numberingService = numberingService;
         }
 
         public async Task<PaginatedOfferResponse> GetOffersAsync(
@@ -975,10 +978,23 @@ namespace MyApi.Modules.Offers.Services
 
         private async Task<string> GenerateOfferNumberAsync()
         {
+            // Use configurable numbering service if available
+            if (_numberingService != null)
+            {
+                try
+                {
+                    return await _numberingService.GetNextAsync("Offer");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Numbering service failed for Offer, falling back to legacy logic");
+                }
+            }
+
+            // Legacy fallback
             var year = DateTime.UtcNow.Year;
             var prefix = $"OFR-{year}-";
             
-            // Get the highest offer number for this year
             var lastOffer = await _context.Offers
                 .Where(o => o.OfferNumber != null && o.OfferNumber.StartsWith(prefix))
                 .OrderByDescending(o => o.OfferNumber)

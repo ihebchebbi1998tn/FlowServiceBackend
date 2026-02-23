@@ -16,17 +16,20 @@ namespace MyApi.Modules.WorkflowEngine.Services
         private readonly ILogger<BusinessWorkflowService> _logger;
         private readonly IWorkflowTriggerService _triggerService;
         private readonly IWorkflowNotificationService _notificationService;
+        private readonly MyApi.Modules.Numbering.Services.INumberingService? _numberingService;
 
         public BusinessWorkflowService(
             ApplicationDbContext db,
             ILogger<BusinessWorkflowService> logger,
             IWorkflowTriggerService triggerService,
-            IWorkflowNotificationService notificationService)
+            IWorkflowNotificationService notificationService,
+            MyApi.Modules.Numbering.Services.INumberingService? numberingService = null)
         {
             _db = db;
             _logger = logger;
             _triggerService = triggerService;
             _notificationService = notificationService;
+            _numberingService = numberingService;
         }
 
         /// <summary>
@@ -294,7 +297,7 @@ namespace MyApi.Modules.WorkflowEngine.Services
                     OfferId = sale.OfferId,  // Propagate OfferId from Sale
                     ContactId = sale.ContactId,
                     Status = "pending",  // Initial status after creation - workflow: pending → ready_for_planning → scheduled → in_progress...
-                    OrderNumber = $"SO-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..6].ToUpper()}",
+                    OrderNumber = _numberingService != null ? await _numberingService.GetNextAsync("ServiceOrder") : $"SO-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..6].ToUpper()}",
                     OrderDate = DateTime.UtcNow,
                     CreatedDate = DateTime.UtcNow,
                     CreatedBy = userId ?? "system",

@@ -308,6 +308,9 @@ builder.Services.AddScoped<MyApi.Modules.Shared.Services.IEntityFormDocumentServ
 // PDF Settings Service (Global settings for all modules)
 builder.Services.AddScoped<IPdfSettingsService, PdfSettingsService>();
 
+// Numbering Service (Configurable document numbering)
+builder.Services.AddScoped<MyApi.Modules.Numbering.Services.INumberingService, MyApi.Modules.Numbering.Services.NumberingService>();
+
 // Signatures Module Services
 builder.Services.AddScoped<ISignatureService, SignatureService>();
 

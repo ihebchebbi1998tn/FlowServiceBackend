@@ -17,15 +17,18 @@ namespace MyApi.Modules.Dispatches.Services
         private readonly ApplicationDbContext _db;
         private readonly ILogger<DispatchService> _logger;
         private readonly IWorkflowTriggerService? _workflowTriggerService;
+        private readonly MyApi.Modules.Numbering.Services.INumberingService? _numberingService;
 
         public DispatchService(
             ApplicationDbContext db, 
             ILogger<DispatchService> logger,
-            IWorkflowTriggerService? workflowTriggerService = null)
+            IWorkflowTriggerService? workflowTriggerService = null,
+            MyApi.Modules.Numbering.Services.INumberingService? numberingService = null)
         {
             _db = db;
             _logger = logger;
             _workflowTriggerService = workflowTriggerService;
+            _numberingService = numberingService;
         }
 
         // Helper to build a map of technicianId -> display name for a dispatch
@@ -97,7 +100,7 @@ namespace MyApi.Modules.Dispatches.Services
             
             var dispatch = new Dispatch
             {
-                DispatchNumber = $"DISP-{DateTime.UtcNow:yyyyMMddHHmmss}",
+                DispatchNumber = _numberingService != null ? await _numberingService.GetNextAsync("Dispatch") : $"DISP-{DateTime.UtcNow:yyyyMMddHHmmss}",
                 JobId = jobId.ToString(),
                 ContactId = contactId,
                 ServiceOrderId = serviceOrderId,
