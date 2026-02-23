@@ -54,6 +54,9 @@ namespace MyApi.Modules.Articles.Models
 
         public int? Duration { get; set; }  // Duration in minutes for service-type articles
 
+        [Column(TypeName = "decimal(5,2)")]
+        public decimal TvaRate { get; set; } = 19.00m;  // TVA/VAT rate in percentage (default 19%)
+
         public bool IsActive { get; set; } = true;
 
         public DateTime CreatedDate { get; set; } = DateTime.UtcNow;

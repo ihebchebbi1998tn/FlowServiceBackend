@@ -131,6 +131,7 @@ namespace MyApi.Modules.Articles.Services
                 Supplier = dto.Supplier,
                 Type = dto.Type ?? "material",
                 Duration = dto.Duration,  // Map duration for services
+                TvaRate = dto.TvaRate,
                 IsActive = dto.IsActive,
                 CreatedDate = DateTime.UtcNow,
                 CreatedBy = userId,
@@ -169,6 +170,7 @@ namespace MyApi.Modules.Articles.Services
             if (dto.Supplier != null) article.Supplier = dto.Supplier;
             if (!string.IsNullOrEmpty(dto.Type)) article.Type = dto.Type;
             if (dto.Duration.HasValue) article.Duration = dto.Duration;  // Map duration for services
+            if (dto.TvaRate.HasValue) article.TvaRate = dto.TvaRate.Value;
             if (dto.IsActive.HasValue) article.IsActive = dto.IsActive.Value;
 
             article.ModifiedDate = DateTime.UtcNow;
@@ -408,6 +410,7 @@ namespace MyApi.Modules.Articles.Services
                 Supplier = article.Supplier,
                 Type = article.Type ?? "material",
                 Duration = article.Duration,  // Map duration for services
+                TvaRate = article.TvaRate,
                 IsActive = article.IsActive,
                 CreatedDate = article.CreatedDate,
                 ModifiedDate = article.ModifiedDate,
@@ -538,6 +541,7 @@ namespace MyApi.Modules.Articles.Services
                                     Supplier = dto.Supplier,
                                     Type = type,
                                     Duration = dto.Duration,
+                                    TvaRate = dto.TvaRate ?? 19.00m,
                                     IsActive = dto.IsActive ?? true,
                                     CreatedDate = DateTime.UtcNow,
                                     CreatedBy = userId

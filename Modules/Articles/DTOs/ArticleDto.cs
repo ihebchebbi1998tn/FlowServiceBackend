@@ -24,6 +24,7 @@ namespace MyApi.Modules.Articles.DTOs
         public string? Supplier { get; set; }
         public string Type { get; set; } = "material";
         public int? Duration { get; set; }  // Duration in minutes for services
+        public decimal TvaRate { get; set; } = 19.00m;  // TVA/VAT rate percentage
         public bool IsActive { get; set; }
         public DateTime CreatedDate { get; set; }
         public DateTime? ModifiedDate { get; set; }
@@ -47,6 +48,7 @@ namespace MyApi.Modules.Articles.DTOs
         public string? Supplier { get; set; }
         public string Type { get; set; } = "material";
         public int? Duration { get; set; }  // Duration in minutes for services
+        public decimal TvaRate { get; set; } = 19.00m;  // TVA/VAT rate percentage
         public bool IsActive { get; set; } = true;
     }
 
@@ -66,6 +68,7 @@ namespace MyApi.Modules.Articles.DTOs
         public string? Supplier { get; set; }
         public string? Type { get; set; }
         public int? Duration { get; set; }  // Duration in minutes for services
+        public decimal? TvaRate { get; set; }  // TVA/VAT rate percentage
         public bool? IsActive { get; set; }
     }
 

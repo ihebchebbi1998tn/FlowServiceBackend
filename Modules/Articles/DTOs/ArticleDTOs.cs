@@ -41,6 +41,8 @@ namespace MyApi.Modules.Articles.DTOs
         public DateTime? LastUsed { get; set; }
         public string? LastUsedBy { get; set; }
 
+        public decimal TvaRate { get; set; } = 19.00m;  // TVA/VAT rate percentage
+
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
         public string CreatedBy { get; set; } = string.Empty;
@@ -97,6 +99,7 @@ namespace MyApi.Modules.Articles.DTOs
 
         // Service
         public decimal? BasePrice { get; set; }
+        public decimal? TvaRate { get; set; } = 19.00m;  // TVA/VAT rate percentage
         public int? Duration { get; set; }
         public string? SkillsRequired { get; set; }
         public string? MaterialsNeeded { get; set; }
@@ -139,6 +142,7 @@ namespace MyApi.Modules.Articles.DTOs
 
         // Service
         public decimal? BasePrice { get; set; }
+        public decimal? TvaRate { get; set; }  // TVA/VAT rate percentage
         public int? Duration { get; set; }
         public string? SkillsRequired { get; set; }
         public string? MaterialsNeeded { get; set; }

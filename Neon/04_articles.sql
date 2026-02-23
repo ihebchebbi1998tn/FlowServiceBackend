@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS "articles" (
     "sub_location" VARCHAR(255),
     "base_price" DECIMAL(10,2),
     "duration" INTEGER,
+    "tva_rate" DECIMAL(5,2) NOT NULL DEFAULT 19.00,
     "skills_required" TEXT,
     "materials_needed" TEXT,
     "preferred_users" TEXT,

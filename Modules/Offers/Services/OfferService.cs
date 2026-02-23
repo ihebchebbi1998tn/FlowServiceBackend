@@ -353,6 +353,83 @@ namespace MyApi.Modules.Offers.Services
                 await _context.SaveChangesAsync();
             }
 
+            // ── Sync changes to linked Sale if offer was converted ──
+            if (!string.IsNullOrEmpty(offer.ConvertedToSaleId) && int.TryParse(offer.ConvertedToSaleId, out int linkedSaleId))
+            {
+                try
+                {
+                    var sale = await _context.Sales.Include(s => s.Items).FirstOrDefaultAsync(s => s.Id == linkedSaleId);
+                    if (sale != null)
+                    {
+                        // Sync core fields
+                        sale.Title = offer.Title;
+                        sale.Description = offer.Description;
+                        sale.ContactId = offer.ContactId;
+                        sale.Currency = offer.Currency ?? sale.Currency;
+                        sale.TotalAmount = offer.TotalAmount;
+                        sale.Taxes = offer.Taxes ?? sale.Taxes;
+                        sale.TaxType = offer.TaxType ?? sale.TaxType;
+                        sale.Discount = offer.Discount ?? sale.Discount;
+                        sale.FiscalStamp = offer.FiscalStamp ?? sale.FiscalStamp;
+                        sale.BillingAddress = offer.BillingAddress;
+                        sale.BillingPostalCode = offer.BillingPostalCode;
+                        sale.BillingCountry = offer.BillingCountry;
+                        sale.DeliveryAddress = offer.DeliveryAddress;
+                        sale.DeliveryPostalCode = offer.DeliveryPostalCode;
+                        sale.DeliveryCountry = offer.DeliveryCountry;
+                        sale.UpdatedAt = DateTime.UtcNow;
+                        sale.ModifiedBy = userId;
+
+                        // Sync items: remove old sale items and re-create from offer
+                        var offerItems = await _context.OfferItems.Where(oi => oi.OfferId == id).ToListAsync();
+                        if (sale.Items != null && sale.Items.Any())
+                        {
+                            _context.SaleItems.RemoveRange(sale.Items);
+                        }
+                        if (offerItems.Any())
+                        {
+                            var newSaleItems = offerItems.Select(oi => new MyApi.Modules.Sales.Models.SaleItem
+                            {
+                                SaleId = sale.Id,
+                                Type = oi.Type,
+                                ArticleId = oi.ArticleId,
+                                ItemName = oi.ItemName,
+                                ItemCode = oi.ItemCode,
+                                Description = oi.Description ?? oi.ItemName ?? "Item",
+                                Quantity = oi.Quantity,
+                                UnitPrice = oi.UnitPrice,
+                                Discount = oi.Discount,
+                                DiscountType = oi.DiscountType ?? "percentage",
+                                InstallationId = oi.InstallationId,
+                                InstallationName = oi.InstallationName,
+                                RequiresServiceOrder = oi.Type == "service",
+                                FulfillmentStatus = "pending",
+                                TaxRate = 0
+                            }).ToList();
+                            _context.SaleItems.AddRange(newSaleItems);
+                        }
+
+                        // Log sync activity on the sale
+                        _context.SaleActivities.Add(new MyApi.Modules.Sales.Models.SaleActivity
+                        {
+                            SaleId = sale.Id,
+                            Type = "updated",
+                            Description = $"Sale synced from updated Offer #{offer.OfferNumber}",
+                            CreatedAt = DateTime.UtcNow,
+                            CreatedByName = userId
+                        });
+
+                        await _context.SaveChangesAsync();
+                        _logger.LogInformation("Synced offer {OfferId} changes to linked sale {SaleId}", id, linkedSaleId);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to sync offer {OfferId} changes to linked sale {SaleId}", id, linkedSaleId);
+                    // Don't fail the offer update if sale sync fails
+                }
+            }
+
             var updatedOffer = await GetOfferByIdAsync(id);
             return updatedOffer!;
         }
