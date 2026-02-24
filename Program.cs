@@ -299,6 +299,9 @@ builder.Services.AddScoped<ISystemLogService, SystemLogService>();
 // AI Chat Module Services
 builder.Services.AddScoped<IAiChatService, AiChatService>();
 
+// Ollama / GenerateWish Service (local LLM)
+builder.Services.AddScoped<IOllamaService, OllamaService>();
+
 // DynamicForms Module Services
 builder.Services.AddScoped<MyApi.Modules.DynamicForms.Services.IDynamicFormService, MyApi.Modules.DynamicForms.Services.DynamicFormService>();
 

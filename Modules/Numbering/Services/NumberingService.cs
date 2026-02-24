@@ -165,6 +165,13 @@ namespace MyApi.Modules.Numbering.Services
         {
             var all = await _context.Set<NumberingSettings>().ToListAsync();
 
+            // Auto-seed if table is empty (first run before migration seed or EF seed runs)
+            if (all.Count == 0)
+            {
+                await EnsureDefaultSettingsAsync();
+                all = await _context.Set<NumberingSettings>().ToListAsync();
+            }
+
             // Ensure all 4 entities are represented
             var result = new List<NumberingSettingsDto>();
             foreach (var entity in ValidEntities)
@@ -173,6 +180,46 @@ namespace MyApi.Modules.Numbering.Services
                 result.Add(existing != null ? MapToDto(existing) : GetDefaultDto(entity));
             }
             return result;
+        }
+
+        /// <summary>
+        /// Ensures default NumberingSettings rows exist for all entities.
+        /// Called on first access if the table is empty — safe for concurrent calls via ON CONFLICT.
+        /// </summary>
+        private async Task EnsureDefaultSettingsAsync()
+        {
+            foreach (var entity in ValidEntities)
+            {
+                var exists = await _context.Set<NumberingSettings>()
+                    .AnyAsync(s => s.EntityName == entity);
+
+                if (!exists)
+                {
+                    var defaults = GetDefaultDto(entity);
+                    _context.Set<NumberingSettings>().Add(new NumberingSettings
+                    {
+                        EntityName = entity,
+                        IsEnabled = false,
+                        Template = defaults.Template,
+                        Strategy = defaults.Strategy,
+                        ResetFrequency = defaults.ResetFrequency,
+                        StartValue = defaults.StartValue,
+                        Padding = defaults.Padding,
+                        CreatedAt = DateTime.UtcNow,
+                        UpdatedAt = DateTime.UtcNow,
+                    });
+                }
+            }
+
+            try
+            {
+                await _context.SaveChangesAsync();
+            }
+            catch (DbUpdateException)
+            {
+                // Race condition — another instance seeded first. Safe to ignore.
+                _logger.LogInformation("NumberingSettings already seeded by another instance");
+            }
         }
 
         public async Task<NumberingSettingsDto?> GetSettingsAsync(string entity)

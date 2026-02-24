@@ -31,6 +31,8 @@ CREATE TABLE IF NOT EXISTS "NumberSequences" (
 );
 
 -- 3. Seed default templates matching current hardcoded logic
+-- These defaults ensure the system works immediately on first run without admin config
+-- is_enabled = FALSE means legacy hardcoded logic is used until admin explicitly enables custom templates
 INSERT INTO "NumberingSettings" ("entity_name", "is_enabled", "template", "strategy", "reset_frequency", "start_value", "padding")
 VALUES
     ('Offer',        FALSE, 'OFR-{YEAR}-{SEQ:6}',             'atomic_counter',   'yearly',  1, 6),
@@ -38,6 +40,15 @@ VALUES
     ('ServiceOrder', FALSE, 'SO-{DATE:yyyyMMdd}-{GUID:6}',    'guid',             'never',   1, 6),
     ('Dispatch',     FALSE, 'DISP-{TS:yyyyMMddHHmmss}',       'timestamp_random', 'never',   1, 6)
 ON CONFLICT ("entity_name") DO NOTHING;
+
+-- 3b. Initialize sequence counters at 0 for each entity (yearly reset default)
+INSERT INTO "NumberSequences" ("entity_name", "period_key", "last_value")
+VALUES
+    ('Offer',        EXTRACT(YEAR FROM NOW())::TEXT, 0),
+    ('Sale',         'all',                          0),
+    ('ServiceOrder', 'all',                          0),
+    ('Dispatch',     'all',                          0)
+ON CONFLICT ("entity_name", "period_key") DO NOTHING;
 
 -- 4. Unique constraints on document number columns (idempotent)
 -- Offers

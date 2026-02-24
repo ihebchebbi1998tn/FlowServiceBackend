@@ -754,6 +754,7 @@ namespace MyApi.Data
             // Apply seed data from separate files
             new LookupSeedData().Seed(modelBuilder);
             new CurrencySeedData().Seed(modelBuilder);
+            new NumberingSeedData().Seed(modelBuilder);
         }
     }
 }
