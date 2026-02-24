@@ -13,6 +13,9 @@ namespace MyApi.Modules.AiChat.Services
         private readonly string _ollamaBaseUrl;
         private readonly string _defaultModel;
 
+        // Concurrency control — prevents multiple LLM requests from overloading the VPS CPU
+        private static readonly SemaphoreSlim _llmSemaphore = new(1, 1);
+
         private static readonly JsonSerializerOptions _jsonOptions = new()
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -47,7 +50,12 @@ namespace MyApi.Modules.AiChat.Services
                 userId, model, hasMessages ? "chat" : "generate",
                 hasMessages ? request.Messages!.Count : 0,
                 request.Temperature ?? 0.7f,
-                request.MaxTokens ?? 2048);
+                request.MaxTokens ?? 1024);
+
+            // Acquire semaphore — only 1 LLM request at a time to avoid CPU overload
+            _logger.LogDebug("🔒 [Generate] Waiting for semaphore — user={UserId}", userId);
+            await _llmSemaphore.WaitAsync();
+            _logger.LogDebug("🔓 [Generate] Semaphore acquired — user={UserId}, waitMs={Ms}", userId, sw.ElapsedMilliseconds);
 
             try
             {
@@ -74,7 +82,7 @@ namespace MyApi.Modules.AiChat.Services
                         Options = new OllamaChatOptions
                         {
                             Temperature = request.Temperature ?? 0.7f,
-                            Num_predict = request.MaxTokens ?? 2048
+                            Num_predict = request.MaxTokens ?? 1024
                         }
                     };
 
@@ -202,6 +210,11 @@ namespace MyApi.Modules.AiChat.Services
                     userId, sw.ElapsedMilliseconds, ex.GetType().Name, ex.Message);
                 return new GenerateWishResponseDto { Success = false, Model = model, Error = "An unexpected error occurred while generating the response" };
             }
+            finally
+            {
+                _llmSemaphore.Release();
+                _logger.LogDebug("🔓 [Generate] Semaphore released — user={UserId}", userId);
+            }
         }
 
         /// <summary>
@@ -216,7 +229,12 @@ namespace MyApi.Modules.AiChat.Services
                 userId, model,
                 request.Messages?.Count ?? 0,
                 request.Temperature ?? 0.7f,
-                request.MaxTokens ?? 2048);
+                request.MaxTokens ?? 1024);
+
+            // Acquire semaphore — only 1 LLM request at a time
+            _logger.LogDebug("🔒 [StreamChat] Waiting for semaphore — user={UserId}", userId);
+            await _llmSemaphore.WaitAsync(cancellationToken);
+            _logger.LogDebug("🔓 [StreamChat] Semaphore acquired — user={UserId}", userId);
 
             try
             {
@@ -250,7 +268,7 @@ namespace MyApi.Modules.AiChat.Services
                     Options = new OllamaChatOptions
                     {
                         Temperature = request.Temperature ?? 0.7f,
-                        Num_predict = request.MaxTokens ?? 2048
+                        Num_predict = request.MaxTokens ?? 1024
                     }
                 };
 
@@ -397,6 +415,11 @@ namespace MyApi.Modules.AiChat.Services
                 await WriteSseLineAsync(responseStream, $"data: {errorEvent}", cancellationToken);
                 await WriteSseLineAsync(responseStream, "data: [DONE]", cancellationToken);
             }
+            finally
+            {
+                _llmSemaphore.Release();
+                _logger.LogDebug("🔓 [StreamChat] Semaphore released — user={UserId}", userId);
+            }
         }
 
         /// <summary>
@@ -404,7 +427,7 @@ namespace MyApi.Modules.AiChat.Services
         /// </summary>
         private static async Task WriteSseLineAsync(Stream stream, string line, CancellationToken ct)
         {
-            var bytes = Encoding.UTF8.GetBytes(line + "\n");
+            var bytes = Encoding.UTF8.GetBytes(line + "\n\n");
             await stream.WriteAsync(bytes.AsMemory(0, bytes.Length), ct);
             await stream.FlushAsync(ct);
         }
