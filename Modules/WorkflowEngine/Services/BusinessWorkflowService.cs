@@ -83,9 +83,19 @@ namespace MyApi.Modules.WorkflowEngine.Services
                 }
 
                 // Create the sale with ALL offer fields (matching ConvertOfferAsync/CreateSaleFromOfferAsync)
+                string saleNum;
+                try
+                {
+                    saleNum = _numberingService != null ? await _numberingService.GetNextAsync("Sale") : $"SALE-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..6].ToUpper()}";
+                }
+                catch
+                {
+                    saleNum = $"SALE-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..6].ToUpper()}";
+                }
+
                 var sale = new Sale
                 {
-                    SaleNumber = $"SALE-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..6].ToUpper()}",
+                    SaleNumber = saleNum,
                     Title = offer.Title,
                     Description = offer.Description,
                     ContactId = offer.ContactId,
@@ -291,13 +301,23 @@ namespace MyApi.Modules.WorkflowEngine.Services
                 if (string.IsNullOrEmpty(serviceType)) serviceType = "maintenance";
 
                 // Create service order with config values + helper columns + geolocation
+                string soNumber;
+                try
+                {
+                    soNumber = _numberingService != null ? await _numberingService.GetNextAsync("ServiceOrder") : $"SO-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..6].ToUpper()}";
+                }
+                catch
+                {
+                    soNumber = $"SO-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..6].ToUpper()}";
+                }
+
                 var serviceOrder = new ServiceOrder
                 {
                     SaleId = saleId.ToString(),
                     OfferId = sale.OfferId,  // Propagate OfferId from Sale
                     ContactId = sale.ContactId,
                     Status = "pending",  // Initial status after creation - workflow: pending → ready_for_planning → scheduled → in_progress...
-                    OrderNumber = _numberingService != null ? await _numberingService.GetNextAsync("ServiceOrder") : $"SO-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..6].ToUpper()}",
+                    OrderNumber = soNumber,
                     OrderDate = DateTime.UtcNow,
                     CreatedDate = DateTime.UtcNow,
                     CreatedBy = userId ?? "system",

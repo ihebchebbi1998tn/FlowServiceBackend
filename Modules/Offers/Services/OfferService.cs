@@ -554,9 +554,19 @@ namespace MyApi.Modules.Offers.Services
             // ── Create Sale if requested ──
             if (convertDto.ConvertToSale)
             {
+                string saleNum;
+                try
+                {
+                    saleNum = _numberingService != null ? await _numberingService.GetNextAsync("Sale") : $"SALE-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString().Substring(0, 5).ToUpper()}";
+                }
+                catch
+                {
+                    saleNum = $"SALE-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString().Substring(0, 5).ToUpper()}";
+                }
+
                 var sale = new MyApi.Modules.Sales.Models.Sale
                 {
-                    SaleNumber = $"SALE-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString().Substring(0, 5).ToUpper()}",
+                    SaleNumber = saleNum,
                     Title = offer.Title,
                     Description = offer.Description,
                     ContactId = offer.ContactId,
@@ -978,7 +988,7 @@ namespace MyApi.Modules.Offers.Services
 
         private async Task<string> GenerateOfferNumberAsync()
         {
-            // Use configurable numbering service if available
+            // Use configurable numbering service if available and enabled
             if (_numberingService != null)
             {
                 try
@@ -991,26 +1001,45 @@ namespace MyApi.Modules.Offers.Services
                 }
             }
 
-            // Legacy fallback
-            var year = DateTime.UtcNow.Year;
-            var prefix = $"OFR-{year}-";
-            
-            var lastOffer = await _context.Offers
-                .Where(o => o.OfferNumber != null && o.OfferNumber.StartsWith(prefix))
-                .OrderByDescending(o => o.OfferNumber)
-                .FirstOrDefaultAsync();
-
-            int nextNumber = 1;
-            if (lastOffer != null && !string.IsNullOrEmpty(lastOffer.OfferNumber))
+            // Legacy fallback — queries DB for the highest existing number to avoid duplicates
+            const int maxRetries = 5;
+            for (int attempt = 0; attempt < maxRetries; attempt++)
             {
-                var lastNumberStr = lastOffer.OfferNumber.Replace(prefix, "");
-                if (int.TryParse(lastNumberStr, out int lastNumber))
+                var year = DateTime.UtcNow.Year;
+                var prefix = $"OFR-{year}-";
+                
+                var lastOffer = await _context.Offers
+                    .Where(o => o.OfferNumber != null && o.OfferNumber.StartsWith(prefix))
+                    .OrderByDescending(o => o.OfferNumber)
+                    .FirstOrDefaultAsync();
+
+                int nextNumber = 1;
+                if (lastOffer != null && !string.IsNullOrEmpty(lastOffer.OfferNumber))
                 {
-                    nextNumber = lastNumber + 1;
+                    var lastNumberStr = lastOffer.OfferNumber.Replace(prefix, "");
+                    if (int.TryParse(lastNumberStr, out int lastNumber))
+                    {
+                        nextNumber = lastNumber + 1;
+                    }
                 }
+
+                // Add attempt offset to avoid collision on concurrent retries
+                nextNumber += attempt;
+
+                var candidate = $"{prefix}{nextNumber:D6}";
+
+                // Verify uniqueness before returning
+                var exists = await _context.Offers.AnyAsync(o => o.OfferNumber == candidate);
+                if (!exists)
+                    return candidate;
+
+                _logger.LogWarning("Offer number {Number} already exists, retrying (attempt {Attempt})", candidate, attempt + 1);
             }
 
-            return $"{prefix}{nextNumber:D6}";
+            // Final fallback: append GUID fragment for guaranteed uniqueness
+            var fallback = $"OFR-{DateTime.UtcNow.Year}-{Guid.NewGuid().ToString()[..8].ToUpper()}";
+            _logger.LogWarning("All offer number retries exhausted, using GUID fallback: {Number}", fallback);
+            return fallback;
         }
 
         // =====================================================

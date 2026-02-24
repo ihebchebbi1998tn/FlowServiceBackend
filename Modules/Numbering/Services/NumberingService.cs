@@ -56,27 +56,64 @@ namespace MyApi.Modules.Numbering.Services
             if (settings == null || !settings.IsEnabled)
                 return GenerateLegacy(entity);
 
-            var now = DateTime.UtcNow;
-            string result;
             int retries = 0;
-            const int maxRetries = 3;
+            const int maxRetries = 10;
 
-            while (true)
+            while (retries < maxRetries)
             {
                 try
                 {
-                    result = await RenderTemplateWithSequence(settings, now, consume: true);
-                    break;
+                    // Refresh timestamp on each attempt so {TS}/{DATE}/{GUID} tokens change
+                    var now = DateTime.UtcNow;
+                    var result = await RenderTemplateWithSequence(settings, now, consume: true);
+
+                    // Verify uniqueness against the actual table to prevent collisions with legacy data
+                    if (!await DocumentNumberExistsAsync(entity, result))
+                        return result;
+
+                    retries++;
+                    _logger.LogWarning("Generated number {Number} already exists for {Entity}, retrying (attempt {Retry}/{Max})", result, entity, retries, maxRetries);
+
+                    // Brief delay for timestamp-based strategies to get a new second
+                    if (settings.Strategy is "timestamp_random")
+                        await Task.Delay(100);
                 }
-                catch (DbUpdateConcurrencyException) when (retries < maxRetries)
+                catch (DbUpdateConcurrencyException)
                 {
                     retries++;
                     _logger.LogWarning("Numbering concurrency conflict for {Entity}, retry {Retry}/{Max}", entity, retries, maxRetries);
-                    await Task.Delay(retries * 50); // brief backoff
+                    await Task.Delay(retries * 50);
                 }
             }
 
-            return result;
+            // Ultimate fallback: use entity prefix + timestamp + GUID for guaranteed uniqueness
+            var prefix = EntityPrefixes.GetValueOrDefault(entity, entity);
+            var fallback = $"{prefix}-{DateTime.UtcNow:yyyyMMddHHmmss}-{Guid.NewGuid().ToString("N")[..6].ToUpper()}";
+            _logger.LogWarning("Numbering exhausted all retries for {Entity}, using guaranteed-unique fallback: {Number}", entity, fallback);
+            return fallback;
+        }
+
+        /// <summary>
+        /// Check if a document number already exists in the corresponding entity table.
+        /// </summary>
+        private async Task<bool> DocumentNumberExistsAsync(string entity, string number)
+        {
+            try
+            {
+                return entity switch
+                {
+                    "Offer" => await _context.Offers.AnyAsync(o => o.OfferNumber == number),
+                    "Sale" => await _context.Sales.AnyAsync(s => s.SaleNumber == number),
+                    "ServiceOrder" => await _context.ServiceOrders.AnyAsync(s => s.OrderNumber == number),
+                    "Dispatch" => await _context.Dispatches.AnyAsync(d => d.DispatchNumber == number),
+                    _ => false
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to check document number uniqueness for {Entity}, assuming unique", entity);
+                return false;
+            }
         }
 
         // ──────────────────────────────────────────────────────────
@@ -89,7 +126,8 @@ namespace MyApi.Modules.Numbering.Services
 
             if (settings == null || !settings.IsEnabled)
             {
-                return Enumerable.Range(1, count).Select(i => GenerateLegacy(entity)).ToList();
+                // For legacy preview, generate safe non-throwing previews
+                return Enumerable.Range(1, count).Select(i => GenerateLegacyPreview(entity, i)).ToList();
             }
 
             return PreviewFromSettings(settings, count);
@@ -147,13 +185,20 @@ namespace MyApi.Modules.Numbering.Services
             }
 
             if (!hasUnique)
-                warnings.Add("Template has no unique token ({SEQ}, {GUID}, {TS}, or {ID}). This may cause collisions.");
+            {
+                warnings.Add("Template has no unique token ({SEQ}, {GUID}, {TS}, or {ID}). Numbers will be identical — a GUID suffix will be auto-appended if collisions occur.");
+            }
 
             if (hasSeq && strategy is "timestamp_random" or "guid")
-                warnings.Add("{SEQ} token is used but strategy does not generate sequences. The {SEQ} value will default to 0.");
+                warnings.Add("{SEQ} token detected — a sequential counter will be used automatically regardless of strategy selection.");
 
             if (!hasSeq && strategy is "db_sequence" or "atomic_counter")
-                warnings.Add("Strategy uses sequences but template has no {SEQ} token.");
+                warnings.Add("Strategy uses sequences but template has no {SEQ} token. Consider adding {SEQ} for sequential numbering.");
+
+            // Warn about timestamp-only templates (same-second collisions)
+            bool hasTs = matches.Cast<Match>().Any(m => m.Groups[1].Value == "TS");
+            if (hasTs && !hasSeq && !matches.Cast<Match>().Any(m => m.Groups[1].Value == "GUID"))
+                warnings.Add("Template uses only {TS} for uniqueness. Concurrent requests within the same second may collide — consider adding {GUID} or {SEQ}.");
 
             return (errors.Count == 0, errors, warnings);
         }
@@ -260,7 +305,55 @@ namespace MyApi.Modules.Numbering.Services
             settings.UpdatedAt = DateTime.UtcNow;
 
             await _context.SaveChangesAsync();
+
+            // Auto-sync: when enabling with {SEQ}, ensure counter is past existing records
+            if (request.IsEnabled && request.Template.Contains("{SEQ", StringComparison.OrdinalIgnoreCase))
+            {
+                await AutoSyncSequenceCounterAsync(entity, request.ResetFrequency, request.StartValue);
+            }
+
             return MapToDto(settings);
+        }
+
+        /// <summary>
+        /// Ensures the sequence counter for an entity is ahead of existing document count.
+        /// Called automatically when user enables/changes numbering settings.
+        /// </summary>
+        private async Task AutoSyncSequenceCounterAsync(string entity, string resetFrequency, int startValue)
+        {
+            try
+            {
+                var now = DateTime.UtcNow;
+                var periodKey = GetPeriodKey(resetFrequency, now);
+
+                // Count existing documents to determine a safe counter floor
+                long existingCount = entity switch
+                {
+                    "Offer" => await _context.Offers.CountAsync(),
+                    "Sale" => await _context.Sales.CountAsync(),
+                    "ServiceOrder" => await _context.ServiceOrders.CountAsync(),
+                    "Dispatch" => await _context.Dispatches.CountAsync(),
+                    _ => 0
+                };
+
+                // Add buffer of 100 to safely skip any gaps/deleted records
+                long safeFloor = existingCount + 100;
+
+                // Only update if current counter is below safe floor
+                var sql = @"
+                    INSERT INTO ""NumberSequences"" (entity_name, period_key, last_value, created_at, updated_at)
+                    VALUES ({0}, {1}, {2}, NOW(), NOW())
+                    ON CONFLICT (entity_name, period_key)
+                    DO UPDATE SET last_value = GREATEST(""NumberSequences"".last_value, {2}), updated_at = NOW()
+                    RETURNING last_value;";
+
+                await _context.Database.SqlQueryRaw<long>(sql, entity, periodKey, safeFloor).ToListAsync();
+                _logger.LogInformation("Auto-synced sequence counter for {Entity} (period {Period}) to at least {Floor}", entity, periodKey, safeFloor);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to auto-sync sequence counter for {Entity}, numbering will still work via collision detection", entity);
+            }
         }
 
         // ══════════════════════════════════════════════════════════
@@ -274,8 +367,11 @@ namespace MyApi.Modules.Numbering.Services
         {
             long seqValue = settings.StartValue;
 
-            if (consume && settings.Strategy is "atomic_counter" or "db_sequence" &&
-                settings.Template.Contains("{SEQ", StringComparison.OrdinalIgnoreCase))
+            // Always consume a sequence value when {SEQ} is in the template, regardless of strategy.
+            // This ensures sequential numbering even if user picks "guid" strategy but includes {SEQ}.
+            bool hasSeqToken = settings.Template.Contains("{SEQ", StringComparison.OrdinalIgnoreCase);
+
+            if (consume && hasSeqToken)
             {
                 seqValue = await GetNextSequenceValueAsync(settings.EntityName, settings.ResetFrequency, settings.StartValue, now);
             }
@@ -371,10 +467,27 @@ namespace MyApi.Modules.Numbering.Services
             var now = DateTime.UtcNow;
             return entity switch
             {
-                "Offer" => $"OFR-{now.Year}-{1:D6}", // caller should still use OfferService's existing logic for real fallback
+                // Offer legacy requires DB query for next sequence — throw so caller (OfferService) uses its own DB-aware fallback
+                "Offer" => throw new NotSupportedException("Offer legacy numbering requires DB query; use OfferService fallback"),
                 "Sale" => $"SALE-{now:yyyyMMdd}-{Guid.NewGuid().ToString()[..5].ToUpper()}",
                 "ServiceOrder" => $"SO-{now:yyyyMMdd}-{Guid.NewGuid().ToString()[..6].ToUpper()}",
-                "Dispatch" => $"DISP-{now:yyyyMMddHHmmss}",
+                "Dispatch" => $"DISP-{now:yyyyMMddHHmmss}-{Guid.NewGuid().ToString()[..4].ToUpper()}",
+                _ => $"DOC-{now:yyyyMMddHHmmss}-{Guid.NewGuid().ToString()[..4].ToUpper()}"
+            };
+        }
+
+        /// <summary>
+        /// Safe preview-only legacy generation (never throws, used for PreviewAsync).
+        /// </summary>
+        private static string GenerateLegacyPreview(string entity, int index)
+        {
+            var now = DateTime.UtcNow;
+            return entity switch
+            {
+                "Offer" => $"OFR-{now.Year}-{index:D6}",
+                "Sale" => $"SALE-{now:yyyyMMdd}-{Guid.NewGuid().ToString()[..5].ToUpper()}",
+                "ServiceOrder" => $"SO-{now:yyyyMMdd}-{Guid.NewGuid().ToString()[..6].ToUpper()}",
+                "Dispatch" => $"DISP-{now:yyyyMMddHHmmss}-{Guid.NewGuid().ToString()[..4].ToUpper()}",
                 _ => $"DOC-{now:yyyyMMddHHmmss}-{Guid.NewGuid().ToString()[..4].ToUpper()}"
             };
         }

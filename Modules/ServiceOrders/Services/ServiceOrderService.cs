@@ -52,7 +52,16 @@ namespace MyApi.Modules.ServiceOrders.Services
                 // Get contact for geolocation data
                 var contact = await _context.Contacts.FindAsync(sale.ContactId);
 
-                var orderNumber = _numberingService != null ? await _numberingService.GetNextAsync("ServiceOrder") : $"SO-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString().Substring(0, 5).ToUpper()}";
+                string orderNumber;
+                try
+                {
+                    orderNumber = _numberingService != null ? await _numberingService.GetNextAsync("ServiceOrder") : $"SO-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString().Substring(0, 5).ToUpper()}";
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Numbering service failed for ServiceOrder, using GUID fallback");
+                    orderNumber = $"SO-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString().Substring(0, 6).ToUpper()}";
+                }
 
                 var serviceOrder = new ServiceOrder
                 {

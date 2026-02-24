@@ -98,9 +98,20 @@ namespace MyApi.Modules.Dispatches.Services
                 return DispatchMapping.ToDto(existingDispatch, existingNameMap);
             }
             
+            string dispatchNumber;
+            try
+            {
+                dispatchNumber = _numberingService != null ? await _numberingService.GetNextAsync("Dispatch") : $"DISP-{DateTime.UtcNow:yyyyMMddHHmmss}-{Guid.NewGuid().ToString()[..4].ToUpper()}";
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Numbering service failed for Dispatch, using GUID fallback");
+                dispatchNumber = $"DISP-{DateTime.UtcNow:yyyyMMddHHmmss}-{Guid.NewGuid().ToString()[..4].ToUpper()}";
+            }
+
             var dispatch = new Dispatch
             {
-                DispatchNumber = _numberingService != null ? await _numberingService.GetNextAsync("Dispatch") : $"DISP-{DateTime.UtcNow:yyyyMMddHHmmss}",
+                DispatchNumber = dispatchNumber,
                 JobId = jobId.ToString(),
                 ContactId = contactId,
                 ServiceOrderId = serviceOrderId,
