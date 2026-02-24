@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using MyApi.Data;
 using MyApi.Infrastructure;
 using MyApi.Modules.SupportTickets.DTOs;
 using MyApi.Modules.SupportTickets.Models;
