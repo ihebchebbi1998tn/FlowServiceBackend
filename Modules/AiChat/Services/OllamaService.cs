@@ -43,21 +43,25 @@ namespace MyApi.Modules.AiChat.Services
             var sw = Stopwatch.StartNew();
 
             _logger.LogInformation(
-                "📨 GenerateWish: user={UserId}, model={Model}, mode={Mode}, msgCount={MsgCount}",
+                "📨 [Generate] START — user={UserId}, model={Model}, mode={Mode}, msgCount={MsgCount}, temp={Temp}, maxTokens={MaxTokens}",
                 userId, model, hasMessages ? "chat" : "generate",
-                hasMessages ? request.Messages!.Count : 0);
+                hasMessages ? request.Messages!.Count : 0,
+                request.Temperature ?? 0.7f,
+                request.MaxTokens ?? 2048);
 
             try
             {
                 var client = _httpClientFactory.CreateClient("Ollama");
                 client.BaseAddress = new Uri(_ollamaBaseUrl);
-                client.Timeout = TimeSpan.FromSeconds(120);
+                client.Timeout = TimeSpan.FromSeconds(300);
+
+                _logger.LogDebug("🔗 [Generate] HttpClient created — baseAddress={BaseAddress}, timeout={Timeout}s",
+                    _ollamaBaseUrl, 300);
 
                 HttpResponseMessage httpResponse;
 
                 if (hasMessages)
                 {
-                    // ── Chat mode: /api/chat ──
                     var chatPayload = new OllamaChatRequest
                     {
                         Model = model,
@@ -74,14 +78,21 @@ namespace MyApi.Modules.AiChat.Services
                         }
                     };
 
-                    _logger.LogDebug("🔄 POST /api/chat — model={Model}, messages={Count}", model, chatPayload.Messages.Count);
+                    var payloadJson = JsonSerializer.Serialize(chatPayload, _jsonOptions);
+                    _logger.LogInformation("🔄 [Generate] POST /api/chat — model={Model}, messages={Count}, payloadLen={PayloadLen}",
+                        model, chatPayload.Messages.Count, payloadJson.Length);
+                    _logger.LogDebug("📋 [Generate] Payload: {Payload}", payloadJson.Substring(0, Math.Min(payloadJson.Length, 500)));
 
                     httpResponse = await client.PostAsJsonAsync("/api/chat", chatPayload, _jsonOptions);
+
+                    _logger.LogInformation("📡 [Generate] Ollama responded — statusCode={StatusCode}, elapsed={Ms}ms",
+                        (int)httpResponse.StatusCode, sw.ElapsedMilliseconds);
 
                     if (!httpResponse.IsSuccessStatusCode)
                     {
                         var errorBody = await httpResponse.Content.ReadAsStringAsync();
-                        _logger.LogError("❌ Ollama /api/chat {StatusCode}: {Body}", (int)httpResponse.StatusCode, errorBody);
+                        _logger.LogError("❌ [Generate] Ollama /api/chat error — status={StatusCode}, body={Body}, elapsed={Ms}ms",
+                            (int)httpResponse.StatusCode, errorBody, sw.ElapsedMilliseconds);
                         return new GenerateWishResponseDto
                         {
                             Success = false, Model = model,
@@ -89,16 +100,23 @@ namespace MyApi.Modules.AiChat.Services
                         };
                     }
 
-                    var chatResponse = await httpResponse.Content.ReadFromJsonAsync<OllamaChatResponse>(_jsonOptions);
+                    var rawResponse = await httpResponse.Content.ReadAsStringAsync();
+                    _logger.LogDebug("📄 [Generate] Raw response (first 300 chars): {Raw}", rawResponse.Substring(0, Math.Min(rawResponse.Length, 300)));
+
+                    var chatResponse = JsonSerializer.Deserialize<OllamaChatResponse>(rawResponse, _jsonOptions);
                     if (chatResponse?.Message == null || string.IsNullOrEmpty(chatResponse.Message.Content))
                     {
-                        _logger.LogWarning("⚠️ Empty response from Ollama chat — user={UserId}, elapsed={Ms}ms", userId, sw.ElapsedMilliseconds);
+                        _logger.LogWarning("⚠️ [Generate] Empty response from Ollama chat — user={UserId}, elapsed={Ms}ms, rawLen={RawLen}",
+                            userId, sw.ElapsedMilliseconds, rawResponse.Length);
                         return new GenerateWishResponseDto { Success = false, Model = model, Error = "Empty response from LLM" };
                     }
 
                     sw.Stop();
-                    _logger.LogInformation("✅ GenerateWish OK — user={UserId}, model={Model}, ollamaDuration={OllamaMs}ms, totalElapsed={TotalMs}ms, responseLen={Len}",
-                        userId, chatResponse.Model, chatResponse.Total_duration / 1_000_000, sw.ElapsedMilliseconds, chatResponse.Message.Content.Length);
+                    _logger.LogInformation("✅ [Generate] OK — user={UserId}, model={Model}, ollamaDuration={OllamaMs}ms, totalElapsed={TotalMs}ms, responseLen={Len}, responsePreview=\"{Preview}\"",
+                        userId, chatResponse.Model,
+                        chatResponse.Total_duration / 1_000_000, sw.ElapsedMilliseconds,
+                        chatResponse.Message.Content.Length,
+                        chatResponse.Message.Content.Substring(0, Math.Min(chatResponse.Message.Content.Length, 150)));
 
                     return new GenerateWishResponseDto
                     {
@@ -111,9 +129,9 @@ namespace MyApi.Modules.AiChat.Services
                 }
                 else
                 {
-                    // ── Legacy generate mode: /api/generate ──
                     if (string.IsNullOrWhiteSpace(request.Prompt))
                     {
+                        _logger.LogWarning("⚠️ [Generate] No prompt provided in generate mode — user={UserId}", userId);
                         return new GenerateWishResponseDto { Success = false, Model = model, Error = "Either Prompt or Messages must be provided" };
                     }
 
@@ -124,14 +142,21 @@ namespace MyApi.Modules.AiChat.Services
                         Stream = false
                     };
 
-                    _logger.LogDebug("🔄 POST /api/generate — model={Model}", model);
+                    _logger.LogInformation("🔄 [Generate] POST /api/generate — model={Model}, promptLen={PromptLen}",
+                        model, request.Prompt!.Length);
+                    _logger.LogDebug("📋 [Generate] Prompt preview: \"{Preview}\"",
+                        request.Prompt!.Substring(0, Math.Min(request.Prompt.Length, 200)));
 
                     httpResponse = await client.PostAsJsonAsync("/api/generate", generatePayload, _jsonOptions);
+
+                    _logger.LogInformation("📡 [Generate] Ollama responded — statusCode={StatusCode}, elapsed={Ms}ms",
+                        (int)httpResponse.StatusCode, sw.ElapsedMilliseconds);
 
                     if (!httpResponse.IsSuccessStatusCode)
                     {
                         var errorBody = await httpResponse.Content.ReadAsStringAsync();
-                        _logger.LogError("❌ Ollama /api/generate {StatusCode}: {Body}", (int)httpResponse.StatusCode, errorBody);
+                        _logger.LogError("❌ [Generate] Ollama /api/generate error — status={StatusCode}, body={Body}",
+                            (int)httpResponse.StatusCode, errorBody);
                         return new GenerateWishResponseDto
                         {
                             Success = false, Model = model,
@@ -142,13 +167,13 @@ namespace MyApi.Modules.AiChat.Services
                     var ollamaResponse = await httpResponse.Content.ReadFromJsonAsync<OllamaGenerateResponse>(_jsonOptions);
                     if (ollamaResponse == null || string.IsNullOrEmpty(ollamaResponse.Response))
                     {
-                        _logger.LogWarning("⚠️ Empty response from Ollama generate — user={UserId}", userId);
+                        _logger.LogWarning("⚠️ [Generate] Empty response from Ollama generate — user={UserId}", userId);
                         return new GenerateWishResponseDto { Success = false, Model = model, Error = "Empty response from LLM" };
                     }
 
                     sw.Stop();
-                    _logger.LogInformation("✅ GenerateWish OK — user={UserId}, model={Model}, ollamaDuration={OllamaMs}ms, totalElapsed={TotalMs}ms",
-                        userId, ollamaResponse.Model, ollamaResponse.Total_duration / 1_000_000, sw.ElapsedMilliseconds);
+                    _logger.LogInformation("✅ [Generate] OK — user={UserId}, model={Model}, ollamaDuration={OllamaMs}ms, totalElapsed={TotalMs}ms, responseLen={Len}",
+                        userId, ollamaResponse.Model, ollamaResponse.Total_duration / 1_000_000, sw.ElapsedMilliseconds, ollamaResponse.Response.Length);
 
                     return new GenerateWishResponseDto
                     {
@@ -162,17 +187,19 @@ namespace MyApi.Modules.AiChat.Services
             }
             catch (TaskCanceledException)
             {
-                _logger.LogWarning("⏱️ Timeout after {Ms}ms — user={UserId}", sw.ElapsedMilliseconds, userId);
+                _logger.LogWarning("⏱️ [Generate] TIMEOUT after {Ms}ms — user={UserId}, model={Model}", sw.ElapsedMilliseconds, userId, model);
                 return new GenerateWishResponseDto { Success = false, Model = model, Error = "Request timed out — the LLM server took too long to respond" };
             }
             catch (HttpRequestException ex)
             {
-                _logger.LogError(ex, "🔌 Cannot reach Ollama at {Url} — elapsed={Ms}ms", _ollamaBaseUrl, sw.ElapsedMilliseconds);
+                _logger.LogError(ex, "🔌 [Generate] Cannot reach Ollama at {Url} — user={UserId}, elapsed={Ms}ms, innerEx={Inner}",
+                    _ollamaBaseUrl, userId, sw.ElapsedMilliseconds, ex.InnerException?.Message ?? "(none)");
                 return new GenerateWishResponseDto { Success = false, Model = model, Error = $"Cannot reach LLM server at {_ollamaBaseUrl}: {ex.Message}" };
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "💥 Unexpected error in GenerateWish — elapsed={Ms}ms", sw.ElapsedMilliseconds);
+                _logger.LogError(ex, "💥 [Generate] Unexpected error — user={UserId}, elapsed={Ms}ms, exType={ExType}, message={Msg}",
+                    userId, sw.ElapsedMilliseconds, ex.GetType().Name, ex.Message);
                 return new GenerateWishResponseDto { Success = false, Model = model, Error = "An unexpected error occurred while generating the response" };
             }
         }
@@ -185,13 +212,17 @@ namespace MyApi.Modules.AiChat.Services
             var model = string.IsNullOrWhiteSpace(request.Model) ? _defaultModel : request.Model;
             var sw = Stopwatch.StartNew();
 
-            _logger.LogInformation("🔄 StreamChat START — user={UserId}, model={Model}", userId, model);
+            _logger.LogInformation("🔄 [StreamChat] START — user={UserId}, model={Model}, msgCount={MsgCount}, temp={Temp}, maxTokens={MaxTokens}",
+                userId, model,
+                request.Messages?.Count ?? 0,
+                request.Temperature ?? 0.7f,
+                request.MaxTokens ?? 2048);
 
             try
             {
                 var client = _httpClientFactory.CreateClient("Ollama");
                 client.BaseAddress = new Uri(_ollamaBaseUrl);
-                client.Timeout = TimeSpan.FromSeconds(120);
+                client.Timeout = TimeSpan.FromSeconds(300);
 
                 var messages = (request.Messages ?? new List<ChatMessageDto>())
                     .Select(m => new OllamaChatMessage { Role = m.Role.ToLower(), Content = m.Content })
@@ -200,9 +231,16 @@ namespace MyApi.Modules.AiChat.Services
                 if (messages.Count == 0 && !string.IsNullOrWhiteSpace(request.Prompt))
                 {
                     messages.Add(new OllamaChatMessage { Role = "user", Content = request.Prompt! });
+                    _logger.LogDebug("📝 [StreamChat] Converted prompt to user message — promptLen={Len}", request.Prompt!.Length);
                 }
 
-                _logger.LogDebug("📤 StreamChat sending {Count} messages to Ollama", messages.Count);
+                // Log all messages being sent
+                for (int i = 0; i < messages.Count; i++)
+                {
+                    _logger.LogDebug("📝 [StreamChat] Message[{Index}] role={Role}, contentLen={Len}, preview=\"{Preview}\"",
+                        i, messages[i].Role, messages[i].Content.Length,
+                        messages[i].Content.Substring(0, Math.Min(messages[i].Content.Length, 120)));
+                }
 
                 var chatPayload = new OllamaChatRequest
                 {
@@ -222,28 +260,61 @@ namespace MyApi.Modules.AiChat.Services
                     "application/json");
 
                 var httpRequest = new HttpRequestMessage(HttpMethod.Post, "/api/chat") { Content = jsonContent };
+
+                // Send SSE keep-alive comment immediately so proxies don't timeout
+                await WriteSseLineAsync(responseStream, ": keepalive", cancellationToken);
+                _logger.LogDebug("💓 [StreamChat] Sent initial keepalive — elapsed={Ms}ms", sw.ElapsedMilliseconds);
+
+                _logger.LogInformation("📡 [StreamChat] Sending request to Ollama — url={Url}/api/chat", _ollamaBaseUrl);
                 var httpResponse = await client.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+
+                _logger.LogInformation("📡 [StreamChat] Ollama headers received — statusCode={StatusCode}, elapsed={Ms}ms",
+                    (int)httpResponse.StatusCode, sw.ElapsedMilliseconds);
 
                 if (!httpResponse.IsSuccessStatusCode)
                 {
                     var errorBody = await httpResponse.Content.ReadAsStringAsync(cancellationToken);
-                    _logger.LogError("❌ StreamChat Ollama error {StatusCode}: {Body}", (int)httpResponse.StatusCode, errorBody);
+                    _logger.LogError("❌ [StreamChat] Ollama error — status={StatusCode}, body={Body}, elapsed={Ms}ms",
+                        (int)httpResponse.StatusCode, errorBody, sw.ElapsedMilliseconds);
                     var errorEvent = JsonSerializer.Serialize(new { error = $"LLM error {(int)httpResponse.StatusCode}: {errorBody}" });
                     await WriteSseLineAsync(responseStream, $"data: {errorEvent}", cancellationToken);
                     await WriteSseLineAsync(responseStream, "data: [DONE]", cancellationToken);
                     return;
                 }
 
-                _logger.LogDebug("📥 StreamChat connected to Ollama — first byte at {Ms}ms", sw.ElapsedMilliseconds);
+                _logger.LogInformation("📥 [StreamChat] Connected — first byte at {Ms}ms, starting chunk processing", sw.ElapsedMilliseconds);
 
                 using var stream = await httpResponse.Content.ReadAsStreamAsync(cancellationToken);
                 using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, bufferSize: 4096);
                 int chunkCount = 0;
+                int totalContentLength = 0;
+                var lastActivity = Stopwatch.StartNew();
+                var firstChunkLogged = false;
+
+                // Start a background keep-alive task to prevent proxy timeouts
+                using var keepAliveCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                var keepAliveTask = Task.Run(async () =>
+                {
+                    try
+                    {
+                        while (!keepAliveCts.Token.IsCancellationRequested)
+                        {
+                            await Task.Delay(15_000, keepAliveCts.Token);
+                            if (lastActivity.ElapsedMilliseconds > 10_000)
+                            {
+                                _logger.LogDebug("💓 [StreamChat] Sending keepalive — lastActivity={Ms}ms ago", lastActivity.ElapsedMilliseconds);
+                                await WriteSseLineAsync(responseStream, ": keepalive", keepAliveCts.Token);
+                            }
+                        }
+                    }
+                    catch (OperationCanceledException) { }
+                }, keepAliveCts.Token);
 
                 while (!reader.EndOfStream && !cancellationToken.IsCancellationRequested)
                 {
                     var line = await reader.ReadLineAsync(cancellationToken);
                     if (string.IsNullOrWhiteSpace(line)) continue;
+                    lastActivity.Restart();
 
                     try
                     {
@@ -251,6 +322,15 @@ namespace MyApi.Modules.AiChat.Services
                         if (chunk?.Message?.Content != null)
                         {
                             chunkCount++;
+                            totalContentLength += chunk.Message.Content.Length;
+
+                            if (!firstChunkLogged)
+                            {
+                                _logger.LogInformation("⚡ [StreamChat] First content chunk — user={UserId}, elapsed={Ms}ms, content=\"{Content}\"",
+                                    userId, sw.ElapsedMilliseconds, chunk.Message.Content);
+                                firstChunkLogged = true;
+                            }
+
                             var sseData = JsonSerializer.Serialize(new
                             {
                                 choices = new[]
@@ -269,34 +349,50 @@ namespace MyApi.Modules.AiChat.Services
                         if (chunk?.Done == true)
                         {
                             sw.Stop();
-                            _logger.LogInformation("✅ StreamChat DONE — user={UserId}, chunks={ChunkCount}, elapsed={Ms}ms", userId, chunkCount, sw.ElapsedMilliseconds);
+                            _logger.LogInformation("✅ [StreamChat] DONE — user={UserId}, model={Model}, chunks={ChunkCount}, totalContentLen={ContentLen}, elapsed={Ms}ms, ollamaDuration={OllamaMs}ms",
+                                userId, chunk.Model, chunkCount, totalContentLength, sw.ElapsedMilliseconds, chunk.Total_duration / 1_000_000);
                             await WriteSseLineAsync(responseStream, "data: [DONE]", cancellationToken);
                             break;
                         }
                     }
                     catch (JsonException ex)
                     {
-                        _logger.LogDebug("⚠️ StreamChat malformed chunk: {Error}", ex.Message);
+                        _logger.LogWarning("⚠️ [StreamChat] Malformed chunk — error={Error}, rawLine=\"{Line}\"",
+                            ex.Message, line.Substring(0, Math.Min(line.Length, 200)));
                     }
                 }
+
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    _logger.LogWarning("🛑 [StreamChat] Client disconnected — user={UserId}, chunks={ChunkCount}, elapsed={Ms}ms", userId, chunkCount, sw.ElapsedMilliseconds);
+                }
+
+                keepAliveCts.Cancel();
+                try { await keepAliveTask; } catch { }
             }
             catch (TaskCanceledException)
             {
-                _logger.LogWarning("⏱️ StreamChat timeout after {Ms}ms — user={UserId}", sw.ElapsedMilliseconds, userId);
-                var errorEvent = JsonSerializer.Serialize(new { error = "Stream request timed out" });
-                await WriteSseLineAsync(responseStream, $"data: {errorEvent}", cancellationToken);
-                await WriteSseLineAsync(responseStream, "data: [DONE]", cancellationToken);
+                _logger.LogWarning("⏱️ [StreamChat] TIMEOUT after {Ms}ms — user={UserId}, model={Model}", sw.ElapsedMilliseconds, userId, model);
+                try
+                {
+                    var errorEvent = JsonSerializer.Serialize(new { error = "Stream request timed out" });
+                    await WriteSseLineAsync(responseStream, $"data: {errorEvent}", CancellationToken.None);
+                    await WriteSseLineAsync(responseStream, "data: [DONE]", CancellationToken.None);
+                }
+                catch { }
             }
             catch (HttpRequestException ex)
             {
-                _logger.LogError(ex, "🔌 StreamChat cannot reach Ollama at {Url}", _ollamaBaseUrl);
+                _logger.LogError(ex, "🔌 [StreamChat] Cannot reach Ollama at {Url} — user={UserId}, elapsed={Ms}ms, innerEx={Inner}",
+                    _ollamaBaseUrl, userId, sw.ElapsedMilliseconds, ex.InnerException?.Message ?? "(none)");
                 var errorEvent = JsonSerializer.Serialize(new { error = $"Cannot reach LLM: {ex.Message}" });
                 await WriteSseLineAsync(responseStream, $"data: {errorEvent}", cancellationToken);
                 await WriteSseLineAsync(responseStream, "data: [DONE]", cancellationToken);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "💥 StreamChat error after {Ms}ms — user={UserId}", sw.ElapsedMilliseconds, userId);
+                _logger.LogError(ex, "💥 [StreamChat] Unexpected error — user={UserId}, elapsed={Ms}ms, exType={ExType}, message={Msg}",
+                    userId, sw.ElapsedMilliseconds, ex.GetType().Name, ex.Message);
                 var errorEvent = JsonSerializer.Serialize(new { error = ex.Message });
                 await WriteSseLineAsync(responseStream, $"data: {errorEvent}", cancellationToken);
                 await WriteSseLineAsync(responseStream, "data: [DONE]", cancellationToken);
