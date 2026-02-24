@@ -42,6 +42,7 @@ using MyApi.Modules.UserAiSettings.Models;
 using MyApi.Modules.Payments.Models;
 using MyApi.Modules.RetenueSource.Models;
 using MyApi.Modules.RetenueSource.Data;
+using MyApi.Modules.SupportTickets.Models;
 
 namespace MyApi.Data
 {
@@ -214,6 +215,10 @@ namespace MyApi.Data
         // Retenue à la Source Module
         public DbSet<RSRecord> RSRecords { get; set; }
         public DbSet<TEJExportLog> TEJExportLogs { get; set; }
+
+        // Support Tickets Module
+        public DbSet<SupportTicket> SupportTickets { get; set; }
+        public DbSet<SupportTicketAttachment> SupportTicketAttachments { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
