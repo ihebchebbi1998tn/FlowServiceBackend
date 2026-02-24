@@ -164,7 +164,6 @@ namespace MyApi.Modules.AiChat.Services
         public async Task StreamChatAsync(GenerateWishRequestDto request, string userId, Stream responseStream, CancellationToken cancellationToken)
         {
             var model = string.IsNullOrWhiteSpace(request.Model) ? _defaultModel : request.Model;
-            var writer = new StreamWriter(responseStream, Encoding.UTF8) { AutoFlush = true };
 
             try
             {
@@ -176,7 +175,6 @@ namespace MyApi.Modules.AiChat.Services
                     .Select(m => new OllamaChatMessage { Role = m.Role.ToLower(), Content = m.Content })
                     .ToList();
 
-                // If only Prompt was provided, wrap it as a user message
                 if (messages.Count == 0 && !string.IsNullOrWhiteSpace(request.Prompt))
                 {
                     messages.Add(new OllamaChatMessage { Role = "user", Content = request.Prompt! });
@@ -206,8 +204,8 @@ namespace MyApi.Modules.AiChat.Services
                 {
                     var errorBody = await httpResponse.Content.ReadAsStringAsync(cancellationToken);
                     var errorEvent = JsonSerializer.Serialize(new { error = $"LLM error {(int)httpResponse.StatusCode}: {errorBody}" });
-                    await writer.WriteLineAsync($"data: {errorEvent}");
-                    await writer.WriteLineAsync("data: [DONE]");
+                    await WriteSseLineAsync(responseStream, $"data: {errorEvent}", cancellationToken);
+                    await WriteSseLineAsync(responseStream, "data: [DONE]", cancellationToken);
                     return;
                 }
 
@@ -216,7 +214,7 @@ namespace MyApi.Modules.AiChat.Services
 
                 while (!reader.EndOfStream && !cancellationToken.IsCancellationRequested)
                 {
-                    var line = await reader.ReadLineAsync();
+                    var line = await reader.ReadLineAsync(cancellationToken);
                     if (string.IsNullOrWhiteSpace(line)) continue;
 
                     try
@@ -224,7 +222,6 @@ namespace MyApi.Modules.AiChat.Services
                         var chunk = JsonSerializer.Deserialize<OllamaChatStreamChunk>(line, _jsonOptions);
                         if (chunk?.Message?.Content != null)
                         {
-                            // Forward as OpenAI-compatible SSE format
                             var sseData = JsonSerializer.Serialize(new
                             {
                                 choices = new[]
@@ -237,12 +234,12 @@ namespace MyApi.Modules.AiChat.Services
                                 },
                                 model = chunk.Model
                             });
-                            await writer.WriteLineAsync($"data: {sseData}");
+                            await WriteSseLineAsync(responseStream, $"data: {sseData}", cancellationToken);
                         }
 
                         if (chunk?.Done == true)
                         {
-                            await writer.WriteLineAsync("data: [DONE]");
+                            await WriteSseLineAsync(responseStream, "data: [DONE]", cancellationToken);
                             break;
                         }
                     }
@@ -256,9 +253,19 @@ namespace MyApi.Modules.AiChat.Services
             {
                 _logger.LogError(ex, "Streaming error for user {UserId}", userId);
                 var errorEvent = JsonSerializer.Serialize(new { error = ex.Message });
-                await writer.WriteLineAsync($"data: {errorEvent}");
-                await writer.WriteLineAsync("data: [DONE]");
+                await WriteSseLineAsync(responseStream, $"data: {errorEvent}", cancellationToken);
+                await WriteSseLineAsync(responseStream, "data: [DONE]", cancellationToken);
             }
+        }
+
+        /// <summary>
+        /// Write a single SSE line to the response stream without synchronous IO.
+        /// </summary>
+        private static async Task WriteSseLineAsync(Stream stream, string line, CancellationToken ct)
+        {
+            var bytes = Encoding.UTF8.GetBytes(line + "\n");
+            await stream.WriteAsync(bytes, 0, bytes.Length, ct);
+            await stream.FlushAsync(ct);
         }
     }
 }
