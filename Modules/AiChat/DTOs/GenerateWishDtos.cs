@@ -68,7 +68,7 @@ namespace MyApi.Modules.AiChat.DTOs
     // ── Ollama /api/generate (legacy single-prompt) ──
     internal class OllamaGenerateRequest
     {
-        public string Model { get; set; } = "llama3:8b";
+        public string Model { get; set; } = "mistral";
         public string Prompt { get; set; } = string.Empty;
         public bool Stream { get; set; } = false;
     }
@@ -90,7 +90,7 @@ namespace MyApi.Modules.AiChat.DTOs
 
     internal class OllamaChatRequest
     {
-        public string Model { get; set; } = "llama3:8b";
+        public string Model { get; set; } = "mistral";
         public List<OllamaChatMessage> Messages { get; set; } = new();
         public bool Stream { get; set; } = false;
         public OllamaChatOptions? Options { get; set; }
