@@ -96,7 +96,7 @@ namespace MyApi.Modules.SupportTickets.Controllers
             var created = await BuildResponseDto(db, ticket.Id);
 
             _logger.LogInformation("Support ticket #{TicketId} created by {Email} on tenant {Tenant}",
-                created.Id, created.UserEmail ?? "anonymous", tenant);
+                created!.Id, created.UserEmail ?? "anonymous", tenant);
 
             return Created($"/api/SupportTickets/{created.Id}", created);
         }

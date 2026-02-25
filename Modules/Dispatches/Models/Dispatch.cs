@@ -36,6 +36,12 @@ namespace MyApi.Modules.Dispatches.Models
         [Column("CompletedDate")]
         public DateTime? CompletedDate { get; set; }
 
+        [Column("ScheduledStartTime")]
+        public TimeSpan? ScheduledStartTime { get; set; }
+
+        [Column("ScheduledEndTime")]
+        public TimeSpan? ScheduledEndTime { get; set; }
+
         [Required]
         [Column("Status", TypeName = "text")]
         public string Status { get; set; } = "pending";
@@ -102,10 +108,18 @@ namespace MyApi.Modules.Dispatches.Models
         [MaxLength(100)]
         public string? ModifiedBy { get; set; }
 
+        [Column("InstallationId")]
+        public int? InstallationId { get; set; }
+
+        [Column("InstallationName")]
+        [MaxLength(255)]
+        public string? InstallationName { get; set; }
+
         // Navigation properties
         [ForeignKey("ContactId")]
         public virtual Contact? Contact { get; set; }
         public virtual List<DispatchTechnician> AssignedTechnicians { get; set; } = new();
+        public virtual List<DispatchJob> DispatchJobs { get; set; } = new();
         public virtual List<TimeEntry> TimeEntries { get; set; } = new();
         public virtual List<Expense> Expenses { get; set; } = new();
         public virtual List<MaterialUsage> MaterialsUsed { get; set; } = new();

@@ -187,6 +187,12 @@ namespace MyApi.Modules.ServiceOrders.DTOs
         public bool RequiresApproval { get; set; }
         public string[]? Tags { get; set; }
         public object? CustomFields { get; set; }
+
+        /// <summary>
+        /// Optional override for job conversion mode: "installation" or "service".
+        /// If null, the system setting from AppSettings table is used.
+        /// </summary>
+        public string? JobConversionMode { get; set; }
     }
 
     public class UpdateServiceOrderDto

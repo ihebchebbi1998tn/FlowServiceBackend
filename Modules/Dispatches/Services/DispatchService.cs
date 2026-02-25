@@ -118,6 +118,8 @@ namespace MyApi.Modules.Dispatches.Services
                 Status = status,
                 Priority = dto.Priority ?? job.Priority ?? "medium",
                 ScheduledDate = dto.ScheduledDate,
+                ScheduledStartTime = dto.ScheduledStartTime,
+                ScheduledEndTime = dto.ScheduledEndTime,
                 SiteAddress = dto.SiteAddress ?? string.Empty,
                 Description = job.JobDescription ?? job.Description,
                 CreatedDate = DateTime.UtcNow,
@@ -165,6 +167,150 @@ namespace MyApi.Modules.Dispatches.Services
             return DispatchMapping.ToDto(createdDispatch, nameMap);
         }
 
+        public async Task<DispatchDto> CreateFromInstallationAsync(CreateDispatchFromInstallationDto dto, string userId)
+        {
+            _logger.LogInformation("CreateFromInstallationAsync called by {UserId} for Installation {InstallationId} with {JobCount} jobs",
+                userId, dto.InstallationId, dto.JobIds.Count);
+
+            // Validate all jobs exist
+            var jobs = await _db.ServiceOrderJobs
+                .Include(j => j.ServiceOrder)
+                .Where(j => dto.JobIds.Contains(j.Id))
+                .ToListAsync();
+
+            if (jobs.Count != dto.JobIds.Count)
+            {
+                var foundIds = jobs.Select(j => j.Id).ToHashSet();
+                var missingIds = dto.JobIds.Where(id => !foundIds.Contains(id)).ToList();
+                throw new KeyNotFoundException($"Jobs not found: {string.Join(", ", missingIds)}");
+            }
+
+            // Check no job already has an active dispatch via DispatchJobs
+            var existingDispatchJobIds = await _db.Set<DispatchJob>()
+                .Where(dj => dto.JobIds.Contains(dj.JobId))
+                .Join(_db.Dispatches.Where(d => !d.IsDeleted),
+                    dj => dj.DispatchId, d => d.Id,
+                    (dj, d) => dj.JobId)
+                .ToListAsync();
+
+            if (existingDispatchJobIds.Any())
+            {
+                throw new InvalidOperationException($"Jobs already dispatched: {string.Join(", ", existingDispatchJobIds)}");
+            }
+
+            // Also check legacy single-job dispatches
+            var jobIdStrings = dto.JobIds.Select(id => id.ToString()).ToList();
+            var legacyConflicts = await _db.Dispatches
+                .Where(d => !d.IsDeleted && d.JobId != null && jobIdStrings.Contains(d.JobId))
+                .Select(d => d.JobId)
+                .ToListAsync();
+
+            if (legacyConflicts.Any())
+            {
+                throw new InvalidOperationException($"Jobs already dispatched (legacy): {string.Join(", ", legacyConflicts)}");
+            }
+
+            // Get contact from DTO or from first job's service order
+            var contactId = dto.ContactId ?? jobs.First().ServiceOrder?.ContactId ?? 0;
+            var serviceOrderId = dto.ServiceOrderId ?? jobs.First().ServiceOrderId;
+
+            if (contactId == 0)
+            {
+                var anyContact = await _db.Contacts.FirstOrDefaultAsync(c => !c.IsDeleted);
+                if (anyContact != null) contactId = anyContact.Id;
+            }
+
+            var hasTechnicians = dto.AssignedTechnicianIds != null && dto.AssignedTechnicianIds.Count > 0;
+            var status = hasTechnicians ? "assigned" : "planned";
+
+            string dispatchNumber;
+            try
+            {
+                dispatchNumber = _numberingService != null
+                    ? await _numberingService.GetNextAsync("Dispatch")
+                    : $"DISP-{DateTime.UtcNow:yyyyMMddHHmmss}-{Guid.NewGuid().ToString()[..4].ToUpper()}";
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Numbering service failed for Dispatch, using GUID fallback");
+                dispatchNumber = $"DISP-{DateTime.UtcNow:yyyyMMddHHmmss}-{Guid.NewGuid().ToString()[..4].ToUpper()}";
+            }
+
+            var dispatch = new Dispatch
+            {
+                DispatchNumber = dispatchNumber,
+                JobId = dto.JobIds.First().ToString(), // backward compat
+                ContactId = contactId,
+                ServiceOrderId = serviceOrderId,
+                InstallationId = dto.InstallationId,
+                InstallationName = dto.InstallationName,
+                Status = status,
+                Priority = dto.Priority ?? "medium",
+                ScheduledDate = dto.ScheduledDate,
+                ScheduledStartTime = dto.ScheduledStartTime,
+                ScheduledEndTime = dto.ScheduledEndTime,
+                SiteAddress = dto.SiteAddress ?? string.Empty,
+                Description = dto.Notes ?? $"Installation: {dto.InstallationName} ({dto.JobIds.Count} jobs)",
+                CreatedDate = DateTime.UtcNow,
+                CreatedBy = userId,
+                DispatchedBy = userId,
+                DispatchedAt = DateTime.UtcNow
+            };
+
+            _db.Dispatches.Add(dispatch);
+            await _db.SaveChangesAsync();
+
+            // Insert all jobs into DispatchJobs join table
+            foreach (var jobId in dto.JobIds)
+            {
+                _db.Set<DispatchJob>().Add(new DispatchJob
+                {
+                    DispatchId = dispatch.Id,
+                    JobId = jobId,
+                    CreatedDate = DateTime.UtcNow
+                });
+            }
+            await _db.SaveChangesAsync();
+
+            // Add assigned technicians
+            if (hasTechnicians)
+            {
+                foreach (var techIdStr in dto.AssignedTechnicianIds!)
+                {
+                    if (int.TryParse(techIdStr, out var techId))
+                    {
+                        _db.Set<DispatchTechnician>().Add(new DispatchTechnician
+                        {
+                            DispatchId = dispatch.Id,
+                            TechnicianId = techId,
+                            AssignedDate = DateTime.UtcNow,
+                            Role = "technician"
+                        });
+                    }
+                }
+                await _db.SaveChangesAsync();
+
+                // Update all jobs' status to dispatched
+                foreach (var job in jobs)
+                {
+                    job.Status = "dispatched";
+                }
+                await _db.SaveChangesAsync();
+            }
+
+            _logger.LogInformation(
+                "Dispatch created from installation {InstallationId} with ID {DispatchId}, {JobCount} jobs, Status: {Status}",
+                dto.InstallationId, dispatch.Id, dto.JobIds.Count, status);
+
+            var createdDispatch = await _db.Dispatches
+                .Include(d => d.AssignedTechnicians)
+                .Include(d => d.DispatchJobs)
+                .FirstAsync(d => d.Id == dispatch.Id);
+
+            var nameMap = await GetTechnicianNameMapForDispatchAsync(createdDispatch.Id);
+            return DispatchMapping.ToDto(createdDispatch, nameMap);
+        }
+
         public async Task<PagedResult<DispatchListItemDto>> GetAllAsync(DispatchQueryParams query)
         {
             var q = _db.Dispatches.AsNoTracking().AsQueryable().Where(d => !d.IsDeleted);
@@ -184,7 +330,8 @@ namespace MyApi.Modules.Dispatches.Services
                 .Skip((pageNumber - 1) * pageSize)
                 .Take(pageSize)
                 .Include(d => d.AssignedTechnicians)
-                .Include(d => d.Contact) // Include Contact for enrichment
+                .Include(d => d.Contact)
+                .Include(d => d.DispatchJobs)
                 .ToListAsync();
 
             // Get all technician IDs to fetch user names
@@ -223,14 +370,25 @@ namespace MyApi.Modules.Dispatches.Services
                         Email = user?.Email
                     };
                 }).ToList(),
-                Scheduling = new SchedulingDto { ScheduledDate = d.ScheduledDate, EstimatedDuration = d.ActualDuration },
+                Scheduling = new SchedulingDto
+                {
+                    ScheduledDate = d.ScheduledDate,
+                    ScheduledStartTime = d.ScheduledStartTime,
+                    ScheduledEndTime = d.ScheduledEndTime,
+                    EstimatedDuration = d.ScheduledStartTime.HasValue && d.ScheduledEndTime.HasValue
+                        ? (int)(d.ScheduledEndTime.Value - d.ScheduledStartTime.Value).TotalMinutes
+                        : d.ActualDuration
+                },
                 ScheduledDate = d.ScheduledDate,
-                ScheduledStartTime = null,
-                ScheduledEndTime = null,
-                Notes = d.Description, // Include notes for technician filtering
+                ScheduledStartTime = d.ScheduledStartTime?.ToString(@"hh\:mm"),
+                ScheduledEndTime = d.ScheduledEndTime?.ToString(@"hh\:mm"),
+                Notes = d.Description,
                 DispatchedBy = d.DispatchedBy,
                 CreatedDate = d.CreatedDate,
-                ModifiedDate = d.ModifiedDate
+                ModifiedDate = d.ModifiedDate,
+                InstallationId = d.InstallationId,
+                InstallationName = d.InstallationName,
+                JobIds = d.DispatchJobs?.Select(dj => dj.JobId).ToList() ?? new()
             }).ToList();
 
             return new PagedResult<DispatchListItemDto>
@@ -253,6 +411,7 @@ namespace MyApi.Modules.Dispatches.Services
                 .Include(x => x.Attachments)
                 .Include(x => x.Notes)
                 .Include(x => x.AssignedTechnicians)
+                .Include(x => x.DispatchJobs)
                 .FirstOrDefaultAsync(x => x.Id == dispatchId && !x.IsDeleted);
 
             if (d == null) throw new KeyNotFoundException($"Dispatch {dispatchId} not found");
@@ -266,6 +425,8 @@ namespace MyApi.Modules.Dispatches.Services
             if (d == null) throw new KeyNotFoundException($"Dispatch {dispatchId} not found");
 
             if (dto.ScheduledDate.HasValue) d.ScheduledDate = dto.ScheduledDate.Value;
+            if (dto.ScheduledStartTime.HasValue) d.ScheduledStartTime = dto.ScheduledStartTime.Value;
+            if (dto.ScheduledEndTime.HasValue) d.ScheduledEndTime = dto.ScheduledEndTime.Value;
             if (!string.IsNullOrEmpty(dto.Priority)) d.Priority = dto.Priority;
 
             d.ModifiedDate = DateTime.UtcNow;
@@ -633,6 +794,7 @@ namespace MyApi.Modules.Dispatches.Services
                 .Include(d => d.MaterialsUsed)
                 .Include(d => d.Attachments)
                 .Include(d => d.Notes)
+                .Include(d => d.DispatchJobs)
                 .FirstOrDefaultAsync(x => x.Id == dispatchId);
 
             if (dispatch == null) return;
@@ -641,7 +803,21 @@ namespace MyApi.Modules.Dispatches.Services
             var jobIdStr = dispatch.JobId;
             var serviceOrderId = dispatch.ServiceOrderId;
 
+            // Collect ALL linked job IDs (from DispatchJobs join table + legacy JobId)
+            var allJobIds = new HashSet<int>();
+            if (dispatch.DispatchJobs != null && dispatch.DispatchJobs.Any())
+            {
+                foreach (var dj in dispatch.DispatchJobs)
+                    allJobIds.Add(dj.JobId);
+            }
+            if (!string.IsNullOrEmpty(jobIdStr) && int.TryParse(jobIdStr, out int legacyJobId))
+            {
+                allJobIds.Add(legacyJobId);
+            }
+
             // Hard delete all child records first
+            if (dispatch.DispatchJobs != null && dispatch.DispatchJobs.Any())
+                _db.Set<DispatchJob>().RemoveRange(dispatch.DispatchJobs);
             if (dispatch.AssignedTechnicians.Any())
                 _db.Set<DispatchTechnician>().RemoveRange(dispatch.AssignedTechnicians);
             if (dispatch.TimeEntries.Any())
@@ -660,14 +836,17 @@ namespace MyApi.Modules.Dispatches.Services
             await _db.SaveChangesAsync();
 
             _logger.LogInformation(
-                "[DISPATCH-DELETE] Hard deleted dispatch {DispatchId} (JobId: {JobId}, SO: {ServiceOrderId}) by user {UserId}",
-                dispatchId, jobIdStr, serviceOrderId, userId);
+                "[DISPATCH-DELETE] Hard deleted dispatch {DispatchId} (JobId: {JobId}, SO: {ServiceOrderId}, LinkedJobs: {JobCount}) by user {UserId}",
+                dispatchId, jobIdStr, serviceOrderId, allJobIds.Count, userId);
 
-            // Reset the associated job back to 'unscheduled' (unplanned)
-            if (!string.IsNullOrEmpty(jobIdStr) && int.TryParse(jobIdStr, out int jobId))
+            // Reset ALL associated jobs back to 'unscheduled'
+            if (allJobIds.Any())
             {
-                var job = await _db.ServiceOrderJobs.FindAsync(jobId);
-                if (job != null)
+                var jobs = await _db.ServiceOrderJobs
+                    .Where(j => allJobIds.Contains(j.Id))
+                    .ToListAsync();
+
+                foreach (var job in jobs)
                 {
                     job.Status = "unscheduled";
                     job.CompletionPercentage = 0;
@@ -675,11 +854,12 @@ namespace MyApi.Modules.Dispatches.Services
                     job.ActualCost = 0;
                     job.CompletedDate = null;
                     job.UpdatedAt = DateTime.UtcNow;
-                    await _db.SaveChangesAsync();
-
-                    _logger.LogInformation(
-                        "[DISPATCH-DELETE] Reset job {JobId} to 'unscheduled' after dispatch deletion", jobId);
                 }
+                await _db.SaveChangesAsync();
+
+                _logger.LogInformation(
+                    "[DISPATCH-DELETE] Reset {JobCount} jobs to 'unscheduled' after dispatch deletion: {JobIds}",
+                    jobs.Count, string.Join(", ", allJobIds));
             }
 
             // Recalculate the Service Order status based on remaining dispatches

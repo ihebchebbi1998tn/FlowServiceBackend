@@ -7,6 +7,7 @@ namespace MyApi.Modules.Dispatches.Services
     public interface IDispatchService
     {
         Task<DispatchDto> CreateFromJobAsync(int jobId, CreateDispatchFromJobDto dto, string userId);
+        Task<DispatchDto> CreateFromInstallationAsync(CreateDispatchFromInstallationDto dto, string userId);
         Task<PagedResult<DispatchListItemDto>> GetAllAsync(DispatchQueryParams query);
         Task<DispatchDto> GetByIdAsync(int dispatchId);
         Task<DispatchDto> UpdateAsync(int dispatchId, UpdateDispatchDto dto, string userId);

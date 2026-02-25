@@ -43,6 +43,20 @@ namespace MyApi.Modules.Dispatches.Controllers
             return CreatedAtAction(nameof(GetById), new { dispatchId = result.Id }, result);
         }
 
+        [HttpPost("from-installation")]
+        public async Task<IActionResult> CreateFromInstallation([FromBody] CreateDispatchFromInstallationDto dto)
+        {
+            if (!ModelState.IsValid) return UnprocessableEntity(ModelState);
+            var userId = GetUserId();
+            var result = await _service.CreateFromInstallationAsync(dto, userId);
+
+            await _systemLogService.LogSuccessAsync(
+                $"Dispatch created from installation {dto.InstallationId} ({dto.JobIds.Count} jobs)", 
+                "Dispatches", "create", userId, GetUserName(), "Dispatch", result.Id.ToString());
+
+            return CreatedAtAction(nameof(GetById), new { dispatchId = result.Id }, result);
+        }
+
         [HttpGet]
         public async Task<IActionResult> GetAll([FromQuery] DispatchQueryParams query)
         {

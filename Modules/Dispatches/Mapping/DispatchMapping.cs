@@ -24,15 +24,25 @@ namespace MyApi.Modules.Dispatches.Mapping
                 DispatchedBy = src.DispatchedBy,
                 CreatedAt = src.CreatedDate,
                 UpdatedAt = src.ModifiedDate ?? src.CreatedDate,
+                InstallationId = src.InstallationId,
+                InstallationName = src.InstallationName,
+                JobIds = src.DispatchJobs?.Select(dj => dj.JobId).ToList() ?? new(),
                 AssignedTechnicians = src.AssignedTechnicians?.Select(at => new UserLightDto 
                 { 
                     Id = at.TechnicianId,
                     Name = technicianNames != null && technicianNames.TryGetValue(at.TechnicianId, out var n) ? n : null
                 }).ToList() ?? new(),
+                ScheduledDate = src.ScheduledDate,
+                ScheduledStartTime = src.ScheduledStartTime?.ToString(@"hh\:mm"),
+                ScheduledEndTime = src.ScheduledEndTime?.ToString(@"hh\:mm"),
                 Scheduling = new SchedulingDto
                 {
                     ScheduledDate = src.ScheduledDate,
-                    EstimatedDuration = src.ActualDuration
+                    ScheduledStartTime = src.ScheduledStartTime,
+                    ScheduledEndTime = src.ScheduledEndTime,
+                    EstimatedDuration = src.ScheduledStartTime.HasValue && src.ScheduledEndTime.HasValue
+                        ? (int)(src.ScheduledEndTime.Value - src.ScheduledStartTime.Value).TotalMinutes
+                        : src.ActualDuration
                 },
                 TimeEntries = src.TimeEntries?.Cast<object>().ToList() ?? new(),
                 Expenses = src.Expenses?.Cast<object>().ToList() ?? new(),

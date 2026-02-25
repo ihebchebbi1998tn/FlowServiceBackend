@@ -43,6 +43,7 @@ using MyApi.Modules.Payments.Models;
 using MyApi.Modules.RetenueSource.Models;
 using MyApi.Modules.RetenueSource.Data;
 using MyApi.Modules.SupportTickets.Models;
+using MyApi.Modules.Settings.Models;
 
 namespace MyApi.Data
 {
@@ -129,6 +130,7 @@ namespace MyApi.Data
     // Dispatches Module
     public DbSet<Dispatch> Dispatches { get; set; }
     public DbSet<DispatchTechnician> DispatchTechnicians { get; set; }
+    public DbSet<DispatchJob> DispatchJobs { get; set; }
     public DbSet<TimeEntry> TimeEntries { get; set; }
     public DbSet<Expense> DispatchExpenses { get; set; }
     public DbSet<MaterialUsage> DispatchMaterials { get; set; }
@@ -219,6 +221,9 @@ namespace MyApi.Data
         // Support Tickets Module
         public DbSet<SupportTicket> SupportTickets { get; set; }
         public DbSet<SupportTicketAttachment> SupportTicketAttachments { get; set; }
+
+        // App Settings Module (Global key-value settings)
+        public DbSet<AppSettings> AppSettings { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

@@ -41,6 +41,10 @@ namespace MyApi.Modules.Dispatches.DTOs
         public string? ScheduledEndTime { get; set; }
         public DateTime? CreatedDate { get; set; }
         public DateTime? ModifiedDate { get; set; }
+        // Multi-job / installation dispatch fields
+        public int? InstallationId { get; set; }
+        public string? InstallationName { get; set; }
+        public List<int> JobIds { get; set; } = new();
     }
 
     public class DispatchDto : DispatchListItemDto

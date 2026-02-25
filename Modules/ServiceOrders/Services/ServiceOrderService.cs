@@ -7,6 +7,7 @@ using MyApi.Modules.Dispatches.DTOs;
 using MyApi.Modules.Dispatches.Models;
 using MyApi.Modules.Sales.Models;
 using MyApi.Modules.WorkflowEngine.Services;
+using MyApi.Modules.Settings.Services;
 
 namespace MyApi.Modules.ServiceOrders.Services
 {
@@ -16,17 +17,20 @@ namespace MyApi.Modules.ServiceOrders.Services
         private readonly ILogger<ServiceOrderService> _logger;
         private readonly IWorkflowTriggerService? _workflowTriggerService;
         private readonly MyApi.Modules.Numbering.Services.INumberingService? _numberingService;
+        private readonly IAppSettingsService? _appSettingsService;
 
         public ServiceOrderService(
             ApplicationDbContext context, 
             ILogger<ServiceOrderService> logger,
             IWorkflowTriggerService? workflowTriggerService = null,
-            MyApi.Modules.Numbering.Services.INumberingService? numberingService = null)
+            MyApi.Modules.Numbering.Services.INumberingService? numberingService = null,
+            IAppSettingsService? appSettingsService = null)
         {
             _context = context;
             _logger = logger;
             _workflowTriggerService = workflowTriggerService;
             _numberingService = numberingService;
+            _appSettingsService = appSettingsService;
         }
 
         public async Task<ServiceOrderDto> CreateFromSaleAsync(int saleId, CreateServiceOrderDto createDto, string userId)
@@ -106,29 +110,117 @@ namespace MyApi.Modules.ServiceOrders.Services
                 _context.ServiceOrders.Add(serviceOrder);
                 await _context.SaveChangesAsync();
 
-                // Create jobs from service-type sale items (the actual services sold)
+                // Determine job conversion mode: DTO override > AppSettings > default "installation"
+                var jobConversionMode = createDto.JobConversionMode;
+                if (string.IsNullOrEmpty(jobConversionMode) && _appSettingsService != null)
+                {
+                    jobConversionMode = await _appSettingsService.GetSettingAsync("JobConversionMode");
+                }
+                jobConversionMode ??= "installation";
+
+                // Create jobs from service-type sale items
                 if (serviceItems.Any())
                 {
-                    var jobs = serviceItems.Select(item => new ServiceOrderJob
+                    var jobs = new List<ServiceOrderJob>();
+
+                    if (jobConversionMode == "installation")
                     {
-                        ServiceOrderId = serviceOrder.Id,
-                        SaleItemId = item.Id.ToString(),
-                        Title = item.ItemName ?? "Service Job",
-                        JobDescription = item.Description ?? item.ItemName ?? "Service job",
-                        Description = item.Description,
-                        Status = "unscheduled",
-                        Priority = createDto.Priority ?? "medium",
-                        InstallationId = item.InstallationId,
-                        InstallationName = item.InstallationName,
-                        WorkType = DetermineWorkType(item.ItemName),
-                        EstimatedDuration = createDto.StartDate.HasValue && createDto.TargetCompletionDate.HasValue
-                            ? (int)(createDto.TargetCompletionDate.Value - createDto.StartDate.Value).TotalHours / (serviceItems.Count > 0 ? serviceItems.Count : 1)
-                            : null,
-                        EstimatedCost = item.LineTotal > 0 ? item.LineTotal : (item.UnitPrice * item.Quantity),
-                        CompletionPercentage = 0,
-                        AssignedTechnicianIds = createDto.AssignedTechnicianIds?.Select(id => id.ToString()).ToArray(),
-                        UpdatedAt = DateTime.UtcNow
-                    }).ToList();
+                        // INSTALLATION-BASED: Group service items by InstallationId
+                        var groupedByInstallation = serviceItems
+                            .Where(i => !string.IsNullOrEmpty(i.InstallationId))
+                            .GroupBy(i => i.InstallationId!)
+                            .ToList();
+
+                        // Items without installation fall back to service-based
+                        var orphanItems = serviceItems
+                            .Where(i => string.IsNullOrEmpty(i.InstallationId))
+                            .ToList();
+
+                        foreach (var group in groupedByInstallation)
+                        {
+                            var items = group.ToList();
+                            var installationName = items.First().InstallationName ?? $"Installation #{group.Key}";
+                            var serviceNames = items.Select(i => i.ItemName ?? "Service").ToList();
+                            var totalCost = items.Sum(i => i.LineTotal > 0 ? i.LineTotal : (i.UnitPrice * i.Quantity));
+
+                            jobs.Add(new ServiceOrderJob
+                            {
+                                ServiceOrderId = serviceOrder.Id,
+                                SaleItemId = string.Join(",", items.Select(i => i.Id)),
+                                Title = installationName,
+                                JobDescription = "Services: " + string.Join(", ", serviceNames),
+                                Description = string.Join("\n", items.Select(i => 
+                                    $"- {i.ItemName}: {i.Quantity} x {i.UnitPrice:F2} = {(i.LineTotal > 0 ? i.LineTotal : i.UnitPrice * i.Quantity):F2}")),
+                                Status = "unscheduled",
+                                Priority = createDto.Priority ?? "medium",
+                                InstallationId = group.Key,
+                                InstallationName = installationName,
+                                WorkType = DetermineWorkType(items.First().ItemName),
+                                EstimatedDuration = createDto.StartDate.HasValue && createDto.TargetCompletionDate.HasValue
+                                    ? (int)(createDto.TargetCompletionDate.Value - createDto.StartDate.Value).TotalHours / Math.Max(groupedByInstallation.Count() + orphanItems.Count(), 1)
+                                    : null,
+                                EstimatedCost = totalCost,
+                                CompletionPercentage = 0,
+                                AssignedTechnicianIds = createDto.AssignedTechnicianIds?.Select(id => id.ToString()).ToArray(),
+                                Notes = System.Text.Json.JsonSerializer.Serialize(items.Select(i => new { 
+                                    itemName = i.ItemName, 
+                                    quantity = i.Quantity, 
+                                    unitPrice = i.UnitPrice,
+                                    lineTotal = i.LineTotal > 0 ? i.LineTotal : i.UnitPrice * i.Quantity
+                                })),
+                                UpdatedAt = DateTime.UtcNow
+                            });
+                        }
+
+                        // Orphan items: each becomes its own job (service-based fallback)
+                        foreach (var item in orphanItems)
+                        {
+                            jobs.Add(new ServiceOrderJob
+                            {
+                                ServiceOrderId = serviceOrder.Id,
+                                SaleItemId = item.Id.ToString(),
+                                Title = item.ItemName ?? "Service Job",
+                                JobDescription = item.Description ?? item.ItemName ?? "Service job",
+                                Description = item.Description,
+                                Status = "unscheduled",
+                                Priority = createDto.Priority ?? "medium",
+                                InstallationId = null,
+                                InstallationName = null,
+                                WorkType = DetermineWorkType(item.ItemName),
+                                EstimatedDuration = createDto.StartDate.HasValue && createDto.TargetCompletionDate.HasValue
+                                    ? (int)(createDto.TargetCompletionDate.Value - createDto.StartDate.Value).TotalHours / Math.Max(serviceItems.Count, 1)
+                                    : null,
+                                EstimatedCost = item.LineTotal > 0 ? item.LineTotal : (item.UnitPrice * item.Quantity),
+                                CompletionPercentage = 0,
+                                AssignedTechnicianIds = createDto.AssignedTechnicianIds?.Select(id => id.ToString()).ToArray(),
+                                UpdatedAt = DateTime.UtcNow
+                            });
+                        }
+                    }
+                    else
+                    {
+                        // SERVICE-BASED (current/legacy behavior): Each service item becomes its own job
+                        jobs = serviceItems.Select(item => new ServiceOrderJob
+                        {
+                            ServiceOrderId = serviceOrder.Id,
+                            SaleItemId = item.Id.ToString(),
+                            Title = item.ItemName ?? "Service Job",
+                            JobDescription = item.Description ?? item.ItemName ?? "Service job",
+                            Description = item.Description,
+                            Status = "unscheduled",
+                            Priority = createDto.Priority ?? "medium",
+                            InstallationId = item.InstallationId,
+                            InstallationName = item.InstallationName,
+                            WorkType = DetermineWorkType(item.ItemName),
+                            EstimatedDuration = createDto.StartDate.HasValue && createDto.TargetCompletionDate.HasValue
+                                ? (int)(createDto.TargetCompletionDate.Value - createDto.StartDate.Value).TotalHours / (serviceItems.Count > 0 ? serviceItems.Count : 1)
+                                : null,
+                            EstimatedCost = item.LineTotal > 0 ? item.LineTotal : (item.UnitPrice * item.Quantity),
+                            CompletionPercentage = 0,
+                            AssignedTechnicianIds = createDto.AssignedTechnicianIds?.Select(id => id.ToString()).ToArray(),
+                            UpdatedAt = DateTime.UtcNow
+                        }).ToList();
+                    }
 
                     _context.ServiceOrderJobs.AddRange(jobs);
                     await _context.SaveChangesAsync();

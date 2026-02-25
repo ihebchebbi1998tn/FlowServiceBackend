@@ -82,12 +82,12 @@ DO UPDATE SET "last_value" = GREATEST(
 -- Dispatch: count existing dispatches this year
 INSERT INTO "NumberSequences" ("entity_name", "period_key", "last_value", "created_at", "updated_at")
 VALUES ('Dispatch', EXTRACT(YEAR FROM NOW())::TEXT,
-        COALESCE((SELECT COUNT(*) FROM "Dispatches" WHERE "CreatedAt" >= date_trunc('year', NOW())), 0) + 100,
+        COALESCE((SELECT COUNT(*) FROM "Dispatches" WHERE "CreatedDate" >= date_trunc('year', NOW())), 0) + 100,
         NOW(), NOW())
 ON CONFLICT ("entity_name", "period_key")
 DO UPDATE SET "last_value" = GREATEST(
     "NumberSequences"."last_value",
-    COALESCE((SELECT COUNT(*) FROM "Dispatches" WHERE "CreatedAt" >= date_trunc('year', NOW())), 0) + 100
+    COALESCE((SELECT COUNT(*) FROM "Dispatches" WHERE "CreatedDate" >= date_trunc('year', NOW())), 0) + 100
 ), "updated_at" = NOW();
 
 -- NOTE: We add +100 buffer to each counter to safely skip any existing records

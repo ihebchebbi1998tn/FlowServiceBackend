@@ -43,6 +43,11 @@ namespace MyApi.Modules.Dispatches.Data
                 .WithOne()
                 .HasForeignKey(dt => dt.DispatchId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            builder.HasMany(d => d.DispatchJobs)
+                .WithOne()
+                .HasForeignKey(dj => dj.DispatchId)
+                .OnDelete(DeleteBehavior.Cascade);
         }
     }
 }

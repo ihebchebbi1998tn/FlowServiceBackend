@@ -17,6 +17,7 @@ using MyApi.Modules.ServiceOrders.Services;
 using MyApi.Modules.Planning.Services;
 using MyApi.Modules.Shared.Services;
 using MyApi.Modules.Preferences.Services;
+using MyApi.Modules.Settings.Services;
 using MyApi.Modules.Notifications.Services;
 using MyApi.Modules.AiChat.Services;
 using MyApi.Modules.WorkflowEngine.Services;
@@ -310,6 +311,9 @@ builder.Services.AddScoped<MyApi.Modules.Shared.Services.IEntityFormDocumentServ
 
 // PDF Settings Service (Global settings for all modules)
 builder.Services.AddScoped<IPdfSettingsService, PdfSettingsService>();
+
+// App Settings Service (Global key-value application settings)
+builder.Services.AddScoped<IAppSettingsService, AppSettingsService>();
 
 // Numbering Service (Configurable document numbering)
 builder.Services.AddScoped<MyApi.Modules.Numbering.Services.INumberingService, MyApi.Modules.Numbering.Services.NumberingService>();
