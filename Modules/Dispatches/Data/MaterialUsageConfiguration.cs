@@ -17,6 +17,7 @@ namespace MyApi.Modules.Dispatches.Data
             builder.Property(m => m.UnitPrice).HasColumnType("decimal(18,2)").IsRequired();
             builder.Property(m => m.TotalPrice).HasColumnType("decimal(18,2)").IsRequired();
             builder.Property(m => m.RecordedBy).HasMaxLength(100).IsRequired();
+            builder.Property(m => m.Unit).HasMaxLength(20).IsRequired();
         }
     }
 }

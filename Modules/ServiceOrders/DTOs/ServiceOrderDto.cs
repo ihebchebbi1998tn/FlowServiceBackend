@@ -73,6 +73,7 @@ namespace MyApi.Modules.ServiceOrders.DTOs
         public string? CreatedBy { get; set; }
         public DateTime CreatedAt { get; set; }
         public string? InvoiceStatus { get; set; }
+        public string? Unit { get; set; }
     }
 
     public class CreateServiceOrderMaterialDto
@@ -88,6 +89,7 @@ namespace MyApi.Modules.ServiceOrders.DTOs
         public bool Replacing { get; set; }
         public string? OldArticleModel { get; set; }
         public string? OldArticleStatus { get; set; }
+        public string? Unit { get; set; }
     }
 
     public class UpdateServiceOrderMaterialDto
@@ -103,6 +105,7 @@ namespace MyApi.Modules.ServiceOrders.DTOs
         public string? OldArticleModel { get; set; }
         public string? OldArticleStatus { get; set; }
         public string? Status { get; set; }
+        public string? Unit { get; set; }
     }
 
     public class ServiceOrderTimeEntryDto

@@ -44,5 +44,10 @@ namespace MyApi.Modules.Dispatches.Models
         [Column("RecordedBy")]
         [MaxLength(100)]
         public string RecordedBy { get; set; } = string.Empty;
+
+        [Required]
+        [Column("Unit")]
+        [MaxLength(20)]
+        public string Unit { get; set; } = "piece";
     }
 }

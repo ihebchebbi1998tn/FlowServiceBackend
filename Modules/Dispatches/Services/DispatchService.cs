@@ -1189,6 +1189,15 @@ namespace MyApi.Modules.Dispatches.Services
                 articleId = anyArticle?.Id;
             }
 
+            // Determine unit from article or DTO
+            var unitValue = dto.Unit ?? "piece";
+            if (string.IsNullOrEmpty(dto.Unit) && articleId.HasValue)
+            {
+                var articleForUnit = await _db.Articles.FirstOrDefaultAsync(a => a.Id == articleId.Value);
+                if (articleForUnit != null && !string.IsNullOrEmpty(articleForUnit.Unit))
+                    unitValue = articleForUnit.Unit;
+            }
+
             var mat = new MaterialUsage
             {
                 DispatchId = dispatchId,
@@ -1198,7 +1207,8 @@ namespace MyApi.Modules.Dispatches.Services
                 UnitPrice = dto.UnitPrice ?? 0,
                 TotalPrice = dto.Quantity * (dto.UnitPrice ?? 0),
                 RecordedBy = userId,
-                UsedDate = DateTime.UtcNow
+                UsedDate = DateTime.UtcNow,
+                Unit = unitValue
             };
             _db.DispatchMaterials.Add(mat);
             await _db.SaveChangesAsync();
@@ -1217,7 +1227,8 @@ namespace MyApi.Modules.Dispatches.Services
                 UnitPrice = mat.UnitPrice,
                 TotalPrice = mat.TotalPrice,
                 Status = "pending", 
-                CreatedAt = mat.UsedDate 
+                CreatedAt = mat.UsedDate,
+                Unit = mat.Unit
             };
         }
 
@@ -1235,7 +1246,8 @@ namespace MyApi.Modules.Dispatches.Services
                 UnitPrice = m.UnitPrice,
                 TotalPrice = m.TotalPrice,
                 Status = "pending", 
-                CreatedAt = m.UsedDate 
+                CreatedAt = m.UsedDate,
+                Unit = m.Unit
             }).ToList();
         }
 

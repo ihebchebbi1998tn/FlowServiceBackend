@@ -101,6 +101,11 @@ namespace MyApi.Modules.ServiceOrders.Models
         [MaxLength(50)]
         public string? InvoiceStatus { get; set; } // null, "selected_for_invoice", "invoiced"
 
+        [Required]
+        [Column("Unit")]
+        [MaxLength(20)]
+        public string Unit { get; set; } = "piece";
+
         // Navigation property
         [ForeignKey("ServiceOrderId")]
         public virtual ServiceOrder? ServiceOrder { get; set; }

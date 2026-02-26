@@ -15,6 +15,7 @@ namespace MyApi.Modules.Dispatches.DTOs
         public string? OldArticleModel { get; set; }
         public string? Description { get; set; }
         public decimal? UnitPrice { get; set; }
+        public string? Unit { get; set; }
     }
 
     public class MaterialDto
@@ -43,6 +44,7 @@ namespace MyApi.Modules.Dispatches.DTOs
         public DateTime CreatedAt { get; set; }
         public string? InvoiceStatus { get; set; }
         public string? SourceTable { get; set; } // "service_order" or "dispatch"
+        public string? Unit { get; set; }
     }
 
     public class ApproveMaterialDto

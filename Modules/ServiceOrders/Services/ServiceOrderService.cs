@@ -1382,6 +1382,15 @@ namespace MyApi.Modules.ServiceOrders.Services
             if (serviceOrder == null)
                 throw new KeyNotFoundException($"Service order with ID {serviceOrderId} not found");
 
+            // Determine unit from article or DTO
+            var unitValue = dto.Unit ?? "piece";
+            if (string.IsNullOrEmpty(dto.Unit) && dto.ArticleId.HasValue)
+            {
+                var articleForUnit = await _context.Articles.FirstOrDefaultAsync(a => a.Id == dto.ArticleId.Value);
+                if (articleForUnit != null && !string.IsNullOrEmpty(articleForUnit.Unit))
+                    unitValue = articleForUnit.Unit;
+            }
+
             var material = new ServiceOrderMaterial
             {
                 ServiceOrderId = serviceOrderId,
@@ -1400,7 +1409,8 @@ namespace MyApi.Modules.ServiceOrders.Services
                 OldArticleModel = dto.OldArticleModel,
                 OldArticleStatus = dto.OldArticleStatus,
                 CreatedBy = userId,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTime.UtcNow,
+                Unit = unitValue
             };
 
             _context.ServiceOrderMaterials.Add(material);
@@ -1430,7 +1440,8 @@ namespace MyApi.Modules.ServiceOrders.Services
                 InstallationId = material.InstallationId,
                 InstallationName = material.InstallationName,
                 CreatedBy = material.CreatedBy,
-                CreatedAt = material.CreatedAt
+                CreatedAt = material.CreatedAt,
+                Unit = material.Unit
             };
         }
 
