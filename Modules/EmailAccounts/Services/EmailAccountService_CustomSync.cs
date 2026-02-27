@@ -3,6 +3,8 @@ using MailKit.Net.Pop3;
 using MailKit.Search;
 using Microsoft.EntityFrameworkCore;
 using MimeKit;
+using MyApi.Modules.EmailAccounts.DTOs;
+using MyApi.Modules.EmailAccounts.Models;
 
 namespace MyApi.Modules.EmailAccounts.Services
 {

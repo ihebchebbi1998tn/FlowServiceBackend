@@ -1,8 +1,12 @@
 using System.Text;
 using System.Text.Json;
+using System.IO;
 using Microsoft.EntityFrameworkCore;
 using MyApi.Modules.EmailAccounts.DTOs;
 using MyApi.Modules.EmailAccounts.Models;
+using MimeKit;
+using MailKit.Net.Smtp;
+using MailKit.Security;
 
 namespace MyApi.Modules.EmailAccounts.Services
 {
@@ -17,17 +21,18 @@ public async Task<SendEmailResultDto> SendEmailAsync(Guid accountId, int userId,
     if (account == null)
         return new SendEmailResultDto { Success = false, Error = "Account not found" };
 
-    try
-    {
-        var result = account.Provider switch
+        try
         {
-            "google" => await SendGmailEmailAsync(account, dto),
-            "microsoft" => await SendOutlookEmailAsync(account, dto),
-            _ => new SendEmailResultDto { Success = false, Error = $"Unsupported provider: {account.Provider}" }
-        };
+            var result = account.Provider switch
+            {
+                "google" => await SendGmailEmailAsync(account, dto),
+                "microsoft" => await SendOutlookEmailAsync(account, dto),
+                "custom" => await SendCustomSmtpEmailAsync(account, dto),
+                _ => new SendEmailResultDto { Success = false, Error = $"Unsupported provider: {account.Provider}" }
+            };
 
-        return result;
-    }
+            return result;
+        }
     catch (Exception ex)
     {
         _logger.LogError(ex, "Failed to send email via {Provider} for account {Handle}", account.Provider, account.Handle);
@@ -189,6 +194,64 @@ private async Task<SendEmailResultDto> SendOutlookEmailAsync(ConnectedEmailAccou
             },
             saveToSentItems = true
         };
+    }
+
+    private async Task<SendEmailResultDto> SendCustomSmtpEmailAsync(ConnectedEmailAccount account, SendEmailDto dto)
+    {
+        // Find persisted custom configuration
+        var custom = await _context.CustomEmailAccounts
+            .FirstOrDefaultAsync(c => c.Email == account.Handle && c.UserId == account.UserId);
+
+        if (custom == null)
+            return new SendEmailResultDto { Success = false, Error = "Custom SMTP configuration not found" };
+
+        string password = null;
+        try { if (!string.IsNullOrEmpty(custom.EncryptedPassword)) password = _protector.Unprotect(custom.EncryptedPassword); } catch { password = custom.EncryptedPassword; }
+
+        var message = new MimeMessage();
+        message.From.Add(new MailboxAddress(custom.DisplayName ?? custom.Email, custom.Email));
+        foreach (var to in dto.To) message.To.Add(MailboxAddress.Parse(to));
+        if (dto.Cc != null)
+            foreach (var cc in dto.Cc) message.Cc.Add(MailboxAddress.Parse(cc));
+        if (dto.Bcc != null)
+            foreach (var bcc in dto.Bcc) message.Bcc.Add(MailboxAddress.Parse(bcc));
+
+        message.Subject = dto.Subject ?? "";
+
+        var builder = new BodyBuilder();
+        if (!string.IsNullOrEmpty(dto.BodyHtml)) builder.HtmlBody = dto.BodyHtml;
+        else builder.TextBody = dto.Body;
+
+        if (dto.Attachments != null)
+        {
+            foreach (var att in dto.Attachments)
+            {
+                try
+                {
+                    var bytes = Convert.FromBase64String(att.ContentBase64);
+                    builder.Attachments.Add(att.FileName, new MemoryStream(bytes), ContentType.Parse(att.ContentType));
+                }
+                catch { /* ignore malformed attachment */ }
+            }
+        }
+
+        message.Body = builder.ToMessageBody();
+
+        using var client = new SmtpClient();
+        // NOTE: in production tighten certificate validation
+        client.ServerCertificateValidationCallback = (s, c, h, e) => true;
+
+        var secure = custom.SmtpSecurity?.ToLower() == "ssl" ? SecureSocketOptions.SslOnConnect
+            : custom.SmtpSecurity?.ToLower() == "tls" ? SecureSocketOptions.StartTls : SecureSocketOptions.Auto;
+
+        await client.ConnectAsync(custom.SmtpServer, custom.SmtpPort ?? 25, secure);
+        if (!string.IsNullOrEmpty(custom.Email) && !string.IsNullOrEmpty(password))
+            await client.AuthenticateAsync(custom.Email, password);
+
+        await client.SendAsync(message);
+        await client.DisconnectAsync(true);
+
+        return new SendEmailResultDto { Success = true };
     }
     else
     {
