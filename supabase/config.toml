@@ -1,0 +1,18 @@
+[api]
+enabled = true
+port = 54321
+schemas = ["public"]
+extra_search_path = ["public"]
+max_rows = 1000
+
+[functions.stock-demand-forecast]
+verify_jwt = false
+
+[functions.stock-anomaly-detection]
+verify_jwt = false
+
+[functions.ai-field-mapping]
+verify_jwt = false
+
+[functions.custom-email]
+verify_jwt = false

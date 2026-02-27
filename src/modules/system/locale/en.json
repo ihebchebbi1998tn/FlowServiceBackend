@@ -1,0 +1,11 @@
+{
+  "common": {
+    "systemSettings": "System settings",
+    "logs": "Logs",
+    "maintenance": "Maintenance",
+    "save": "Save",
+    "cancel": "Cancel",
+    "restartService": "Restart service",
+    "status": "Status"
+  }
+}
