@@ -10,7 +10,7 @@ const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 // ─── Multi-key fallback pool ──────────────────────────────────────────────────
 // Keys tried in order; blacklisted on spend-limit, cooled on rate-limit.
 const FALLBACK_KEYS: string[] = [
-  "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",
+  "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",
 ];
 
 const MODEL_ROTATION: string[] = [
