@@ -20,9 +20,19 @@ namespace MyApi.Modules.EmailAccounts.Services
             var connected = await _context.ConnectedEmailAccounts.FirstOrDefaultAsync(a => a.UserId == userId && a.Handle == custom.Email && a.Provider == "custom");
             if (connected == null) throw new InvalidOperationException("Connected account record for custom account not found");
 
-            // Decrypt password
+            // Decrypt password (stored as base64 of protected bytes)
             if (string.IsNullOrEmpty(custom.EncryptedPassword)) throw new InvalidOperationException("No password available for custom account");
-            var password = _protector.Unprotect(custom.EncryptedPassword);
+            string password;
+            try
+            {
+                var protectedBytes = Convert.FromBase64String(custom.EncryptedPassword);
+                var un = _protector.Unprotect(protectedBytes);
+                password = System.Text.Encoding.UTF8.GetString(un);
+            }
+            catch
+            {
+                password = custom.EncryptedPassword;
+            }
 
             int newCount = 0, updatedCount = 0;
 
@@ -36,7 +46,7 @@ namespace MyApi.Modules.EmailAccounts.Services
                 imap.Connect(custom.ImapServer, custom.ImapPort.Value, secure);
                 imap.Authenticate(custom.Email, password);
 
-                var inbox = imap.GetFolder(MailKit.SpecialFolder.Inbox);
+                var inbox = imap.Inbox;
                 inbox.Open(MailKit.FolderAccess.ReadOnly);
                 var uids = inbox.Search(SearchQuery.All);
                 var take = uids.Count > maxResults ? uids.TakeLast(maxResults) : uids;

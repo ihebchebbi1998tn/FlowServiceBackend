@@ -240,7 +240,19 @@ private async Task<SendEmailResultDto> SendGmailEmailAsync(ConnectedEmailAccount
             return new SendEmailResultDto { Success = false, Error = "Custom SMTP configuration not found" };
 
         string password = null;
-        try { if (!string.IsNullOrEmpty(custom.EncryptedPassword)) password = _protector.Unprotect(custom.EncryptedPassword); } catch { password = custom.EncryptedPassword; }
+        try
+        {
+            if (!string.IsNullOrEmpty(custom.EncryptedPassword))
+            {
+                var protectedBytes = Convert.FromBase64String(custom.EncryptedPassword);
+                var un = _protector.Unprotect(protectedBytes);
+                password = System.Text.Encoding.UTF8.GetString(un);
+            }
+        }
+        catch
+        {
+            password = custom.EncryptedPassword;
+        }
 
         var message = new MimeMessage();
         message.From.Add(new MailboxAddress(custom.DisplayName ?? custom.Email, custom.Email));
@@ -263,7 +275,11 @@ private async Task<SendEmailResultDto> SendGmailEmailAsync(ConnectedEmailAccount
                 try
                 {
                     var bytes = Convert.FromBase64String(att.ContentBase64);
-                    builder.Attachments.Add(att.FileName, new MemoryStream(bytes), ContentType.Parse(att.ContentType));
+                    var parts = (att.ContentType ?? "application/octet-stream").Split('/');
+                    var mimeType = parts.Length > 0 ? parts[0] : "application";
+                    var mimeSub = parts.Length > 1 ? parts[1] : "octet-stream";
+                    var ct = new MimeKit.ContentType(mimeType, mimeSub);
+                    builder.Attachments.Add(att.FileName, new MemoryStream(bytes), ct);
                 }
                 catch { /* ignore malformed attachment */ }
             }

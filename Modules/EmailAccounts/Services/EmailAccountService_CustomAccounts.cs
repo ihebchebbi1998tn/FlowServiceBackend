@@ -39,7 +39,7 @@ namespace MyApi.Modules.EmailAccounts.Services
                 Pop3Server = cfg.Pop3Server,
                 Pop3Port = cfg.Pop3Port,
                 Pop3Security = cfg.Pop3Security,
-                EncryptedPassword = string.IsNullOrEmpty(cfg.Password) ? null : _protector.Protect(cfg.Password),
+                EncryptedPassword = string.IsNullOrEmpty(cfg.Password) ? null : Convert.ToBase64String(_protector.Protect(System.Text.Encoding.UTF8.GetBytes(cfg.Password))),
                 IsActive = true,
             };
 
@@ -85,7 +85,7 @@ namespace MyApi.Modules.EmailAccounts.Services
             item.Pop3Server = cfg.Pop3Server ?? item.Pop3Server;
             item.Pop3Port = cfg.Pop3Port ?? item.Pop3Port;
             item.Pop3Security = cfg.Pop3Security ?? item.Pop3Security;
-            if (!string.IsNullOrEmpty(cfg.Password)) item.EncryptedPassword = _protector.Protect(cfg.Password);
+            if (!string.IsNullOrEmpty(cfg.Password)) item.EncryptedPassword = Convert.ToBase64String(_protector.Protect(System.Text.Encoding.UTF8.GetBytes(cfg.Password)));
             item.UpdatedAt = DateTime.UtcNow;
 
             await _context.SaveChangesAsync();
