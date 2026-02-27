@@ -188,7 +188,7 @@ namespace MyApi.Modules.EmailAccounts.Controllers
             try
             {
                 var userId = int.Parse(User.FindFirst("sub")?.Value ?? "0");
-                var list = await _emailAccount_service.GetCustomAccountsByUserAsync(userId);
+                var list = await _emailAccountService.GetCustomAccountsByUserAsync(userId);
                 return Ok(list);
             }
             catch (Exception ex)

@@ -239,6 +239,9 @@ private async Task<SendEmailResultDto> SendGmailEmailAsync(ConnectedEmailAccount
         if (custom == null)
             return new SendEmailResultDto { Success = false, Error = "Custom SMTP configuration not found" };
 
+        if (string.IsNullOrWhiteSpace(custom.Email))
+            return new SendEmailResultDto { Success = false, Error = "Custom SMTP configuration missing email address" };
+
         string password = null;
         try
         {
