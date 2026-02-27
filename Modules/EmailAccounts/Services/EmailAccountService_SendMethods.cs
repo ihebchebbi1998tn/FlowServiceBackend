@@ -256,11 +256,23 @@ private async Task<SendEmailResultDto> SendGmailEmailAsync(ConnectedEmailAccount
 
         var message = new MimeMessage();
         message.From.Add(new MailboxAddress(custom.DisplayName ?? custom.Email, custom.Email));
-        foreach (var to in dto.To) message.To.Add(MailboxAddress.Parse(to));
+        if (dto.To != null)
+        {
+            foreach (var to in dto.To.Where(s => !string.IsNullOrWhiteSpace(s)))
+                message.To.Add(MailboxAddress.Parse(to));
+        }
+
         if (dto.Cc != null)
-            foreach (var cc in dto.Cc) message.Cc.Add(MailboxAddress.Parse(cc));
+        {
+            foreach (var cc in dto.Cc.Where(s => !string.IsNullOrWhiteSpace(s)))
+                message.Cc.Add(MailboxAddress.Parse(cc));
+        }
+
         if (dto.Bcc != null)
-            foreach (var bcc in dto.Bcc) message.Bcc.Add(MailboxAddress.Parse(bcc));
+        {
+            foreach (var bcc in dto.Bcc.Where(s => !string.IsNullOrWhiteSpace(s)))
+                message.Bcc.Add(MailboxAddress.Parse(bcc));
+        }
 
         message.Subject = dto.Subject ?? "";
 
@@ -274,12 +286,14 @@ private async Task<SendEmailResultDto> SendGmailEmailAsync(ConnectedEmailAccount
             {
                 try
                 {
+                    if (string.IsNullOrWhiteSpace(att?.ContentBase64)) continue;
                     var bytes = Convert.FromBase64String(att.ContentBase64);
                     var parts = (att.ContentType ?? "application/octet-stream").Split('/');
                     var mimeType = parts.Length > 0 ? parts[0] : "application";
                     var mimeSub = parts.Length > 1 ? parts[1] : "octet-stream";
                     var ct = new MimeKit.ContentType(mimeType, mimeSub);
-                    builder.Attachments.Add(att.FileName, new MemoryStream(bytes), ct);
+                    var fileName = !string.IsNullOrWhiteSpace(att.FileName) ? att.FileName : "attachment";
+                    builder.Attachments.Add(fileName, new MemoryStream(bytes), ct);
                 }
                 catch { /* ignore malformed attachment */ }
             }

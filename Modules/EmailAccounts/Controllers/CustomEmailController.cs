@@ -185,9 +185,18 @@ namespace MyApi.Modules.EmailAccounts.Controllers
         [HttpGet]
         public async Task<IActionResult> List()
         {
-            var userId = int.Parse(User.FindFirst("sub")?.Value ?? "0");
-            var list = await _emailAccountService.GetCustomAccountsByUserAsync(userId);
-            return Ok(list);
+            try
+            {
+                var userId = int.Parse(User.FindFirst("sub")?.Value ?? "0");
+                var list = await _emailAccount_service.GetCustomAccountsByUserAsync(userId);
+                return Ok(list);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to list custom email accounts for user");
+                // Return error details to help debug 500 during development
+                return StatusCode(500, new { success = false, error = ex.Message, trace = ex.StackTrace });
+            }
         }
 
         [HttpGet("{id}")]
