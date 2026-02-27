@@ -145,55 +145,89 @@ private async Task<SendEmailResultDto> SendGmailEmailAsync(ConnectedEmailAccount
     var messageId = responseData.TryGetProperty("id", out var id) ? id.GetString() : null;
 
     return new SendEmailResultDto { Success = true, MessageId = messageId };
-}
+    }
 
-private async Task<SendEmailResultDto> SendOutlookEmailAsync(ConnectedEmailAccount account, SendEmailDto dto)
-{
-    var client = _httpClientFactory.CreateClient();
-    var accessToken = await EnsureValidMicrosoftTokenAsync(account);
-    client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
-
-    var toRecipients = dto.To.Select(e => new { emailAddress = new { address = e } }).ToList();
-    var ccRecipients = dto.Cc.Select(e => new { emailAddress = new { address = e } }).ToList();
-    var bccRecipients = dto.Bcc.Select(e => new { emailAddress = new { address = e } }).ToList();
-
-    var bodyContentType = !string.IsNullOrEmpty(dto.BodyHtml) ? "HTML" : "Text";
-    var bodyContent = !string.IsNullOrEmpty(dto.BodyHtml) ? dto.BodyHtml : dto.Body;
-
-    var attachments = dto.Attachments?.Select(a => new
+    private async Task<SendEmailResultDto> SendOutlookEmailAsync(ConnectedEmailAccount account, SendEmailDto dto)
     {
-        @odata_type = "#microsoft.graph.fileAttachment",
-        name = a.FileName,
-        contentType = a.ContentType,
-        contentBytes = a.ContentBase64
-    }).ToList();
+        var client = _httpClientFactory.CreateClient();
+        var accessToken = await EnsureValidMicrosoftTokenAsync(account);
+        client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
 
-    object emailPayload;
-    if (attachments != null && attachments.Count > 0)
-    {
-        emailPayload = new
+        var toRecipients = dto.To.Select(e => new { emailAddress = new { address = e } }).ToList();
+        var ccRecipients = dto.Cc.Select(e => new { emailAddress = new { address = e } }).ToList();
+        var bccRecipients = dto.Bcc.Select(e => new { emailAddress = new { address = e } }).ToList();
+
+        var bodyContentType = !string.IsNullOrEmpty(dto.BodyHtml) ? "HTML" : "Text";
+        var bodyContent = !string.IsNullOrEmpty(dto.BodyHtml) ? dto.BodyHtml : dto.Body;
+
+        var attachments = dto.Attachments?.Select(a => new
         {
-            message = new
+            @odata_type = "#microsoft.graph.fileAttachment",
+            name = a.FileName,
+            contentType = a.ContentType,
+            contentBytes = a.ContentBase64
+        }).ToList();
+
+        object emailPayload;
+        if (attachments != null && attachments.Count > 0)
+        {
+            emailPayload = new
             {
-                subject = dto.Subject,
-                body = new
+                message = new
                 {
-                    contentType = bodyContentType,
-                    content = bodyContent
+                    subject = dto.Subject,
+                    body = new
+                    {
+                        contentType = bodyContentType,
+                        content = bodyContent
+                    },
+                    toRecipients,
+                    ccRecipients,
+                    bccRecipients,
+                    attachments = attachments.Select(a => new Dictionary<string, object>
+                    {
+                        { "@odata.type", "#microsoft.graph.fileAttachment" },
+                        { "name", a.name },
+                        { "contentType", a.contentType },
+                        { "contentBytes", a.contentBytes }
+                    }).ToList()
                 },
-                toRecipients,
-                ccRecipients,
-                bccRecipients,
-                attachments = attachments.Select(a => new Dictionary<string, object>
+                saveToSentItems = true
+            };
+        }
+        else
+        {
+            emailPayload = new
+            {
+                message = new
                 {
-                    { "@odata.type", "#microsoft.graph.fileAttachment" },
-                    { "name", a.name },
-                    { "contentType", a.contentType },
-                    { "contentBytes", a.contentBytes }
-                }).ToList()
-            },
-            saveToSentItems = true
-        };
+                    subject = dto.Subject,
+                    body = new
+                    {
+                        contentType = bodyContentType,
+                        content = bodyContent
+                    },
+                    toRecipients,
+                    ccRecipients,
+                    bccRecipients
+                },
+                saveToSentItems = true
+            };
+        }
+
+        var jsonBody = JsonSerializer.Serialize(emailPayload);
+        var content = new StringContent(jsonBody, Encoding.UTF8, "application/json");
+
+        var response = await client.PostAsync("https://graph.microsoft.com/v1.0/me/sendMail", content);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync();
+            _logger.LogError("Outlook send failed: {Status} - {Body}", response.StatusCode, errorBody);
+            return new SendEmailResultDto { Success = false, Error = $"Outlook send failed: {response.StatusCode}" };
+        }
+
+        return new SendEmailResultDto { Success = true };
     }
 
     private async Task<SendEmailResultDto> SendCustomSmtpEmailAsync(ConnectedEmailAccount account, SendEmailDto dto)
@@ -237,56 +271,20 @@ private async Task<SendEmailResultDto> SendOutlookEmailAsync(ConnectedEmailAccou
 
         message.Body = builder.ToMessageBody();
 
-        using var client = new SmtpClient();
-        // NOTE: in production tighten certificate validation
-        client.ServerCertificateValidationCallback = (s, c, h, e) => true;
+        using var smtp = new SmtpClient();
+        smtp.ServerCertificateValidationCallback = (s, c, h, e) => true;
 
         var secure = custom.SmtpSecurity?.ToLower() == "ssl" ? SecureSocketOptions.SslOnConnect
             : custom.SmtpSecurity?.ToLower() == "tls" ? SecureSocketOptions.StartTls : SecureSocketOptions.Auto;
 
-        await client.ConnectAsync(custom.SmtpServer, custom.SmtpPort ?? 25, secure);
+        await smtp.ConnectAsync(custom.SmtpServer, custom.SmtpPort ?? 25, secure);
         if (!string.IsNullOrEmpty(custom.Email) && !string.IsNullOrEmpty(password))
-            await client.AuthenticateAsync(custom.Email, password);
+            await smtp.AuthenticateAsync(custom.Email, password);
 
-        await client.SendAsync(message);
-        await client.DisconnectAsync(true);
+        await smtp.SendAsync(message);
+        await smtp.DisconnectAsync(true);
 
         return new SendEmailResultDto { Success = true };
-    }
-    else
-    {
-        emailPayload = new
-        {
-            message = new
-            {
-                subject = dto.Subject,
-                body = new
-                {
-                    contentType = bodyContentType,
-                    content = bodyContent
-                },
-                toRecipients,
-                ccRecipients,
-                bccRecipients
-            },
-            saveToSentItems = true
-        };
-    }
-
-    var jsonBody = JsonSerializer.Serialize(emailPayload);
-    var content = new StringContent(jsonBody, Encoding.UTF8, "application/json");
-
-    var response = await client.PostAsync("https://graph.microsoft.com/v1.0/me/sendMail", content);
-
-    if (!response.IsSuccessStatusCode)
-    {
-        var errorBody = await response.Content.ReadAsStringAsync();
-        _logger.LogError("Outlook send failed: {Status} - {Body}", response.StatusCode, errorBody);
-        return new SendEmailResultDto { Success = false, Error = $"Outlook send failed: {response.StatusCode}" };
-    }
-
-    // Microsoft sendMail returns 202 Accepted with no body
-    return new SendEmailResultDto { Success = true };
     }
 }
 }
