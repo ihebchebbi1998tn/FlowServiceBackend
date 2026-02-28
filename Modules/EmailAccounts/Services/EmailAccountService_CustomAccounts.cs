@@ -8,12 +8,20 @@ namespace MyApi.Modules.EmailAccounts.Services
     {
         public async Task<IEnumerable<CustomEmailAccountDto>> GetCustomAccountsByUserAsync(int userId)
         {
-            var list = await _context.Set<CustomEmailAccount>()
-                .Where(c => c.UserId == userId)
-                .OrderByDescending(c => c.CreatedAt)
-                .ToListAsync();
+            try
+            {
+                var list = await _context.Set<CustomEmailAccount>()
+                    .Where(c => c.UserId == userId)
+                    .OrderByDescending(c => c.CreatedAt)
+                    .ToListAsync();
 
-            return list.Select(MapCustomToDto);
+                return list.Select(MapCustomToDto);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to get custom accounts for user {UserId}", userId);
+                throw;
+            }
         }
 
         public async Task<CustomEmailAccountDto?> GetCustomAccountByIdAsync(Guid id, int userId)

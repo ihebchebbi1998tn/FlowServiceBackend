@@ -187,7 +187,7 @@ namespace MyApi.Modules.EmailAccounts.Controllers
         {
             try
             {
-                var userId = int.Parse(User.FindFirst("sub")?.Value ?? "0");
+                var userId = int.Parse(User.FindFirst("UserId")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value ?? "0");
                 var list = await _emailAccountService.GetCustomAccountsByUserAsync(userId);
                 return Ok(list);
             }
@@ -202,7 +202,7 @@ namespace MyApi.Modules.EmailAccounts.Controllers
         [HttpGet("{id}")]
         public async Task<IActionResult> Get(Guid id)
         {
-            var userId = int.Parse(User.FindFirst("sub")?.Value ?? "0");
+            var userId = int.Parse(User.FindFirst("UserId")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value ?? "0");
             var item = await _emailAccountService.GetCustomAccountByIdAsync(id, userId);
             if (item == null) return NotFound();
             return Ok(item);
@@ -211,7 +211,7 @@ namespace MyApi.Modules.EmailAccounts.Controllers
         [HttpPost("save")]
         public async Task<IActionResult> Save([FromBody] CreateCustomEmailAccountDto dto)
         {
-            var userId = int.Parse(User.FindFirst("sub")?.Value ?? "0");
+            var userId = int.Parse(User.FindFirst("UserId")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value ?? "0");
             var created = await _emailAccountService.CreateCustomAccountAsync(userId, dto);
             return Ok(created);
         }
@@ -219,7 +219,7 @@ namespace MyApi.Modules.EmailAccounts.Controllers
         [HttpPut("{id}")]
         public async Task<IActionResult> Update(Guid id, [FromBody] CreateCustomEmailAccountDto dto)
         {
-            var userId = int.Parse(User.FindFirst("sub")?.Value ?? "0");
+            var userId = int.Parse(User.FindFirst("UserId")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value ?? "0");
             var updated = await _emailAccountService.UpdateCustomAccountAsync(id, userId, dto);
             if (updated == null) return NotFound();
             return Ok(updated);
@@ -228,7 +228,7 @@ namespace MyApi.Modules.EmailAccounts.Controllers
         [HttpDelete("{id}")]
         public async Task<IActionResult> Delete(Guid id)
         {
-            var userId = int.Parse(User.FindFirst("sub")?.Value ?? "0");
+            var userId = int.Parse(User.FindFirst("UserId")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value ?? "0");
             var ok = await _emailAccountService.DeleteCustomAccountAsync(id, userId);
             if (!ok) return NotFound();
             return Ok(new { success = true });
@@ -237,7 +237,7 @@ namespace MyApi.Modules.EmailAccounts.Controllers
         [HttpPost("{id}/sync")]
         public async Task<IActionResult> Sync(Guid id, [FromQuery] int maxResults = 50)
         {
-            var userId = int.Parse(User.FindFirst("sub")?.Value ?? "0");
+            var userId = int.Parse(User.FindFirst("UserId")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value ?? "0");
             try
             {
                 var result = await _emailAccountService.SyncCustomAccountAsync(id, userId, maxResults);
