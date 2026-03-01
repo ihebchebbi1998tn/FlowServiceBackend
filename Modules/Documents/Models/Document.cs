@@ -103,5 +103,15 @@ namespace MyApi.Modules.Documents.Models
         [Column("CompressionMethod")]
         [MaxLength(50)]
         public string CompressionMethod { get; set; } = "none";
+
+        // External URL when document references an external resource (not a stored file)
+        [Column("ExternalUrl")]
+        [MaxLength(2000)]
+        public string? ExternalUrl { get; set; }
+
+        // Resource type: 'file' (stored file) or 'link' (external URL)
+        [Column("ResourceType")]
+        [MaxLength(50)]
+        public string? ResourceType { get; set; }
     }
 }

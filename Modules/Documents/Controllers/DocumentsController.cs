@@ -340,6 +340,68 @@ namespace MyApi.Modules.Documents.Controllers
         }
 
         /// <summary>
+        /// POST /api/Documents — Create a document record without uploading a file (e.g., external link)
+        /// </summary>
+        [HttpPost]
+        public async Task<ActionResult> CreateDocument([FromBody] CreateDocumentRequest request)
+        {
+            try
+            {
+                // Extract user info from JWT
+                var userId = User.FindFirst("sub")?.Value
+                    ?? User.FindFirst("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier")?.Value
+                    ?? "unknown";
+                var userName = User.FindFirst("name")?.Value
+                    ?? User.FindFirst("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name")?.Value
+                    ?? User.Identity?.Name
+                    ?? "Unknown User";
+
+                if (request == null)
+                    return BadRequest(new { error = "Invalid payload" });
+
+                // Determine file name for the link (use title or fallback to url)
+                var safeFileName = string.IsNullOrEmpty(request.Title)
+                    ? (request.ExternalUrl != null ? Path.GetFileName(new Uri(request.ExternalUrl).AbsolutePath) : "link")
+                    : SanitizeFileName(request.Title.Replace(' ', '_'));
+
+                var doc = new Models.Document
+                {
+                    FileName = safeFileName,
+                    OriginalName = request.Title ?? safeFileName,
+                    // For link-only documents store URL in ExternalUrl and mark resource type
+                    FilePath = string.Empty,
+                    ExternalUrl = request.ExternalUrl ?? string.Empty,
+                    FileSize = 0,
+                    OriginalFileSize = 0,
+                    ContentType = request.ContentType ?? "link",
+                    ResourceType = string.IsNullOrEmpty(request.ExternalUrl) ? "file" : "link",
+                    ModuleType = string.IsNullOrEmpty(request.ModuleType) ? "general" : request.ModuleType,
+                    ModuleId = string.IsNullOrEmpty(request.ModuleId) ? null : request.ModuleId,
+                    ModuleName = string.IsNullOrEmpty(request.ModuleName) ? null : request.ModuleName,
+                    Category = string.IsNullOrEmpty(request.Category) ? "crm" : request.Category,
+                    Description = string.IsNullOrEmpty(request.Description) ? null : request.Description,
+                    Tags = request.Tags == null ? null : string.Join(',', request.Tags),
+                    IsPublic = request.IsPublic,
+                    UploadedBy = userId,
+                    UploadedByName = userName,
+                    UploadedAt = DateTime.UtcNow,
+                    IsCompressed = false,
+                    CompressionMethod = "none",
+                };
+
+                _db.Documents.Add(doc);
+                await _db.SaveChangesAsync();
+
+                return Ok(new { success = true, document = doc });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error creating document");
+                return StatusCode(500, new { error = "Failed to create document" });
+            }
+        }
+
+        /// <summary>
         /// POST /api/Documents/upload — Upload file(s) and save metadata
         /// </summary>
         [HttpPost("upload")]
@@ -429,6 +491,7 @@ namespace MyApi.Modules.Documents.Controllers
                         FileName = safeFileName,
                         OriginalName = file.FileName,
                         FilePath = relativePath,
+                        ExternalUrl = null,
                         FileSize = new FileInfo(diskPath).Length, // Actual size on disk
                         OriginalFileSize = originalFileSize,
                         ContentType = file.ContentType ?? "application/octet-stream",
@@ -442,6 +505,7 @@ namespace MyApi.Modules.Documents.Controllers
                         IsCompressed = isCompressed,
                         CompressionRatio = compressionRatio,
                         CompressionMethod = compressionMethod,
+                        ResourceType = "file",
                         UploadedBy = userId,
                         UploadedByName = userName,
                         UploadedAt = DateTime.UtcNow,
@@ -604,5 +668,19 @@ namespace MyApi.Modules.Documents.Controllers
     public class BulkDeleteRequest
     {
         public List<string> Ids { get; set; } = new();
+    }
+
+    public class CreateDocumentRequest
+    {
+        public string? ModuleType { get; set; }
+        public string? ModuleId { get; set; }
+        public string? ModuleName { get; set; }
+        public string? Title { get; set; }
+        public string? ExternalUrl { get; set; }
+        public string? Description { get; set; }
+        public List<string>? Tags { get; set; }
+        public string? Category { get; set; }
+        public bool IsPublic { get; set; } = false;
+        public string? ContentType { get; set; }
     }
 }
