@@ -43,4 +43,39 @@ namespace MyApi.Modules.SupportTickets.DTOs
     {
         public string Status { get; set; } = string.Empty;
     }
+
+    public class SupportTicketCommentDto
+    {
+        public int Id { get; set; }
+        public int TicketId { get; set; }
+        public string Author { get; set; } = string.Empty;
+        public string? AuthorEmail { get; set; }
+        public string Text { get; set; } = string.Empty;
+        public bool IsInternal { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public List<SupportTicketAttachmentDto>? Attachments { get; set; }
+    }
+
+    public class CreateCommentDto
+    {
+        public string Text { get; set; } = string.Empty;
+        public bool IsInternal { get; set; } = false;
+        public List<IFormFile>? Attachments { get; set; }
+    }
+
+    public class SupportTicketLinkDto
+    {
+        public int Id { get; set; }
+        public int SourceTicketId { get; set; }
+        public int TargetTicketId { get; set; }
+        public string LinkType { get; set; } = "related";
+        public string? TargetTicketTitle { get; set; }
+        public string? TargetTicketStatus { get; set; }
+    }
+
+    public class CreateLinkDto
+    {
+        public int TargetTicketId { get; set; }
+        public string LinkType { get; set; } = "related";
+    }
 }

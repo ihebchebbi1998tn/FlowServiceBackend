@@ -87,3 +87,32 @@ public static class TenantConnectionResolver
         return null;
     }
 }
+
+/// <summary>
+/// Resolves a tenant-specific public files base URL.
+/// Checks (in order):
+///  1. Hardcoded in-memory map (for quick dev/testing)
+///  2. Environment variable TENANT_{NAME}_PUBLIC_BASE_URL
+///  3. Returns null → caller should fall back to global Files:PublicBaseUrl or request host
+/// </summary>
+public static class TenantPublicUrlResolver
+{
+    private static readonly Dictionary<string, string> _tenantPublicBases = new(StringComparer.OrdinalIgnoreCase)
+    {
+        // Example:
+        // ["demo"] = "https://demo-files.example.com",
+    };
+
+    public static string? GetPublicBaseUrl(string? tenant)
+    {
+        if (string.IsNullOrEmpty(tenant)) return null;
+
+        if (_tenantPublicBases.TryGetValue(tenant, out var baseUrl)) return baseUrl;
+
+        var envKey = $"TENANT_{tenant.ToUpperInvariant()}_PUBLIC_BASE_URL";
+        var envVal = Environment.GetEnvironmentVariable(envKey);
+        if (!string.IsNullOrEmpty(envVal)) return envVal;
+
+        return null;
+    }
+}

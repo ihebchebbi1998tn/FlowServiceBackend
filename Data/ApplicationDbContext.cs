@@ -222,6 +222,8 @@ namespace MyApi.Data
         // Support Tickets Module
         public DbSet<SupportTicket> SupportTickets { get; set; }
         public DbSet<SupportTicketAttachment> SupportTicketAttachments { get; set; }
+        public DbSet<SupportTicketComment> SupportTicketComments { get; set; }
+        public DbSet<SupportTicketLink> SupportTicketLinks { get; set; }
 
         // App Settings Module (Global key-value settings)
         public DbSet<AppSettings> AppSettings { get; set; }

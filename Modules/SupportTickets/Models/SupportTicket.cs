@@ -69,4 +69,53 @@ namespace MyApi.Modules.SupportTickets.Models
         [ForeignKey("SupportTicketId")]
         public virtual SupportTicket Ticket { get; set; } = null!;
     }
+
+    public class SupportTicketComment
+    {
+        [Key]
+        [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
+        public int Id { get; set; }
+
+        [Required]
+        public int SupportTicketId { get; set; }
+
+        [StringLength(255)]
+        public string Author { get; set; } = string.Empty;
+
+        [StringLength(255)]
+        public string? AuthorEmail { get; set; }
+
+        public string Text { get; set; } = string.Empty;
+
+        public bool IsInternal { get; set; } = false;
+
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+        [ForeignKey("SupportTicketId")]
+        public virtual SupportTicket Ticket { get; set; } = null!;
+    }
+
+    public class SupportTicketLink
+    {
+        [Key]
+        [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
+        public int Id { get; set; }
+
+        [Required]
+        public int SourceTicketId { get; set; }
+
+        [Required]
+        public int TargetTicketId { get; set; }
+
+        [StringLength(30)]
+        public string LinkType { get; set; } = "related";
+
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+        [ForeignKey("SourceTicketId")]
+        public virtual SupportTicket SourceTicket { get; set; } = null!;
+
+        [ForeignKey("TargetTicketId")]
+        public virtual SupportTicket TargetTicket { get; set; } = null!;
+    }
 }
