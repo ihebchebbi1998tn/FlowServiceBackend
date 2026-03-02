@@ -99,6 +99,8 @@ namespace MyApi.Data
         // Tasks Module
         public DbSet<Project> Projects { get; set; }
         public DbSet<ProjectColumn> ProjectColumns { get; set; }
+        public DbSet<ProjectNote> ProjectNotes { get; set; }
+        public DbSet<ProjectActivity> ProjectActivities { get; set; }
         public DbSet<ProjectTask> ProjectTasks { get; set; }
         public DbSet<DailyTask> DailyTasks { get; set; }
         public DbSet<TaskComment> TaskComments { get; set; }

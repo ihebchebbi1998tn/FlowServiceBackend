@@ -326,6 +326,121 @@ namespace MyApi.Modules.Projects.Services
             }
         }
 
+        public async Task<List<ProjectNoteDto>> GetProjectNotesAsync(int projectId)
+        {
+            try
+            {
+                var notes = await _context.Set<ProjectNote>()
+                    .Where(n => n.ProjectId == projectId)
+                    .OrderByDescending(n => n.CreatedDate)
+                    .AsNoTracking()
+                    .ToListAsync();
+
+                return notes.Select(n => new ProjectNoteDto
+                {
+                    Id = n.Id,
+                    ProjectId = n.ProjectId,
+                    Content = n.Content,
+                    CreatedDate = n.CreatedDate,
+                    CreatedBy = n.CreatedBy,
+                    ModifiedDate = n.ModifiedDate,
+                    ModifiedBy = n.ModifiedBy
+                }).ToList();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving project notes for project {ProjectId}", projectId);
+                throw;
+            }
+        }
+
+        public async Task<ProjectNoteDto> CreateProjectNoteAsync(int projectId, CreateProjectNoteRequestDto createDto, string createdByUser)
+        {
+            try
+            {
+                // Verify project exists
+                var project = await _context.Projects.FindAsync(projectId);
+                if (project == null)
+                    throw new InvalidOperationException($"Project with ID {projectId} not found");
+
+                var note = new ProjectNote
+                {
+                    ProjectId = projectId,
+                    Content = createDto.Content,
+                    CreatedDate = DateTime.UtcNow,
+                    CreatedBy = createdByUser
+                };
+
+                _context.Set<ProjectNote>().Add(note);
+                await _context.SaveChangesAsync();
+
+                return new ProjectNoteDto
+                {
+                    Id = note.Id,
+                    ProjectId = note.ProjectId,
+                    Content = note.Content,
+                    CreatedDate = note.CreatedDate,
+                    CreatedBy = note.CreatedBy,
+                    ModifiedDate = note.ModifiedDate,
+                    ModifiedBy = note.ModifiedBy
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error creating project note for project {ProjectId}", projectId);
+                throw;
+            }
+        }
+
+        public async Task<bool> DeleteProjectNoteAsync(int noteId, string deletedByUser)
+        {
+            try
+            {
+                var note = await _context.Set<ProjectNote>().FindAsync(noteId);
+                if (note == null)
+                    return false;
+
+                _context.Set<ProjectNote>().Remove(note);
+                await _context.SaveChangesAsync();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error deleting project note {NoteId}", noteId);
+                throw;
+            }
+        }
+
+        public async Task<List<ProjectActivityDto>> GetProjectActivityAsync(int projectId)
+        {
+            try
+            {
+                var activities = await _context.Set<ProjectActivity>()
+                    .Where(a => a.ProjectId == projectId)
+                    .OrderByDescending(a => a.CreatedDate)
+                    .AsNoTracking()
+                    .ToListAsync();
+
+                return activities.Select(a => new ProjectActivityDto
+                {
+                    Id = a.Id,
+                    ProjectId = a.ProjectId,
+                    ActionType = a.ActionType,
+                    Description = a.Description,
+                    Details = a.Details,
+                    CreatedDate = a.CreatedDate,
+                    CreatedBy = a.CreatedBy,
+                    RelatedEntityId = a.RelatedEntityId,
+                    RelatedEntityType = a.RelatedEntityType
+                }).ToList();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving project activity for project {ProjectId}", projectId);
+                throw;
+            }
+        }
+
         private ProjectResponseDto MapToProjectDto(Project project)
         {
             return new ProjectResponseDto

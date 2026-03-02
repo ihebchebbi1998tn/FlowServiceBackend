@@ -16,5 +16,13 @@ namespace MyApi.Modules.Projects.Services
         
         // Project search
         Task<List<ProjectResponseDto>> SearchProjectsAsync(string searchTerm);
+        
+        // Project Notes
+        Task<List<ProjectNoteDto>> GetProjectNotesAsync(int projectId);
+        Task<ProjectNoteDto> CreateProjectNoteAsync(int projectId, CreateProjectNoteRequestDto createDto, string createdByUser);
+        Task<bool> DeleteProjectNoteAsync(int noteId, string deletedByUser);
+        
+        // Project Activity
+        Task<List<ProjectActivityDto>> GetProjectActivityAsync(int projectId);
     }
 }
