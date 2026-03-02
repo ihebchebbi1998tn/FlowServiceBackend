@@ -202,6 +202,7 @@ namespace MyApi.Modules.Offers.Services
                 Taxes = createDto.Taxes ?? 0,
                 TaxType = createDto.TaxType ?? "percentage",
                 Discount = createDto.Discount ?? 0,
+                DiscountType = createDto.DiscountType ?? "percentage",
                 FiscalStamp = createDto.FiscalStamp ?? 1.000m,
                 TotalAmount = 0,
                 CreatedBy = userId,
@@ -291,6 +292,7 @@ namespace MyApi.Modules.Offers.Services
             if (updateDto.Taxes.HasValue) offer.Taxes = updateDto.Taxes.Value;
             if (updateDto.TaxType != null) offer.TaxType = updateDto.TaxType;
             if (updateDto.Discount.HasValue) offer.Discount = updateDto.Discount.Value;
+            if (updateDto.DiscountType != null) offer.DiscountType = updateDto.DiscountType;
             if (updateDto.FiscalStamp.HasValue) offer.FiscalStamp = updateDto.FiscalStamp.Value;
             if (updateDto.ValidUntil.HasValue) offer.ValidUntil = updateDto.ValidUntil;
             if (updateDto.BillingAddress != null) offer.BillingAddress = updateDto.BillingAddress;
@@ -479,6 +481,7 @@ namespace MyApi.Modules.Offers.Services
                 Taxes = originalOffer.Taxes,
                 TaxType = originalOffer.TaxType,
                 Discount = originalOffer.Discount,
+                DiscountType = originalOffer.DiscountType ?? "percentage",
                 FiscalStamp = originalOffer.FiscalStamp,
                 TotalAmount = 0,
                 ValidUntil = DateTime.UtcNow.AddDays(30),
@@ -942,6 +945,7 @@ namespace MyApi.Modules.Offers.Services
                 Taxes = offer.Taxes,
                 TaxType = offer.TaxType,
                 Discount = offer.Discount,
+                DiscountType = offer.DiscountType ?? "percentage",
                 FiscalStamp = offer.FiscalStamp,
                 TotalAmount = offer.GrandTotal > 0 ? offer.GrandTotal : offer.TotalAmount,
                 ValidUntil = offer.ValidUntil,

@@ -17,6 +17,7 @@ namespace MyApi.Modules.Offers.DTOs
         public decimal? Taxes { get; set; }
         public string TaxType { get; set; } = "percentage";
         public decimal? Discount { get; set; }
+        public string DiscountType { get; set; } = "percentage";
         public decimal? FiscalStamp { get; set; }
         public decimal? TotalAmount { get; set; }
         
@@ -112,6 +113,7 @@ namespace MyApi.Modules.Offers.DTOs
         public decimal? Taxes { get; set; }
         public string? TaxType { get; set; }
         public decimal? Discount { get; set; }
+        public string? DiscountType { get; set; }
         public decimal? FiscalStamp { get; set; }
         public string? Notes { get; set; }
         public List<CreateOfferItemDto>? Items { get; set; }
@@ -145,6 +147,7 @@ namespace MyApi.Modules.Offers.DTOs
         public decimal? Taxes { get; set; }
         public string? TaxType { get; set; }
         public decimal? Discount { get; set; }
+        public string? DiscountType { get; set; }
         public decimal? FiscalStamp { get; set; }
         public decimal? TotalAmount { get; set; }
         public DateTime? ValidUntil { get; set; }

@@ -71,6 +71,10 @@ namespace MyApi.Modules.Offers.Models
         [Column("Discount", TypeName = "decimal(18,2)")]
         public decimal? Discount { get; set; } = 0;
 
+        [Column("DiscountType")]
+        [MaxLength(20)]
+        public string DiscountType { get; set; } = "percentage";
+
         [Column("FiscalStamp", TypeName = "decimal(10,3)")]
         public decimal? FiscalStamp { get; set; } = 1.000m;
 
