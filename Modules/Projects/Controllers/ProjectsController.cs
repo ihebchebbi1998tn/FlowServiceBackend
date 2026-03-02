@@ -207,6 +207,87 @@ namespace MyApi.Modules.Projects.Controllers
             }
         }
 
+        /// <summary>
+        /// Get project notes
+        /// </summary>
+        [HttpGet("{projectId}/notes")]
+        public async Task<ActionResult<List<ProjectNoteDto>>> GetProjectNotes(int projectId)
+        {
+            try
+            {
+                var notes = await _projectService.GetProjectNotesAsync(projectId);
+                return Ok(notes);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting project notes");
+                return StatusCode(500, "An error occurred while retrieving project notes");
+            }
+        }
+
+        /// <summary>
+        /// Create a new project note
+        /// </summary>
+        [HttpPost("{projectId}/notes")]
+        public async Task<ActionResult<ProjectNoteDto>> CreateProjectNote(int projectId, [FromBody] CreateProjectNoteRequestDto createDto)
+        {
+            try
+            {
+                if (!ModelState.IsValid)
+                {
+                    return BadRequest(ModelState);
+                }
+
+                var note = await _projectService.CreateProjectNoteAsync(projectId, createDto, GetCurrentUser());
+                return CreatedAtAction(nameof(GetProjectNotes), new { projectId = projectId }, note);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error creating project note");
+                return StatusCode(500, "An error occurred while creating the project note");
+            }
+        }
+
+        /// <summary>
+        /// Delete a project note
+        /// </summary>
+        [HttpDelete("notes/{noteId}")]
+        public async Task<ActionResult> DeleteProjectNote(int noteId)
+        {
+            try
+            {
+                var success = await _projectService.DeleteProjectNoteAsync(noteId, GetCurrentUser());
+                if (!success)
+                {
+                    return NotFound($"Note with ID {noteId} not found");
+                }
+                return NoContent();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error deleting project note");
+                return StatusCode(500, "An error occurred while deleting the project note");
+            }
+        }
+
+        /// <summary>
+        /// Get project activity
+        /// </summary>
+        [HttpGet("{projectId}/activity")]
+        public async Task<ActionResult<List<ProjectActivityDto>>> GetProjectActivity(int projectId)
+        {
+            try
+            {
+                var activities = await _projectService.GetProjectActivityAsync(projectId);
+                return Ok(activities);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting project activity");
+                return StatusCode(500, "An error occurred while retrieving project activity");
+            }
+        }
+
         private string GetCurrentUser()
         {
             return User.FindFirst(ClaimTypes.Email)?.Value ?? 

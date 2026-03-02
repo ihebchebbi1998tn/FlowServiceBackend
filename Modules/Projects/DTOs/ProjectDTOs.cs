@@ -102,6 +102,43 @@ namespace MyApi.Modules.Projects.DTOs
         public DateTime? EndDate { get; set; }
     }
 
+    public class ProjectNoteDto
+    {
+        public int Id { get; set; }
+        public int ProjectId { get; set; }
+        public string Content { get; set; } = string.Empty;
+        public DateTime CreatedDate { get; set; }
+        public string CreatedBy { get; set; } = string.Empty;
+        public DateTime? ModifiedDate { get; set; }
+        public string? ModifiedBy { get; set; }
+    }
+
+    public class CreateProjectNoteRequestDto
+    {
+        [Required]
+        [StringLength(5000)]
+        public string Content { get; set; } = string.Empty;
+    }
+
+    public class UpdateProjectNoteRequestDto
+    {
+        [StringLength(5000)]
+        public string? Content { get; set; }
+    }
+
+    public class ProjectActivityDto
+    {
+        public int Id { get; set; }
+        public int ProjectId { get; set; }
+        public string ActionType { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public string? Details { get; set; }
+        public DateTime CreatedDate { get; set; }
+        public string CreatedBy { get; set; } = string.Empty;
+        public int? RelatedEntityId { get; set; }
+        public string? RelatedEntityType { get; set; }
+    }
+
     public class ProjectSearchRequestDto
     {
         public string? SearchTerm { get; set; }
