@@ -16,7 +16,6 @@ namespace MyApi.Infrastructure;
 public static class TenantSlugCache
 {
     private static readonly ConcurrentDictionary<string, int> _slugToId = new(StringComparer.OrdinalIgnoreCase);
-    private static bool _initialized = false;
 
     /// <summary>
     /// Load all active tenants from the database into cache.
@@ -40,14 +39,11 @@ public static class TenantSlugCache
                 var tenantId = t.IsDefault ? 0 : t.Id;
                 _slugToId[t.Slug] = tenantId;
             }
-
-            _initialized = true;
         }
         catch (Exception ex)
         {
             // If Tenants table doesn't exist yet (pre-migration), silently continue
             Console.WriteLine($"[TenantSlugCache] Could not initialize: {ex.Message}");
-            _initialized = true; // Mark as initialized to prevent repeated failures
         }
     }
 
