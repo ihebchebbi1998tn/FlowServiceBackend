@@ -562,7 +562,7 @@ namespace MyApi.Modules.Projects.Services
             }
         }
 
-
+        #endregion
 
         #region Task Assignment
 
