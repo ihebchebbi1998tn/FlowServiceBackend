@@ -1,11 +1,14 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using MyApi.Infrastructure;
 
 namespace MyApi.Modules.ServiceOrders.Models
 {
     [Table("ServiceOrders")]
-    public class ServiceOrder
+    public class ServiceOrder : ITenantEntity
     {
+        public int TenantId { get; set; }
+
         [Key]
         [Column("Id")]
         [DatabaseGenerated(DatabaseGeneratedOption.Identity)]

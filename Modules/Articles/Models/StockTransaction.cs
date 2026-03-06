@@ -1,11 +1,15 @@
+using System;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using MyApi.Infrastructure;
 
 namespace MyApi.Modules.Articles.Models
 {
     [Table("stock_transactions")]
-    public class StockTransaction
+    public class StockTransaction : ITenantEntity
     {
+        public int TenantId { get; set; }
+
         [Key]
         [Column("id")]
         [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
@@ -18,7 +22,7 @@ namespace MyApi.Modules.Articles.Models
         [Required]
         [Column("transaction_type")]
         [MaxLength(50)]
-        public string TransactionType { get; set; } = string.Empty; // add, remove, sale_deduction, offer_added, adjustment, transfer_in, transfer_out, return, damaged, lost
+        public string TransactionType { get; set; } = string.Empty;
 
         [Required]
         [Column("quantity", TypeName = "decimal(18,2)")]
@@ -38,7 +42,7 @@ namespace MyApi.Modules.Articles.Models
 
         [Column("reference_type")]
         [MaxLength(50)]
-        public string? ReferenceType { get; set; } // offer, sale, service_order, manual, adjustment
+        public string? ReferenceType { get; set; }
 
         [Column("reference_id")]
         [MaxLength(50)]

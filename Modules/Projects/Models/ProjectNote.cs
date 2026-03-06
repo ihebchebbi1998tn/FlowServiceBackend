@@ -1,13 +1,13 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using MyApi.Infrastructure;
 
 namespace MyApi.Modules.Projects.Models
 {
-    /// <summary>
-    /// ProjectNote model for project-level notes
-    /// </summary>
-    public class ProjectNote
+    public class ProjectNote : ITenantEntity
     {
+        public int TenantId { get; set; }
+
         [Key]
         [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
         public int Id { get; set; }
@@ -30,7 +30,6 @@ namespace MyApi.Modules.Projects.Models
         [StringLength(255)]
         public string? ModifiedBy { get; set; }
 
-        // Navigation property
         [ForeignKey("ProjectId")]
         public virtual Project? Project { get; set; }
     }

@@ -1,12 +1,14 @@
 using System;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using MyApi.Infrastructure;
 
 namespace MyApi.Modules.Planning.Models
 {
     [Table("user_working_hours")]
-    public class UserWorkingHours
+    public class UserWorkingHours : ITenantEntity
     {
+        public int TenantId { get; set; }
         [Key]
         [Column("id")]
         public int Id { get; set; }

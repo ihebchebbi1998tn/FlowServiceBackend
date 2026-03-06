@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using MyApi.Infrastructure;
 
 namespace MyApi.Modules.WorkflowEngine.Models
 {
@@ -8,8 +9,9 @@ namespace MyApi.Modules.WorkflowEngine.Models
     /// Prevents duplicate workflow executions when using state-based polling.
     /// </summary>
     [Table("WorkflowProcessedEntities")]
-    public class WorkflowProcessedEntity
+    public class WorkflowProcessedEntity : ITenantEntity
     {
+        public int TenantId { get; set; }
         [Key]
         public int Id { get; set; }
 

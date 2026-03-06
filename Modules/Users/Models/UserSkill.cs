@@ -1,12 +1,14 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using MyApi.Infrastructure;
 using MyApi.Modules.Skills.Models;
 
 namespace MyApi.Modules.Users.Models
 {
     [Table("UserSkills")]
-    public class UserSkill
+    public class UserSkill : ITenantEntity
     {
+        public int TenantId { get; set; }
         [Key]
         public int Id { get; set; }
 

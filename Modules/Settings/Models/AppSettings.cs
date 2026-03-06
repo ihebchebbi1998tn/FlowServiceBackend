@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using MyApi.Infrastructure;
 
 namespace MyApi.Modules.Settings.Models
 {
@@ -8,8 +9,9 @@ namespace MyApi.Modules.Settings.Models
     /// Follows the same standalone-table pattern as NumberingSettings and PdfSettings.
     /// </summary>
     [Table("AppSettings")]
-    public class AppSettings
+    public class AppSettings : ITenantEntity
     {
+        public int TenantId { get; set; }
         [Key]
         [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
         public int Id { get; set; }

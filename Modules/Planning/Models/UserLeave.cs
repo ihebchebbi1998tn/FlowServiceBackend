@@ -1,12 +1,14 @@
 using System;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using MyApi.Infrastructure;
 
 namespace MyApi.Modules.Planning.Models
 {
     [Table("user_leaves")]
-    public class UserLeave
+    public class UserLeave : ITenantEntity
     {
+        public int TenantId { get; set; }
         [Key]
         [Column("id")]
         public int Id { get; set; }

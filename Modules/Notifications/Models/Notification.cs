@@ -1,11 +1,13 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using MyApi.Infrastructure;
 
 namespace MyApi.Modules.Notifications.Models
 {
     [Table("Notifications")]
-    public class Notification
+    public class Notification : ITenantEntity
     {
+        public int TenantId { get; set; }
         [Key]
         public int Id { get; set; }
 

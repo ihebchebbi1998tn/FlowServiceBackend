@@ -264,13 +264,26 @@ namespace MyApi.Modules.Auth.Services
                     }
                 }
 
+                // Resolve company logo: tenant-specific first, then fallback to admin's logo
+                string? resolvedLogoUrl = admin.CompanyLogoUrl;
+                var tenantId = _context.GetTenantId();
+                if (tenantId > 0)
+                {
+                    var tenantLogo = await _context.Tenants
+                        .Where(t => t.Id == tenantId && t.IsActive)
+                        .Select(t => t.CompanyLogoUrl)
+                        .FirstOrDefaultAsync();
+                    if (!string.IsNullOrEmpty(tenantLogo))
+                        resolvedLogoUrl = tenantLogo;
+                }
+
                 return new AdminExistsResultDto
                 {
                     AdminExists = true,
                     SignupAllowed = false,
                     Message = "An administrator account exists. Please login.",
                     AdminPreferences = adminPreferences,
-                    CompanyLogoUrl = admin.CompanyLogoUrl
+                    CompanyLogoUrl = resolvedLogoUrl
                 };
             }
             catch (Exception ex)
@@ -293,6 +306,19 @@ namespace MyApi.Modules.Auth.Services
         {
             try
             {
+                // Check if there's a current tenant with its own logo
+                var tenantId = _context.GetTenantId();
+                if (tenantId > 0)
+                {
+                    var tenantLogo = await _context.Tenants
+                        .Where(t => t.Id == tenantId && t.IsActive)
+                        .Select(t => t.CompanyLogoUrl)
+                        .FirstOrDefaultAsync();
+                    if (!string.IsNullOrEmpty(tenantLogo))
+                        return tenantLogo;
+                }
+
+                // Fallback to MainAdminUser's company logo
                 var admin = await _context.MainAdminUsers
                     .Where(a => a.IsActive)
                     .Select(a => a.CompanyLogoUrl)
@@ -767,7 +793,8 @@ namespace MyApi.Modules.Auth.Services
                 new Claim("FirstName", user.FirstName),
                 new Claim("LastName", user.LastName),
                 new Claim("Industry", user.Industry ?? ""),
-                new Claim("UserType", "MainAdminUser")
+                new Claim("UserType", "MainAdminUser"),
+                new Claim("login_type", "admin")
             };
 
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
@@ -936,7 +963,8 @@ namespace MyApi.Modules.Auth.Services
                 new Claim("FirstName", user.FirstName),
                 new Claim("LastName", user.LastName),
                 new Claim("Role", user.Role ?? "User"),
-                new Claim("UserType", "RegularUser")
+                new Claim("UserType", "RegularUser"),
+                new Claim("login_type", "user")
             };
 
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));

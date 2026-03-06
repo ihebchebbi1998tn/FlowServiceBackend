@@ -1,11 +1,13 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using MyApi.Infrastructure;
 
 namespace MyApi.Modules.Offers.Models
 {
     [Table("OfferItems")]
-    public class OfferItem
+    public class OfferItem : ITenantEntity
     {
+        public int TenantId { get; set; }
         [Key]
         [Column("Id")]
         [DatabaseGenerated(DatabaseGeneratedOption.Identity)]

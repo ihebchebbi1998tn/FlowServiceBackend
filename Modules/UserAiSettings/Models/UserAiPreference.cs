@@ -1,11 +1,13 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using MyApi.Infrastructure;
 
 namespace MyApi.Modules.UserAiSettings.Models
 {
     [Table("UserAiPreferences")]
-    public class UserAiPreference
+    public class UserAiPreference : ITenantEntity
     {
+        public int TenantId { get; set; }
         [Key]
         public int Id { get; set; }
 

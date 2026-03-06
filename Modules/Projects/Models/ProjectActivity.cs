@@ -1,13 +1,13 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using MyApi.Infrastructure;
 
 namespace MyApi.Modules.Projects.Models
 {
-    /// <summary>
-    /// ProjectActivity model for tracking project changes and events
-    /// </summary>
-    public class ProjectActivity
+    public class ProjectActivity : ITenantEntity
     {
+        public int TenantId { get; set; }
+
         [Key]
         [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
         public int Id { get; set; }
@@ -17,7 +17,7 @@ namespace MyApi.Modules.Projects.Models
 
         [Required]
         [StringLength(50)]
-        public string ActionType { get; set; } = string.Empty; // created, updated, task_added, task_completed, member_added, member_removed, etc.
+        public string ActionType { get; set; } = string.Empty;
 
         [Required]
         [StringLength(500)]
@@ -32,13 +32,11 @@ namespace MyApi.Modules.Projects.Models
         [StringLength(255)]
         public string CreatedBy { get; set; } = string.Empty;
 
-        // Optional reference to related entity (TaskId, NoteId, etc.)
         public int? RelatedEntityId { get; set; }
 
         [StringLength(100)]
         public string? RelatedEntityType { get; set; }
 
-        // Navigation property
         [ForeignKey("ProjectId")]
         public virtual Project? Project { get; set; }
     }

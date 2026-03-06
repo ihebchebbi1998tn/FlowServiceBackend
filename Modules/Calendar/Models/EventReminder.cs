@@ -1,11 +1,14 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using MyApi.Infrastructure;
 
 namespace MyApi.Modules.Calendar.Models
 {
     [Table("event_reminders")]
-    public class EventReminder
+    public class EventReminder : ITenantEntity
     {
+        public int TenantId { get; set; }
+
         [Key]
         public Guid Id { get; set; }
 

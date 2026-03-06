@@ -1,12 +1,14 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using MyApi.Infrastructure;
 using MyApi.Modules.Contacts.Models;
 
 namespace MyApi.Modules.Projects.Models
 {
     [Table("Projects")]
-    public class Project
+    public class Project : ITenantEntity
     {
+        public int TenantId { get; set; }
         [Key]
         [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
         public int Id { get; set; }

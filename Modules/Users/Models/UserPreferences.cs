@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using MyApi.Infrastructure;
 
 namespace MyApi.Modules.Users.Models
 {
@@ -8,8 +9,9 @@ namespace MyApi.Modules.Users.Models
     /// MainAdminUsers use PreferencesJson column directly on MainAdminUsers table.
     /// </summary>
     [Table("UserPreferences")]
-    public class UserPreferences
+    public class UserPreferences : ITenantEntity
     {
+        public int TenantId { get; set; }
         [Key]
         [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
         public int Id { get; set; }

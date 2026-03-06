@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using MyApi.Infrastructure;
 
 namespace MyApi.Modules.Numbering.Models
 {
@@ -8,8 +9,9 @@ namespace MyApi.Modules.Numbering.Models
     /// One row per (entity, period) combination.
     /// </summary>
     [Table("NumberSequences")]
-    public class NumberSequence
+    public class NumberSequence : ITenantEntity
     {
+        public int TenantId { get; set; }
         [Key]
         [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
         public int Id { get; set; }

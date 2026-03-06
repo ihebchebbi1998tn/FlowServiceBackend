@@ -1,12 +1,15 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using MyApi.Modules.Contacts.Models;
+using MyApi.Infrastructure;
 
 namespace MyApi.Modules.Calendar.Models
 {
     [Table("calendar_events")]
-    public class CalendarEvent
+    public class CalendarEvent : ITenantEntity
     {
+        public int TenantId { get; set; }
+
         [Key]
         public Guid Id { get; set; }
 
@@ -25,7 +28,6 @@ namespace MyApi.Modules.Calendar.Models
         [Column("all_day")]
         public bool AllDay { get; set; } = false;
 
-        // Event categorization
         [Required]
         [MaxLength(50)]
         public string Type { get; set; } = string.Empty;
@@ -44,13 +46,11 @@ namespace MyApi.Modules.Calendar.Models
         [MaxLength(7)]
         public string? Color { get; set; }
 
-        // Location and attendees
         public string? Location { get; set; }
 
         [Column(TypeName = "jsonb")]
         public string? Attendees { get; set; }
 
-        // Relationships to other entities
         [MaxLength(20)]
         [Column("related_type")]
         public string? RelatedType { get; set; }
@@ -61,7 +61,6 @@ namespace MyApi.Modules.Calendar.Models
         [Column("contact_id")]
         public int? ContactId { get; set; }
 
-        // Reminders and recurrence
         [Column(TypeName = "jsonb")]
         public string? Reminders { get; set; }
 
@@ -71,7 +70,6 @@ namespace MyApi.Modules.Calendar.Models
         [Column("is_private")]
         public bool IsPrivate { get; set; } = false;
 
-        // Audit fields
         [Required]
         [Column("created_at")]
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

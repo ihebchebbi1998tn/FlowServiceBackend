@@ -520,8 +520,8 @@ namespace MyApi.Modules.Sales.Services
 
                 // Nullify SaleId reference in ServiceOrders (cast int to string for VARCHAR column)
                 await _context.Database.ExecuteSqlRawAsync(
-                    @"UPDATE ""ServiceOrders"" SET ""SaleId"" = NULL WHERE ""SaleId"" = @p0",
-                    id.ToString());
+                    @"UPDATE ""ServiceOrders"" SET ""SaleId"" = NULL WHERE ""SaleId"" = @p0 AND ""TenantId"" = @p1",
+                    id.ToString(), _context.GetTenantId());
 
                 // If sale was converted from an offer, reset the offer and log activity
                 if (!string.IsNullOrEmpty(sale.OfferId) && int.TryParse(sale.OfferId, out int offerId))

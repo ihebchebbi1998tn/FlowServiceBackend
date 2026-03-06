@@ -1,13 +1,15 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using MyApi.Infrastructure;
 
 namespace MyApi.Modules.Projects.Models
 {
     /// <summary>
     /// TaskChecklist model for grouping checklist items within a task
     /// </summary>
-    public class TaskChecklist
+    public class TaskChecklist : ITenantEntity
     {
+        public int TenantId { get; set; }
         [Key]
         [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
         public int Id { get; set; }
@@ -68,8 +70,9 @@ namespace MyApi.Modules.Projects.Models
     /// <summary>
     /// TaskChecklistItem model for individual items within a checklist
     /// </summary>
-    public class TaskChecklistItem
+    public class TaskChecklistItem : ITenantEntity
     {
+        public int TenantId { get; set; }
         [Key]
         [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
         public int Id { get; set; }

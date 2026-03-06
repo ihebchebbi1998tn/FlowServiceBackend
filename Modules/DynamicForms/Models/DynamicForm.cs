@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using MyApi.Infrastructure;
 using MyApi.Modules.Shared.Domain.Common;
 
 namespace MyApi.Modules.DynamicForms.Models
@@ -39,8 +40,9 @@ namespace MyApi.Modules.DynamicForms.Models
     /// Dynamic Form entity - stores form definitions with fields as JSON
     /// </summary>
     [Table("DynamicForms")]
-    public class DynamicForm : BaseEntityWithStatus
+    public class DynamicForm : BaseEntityWithStatus, ITenantEntity
     {
+        public int TenantId { get; set; }
         [Required]
         [MaxLength(200)]
         public string NameEn { get; set; } = string.Empty;
@@ -101,8 +103,9 @@ namespace MyApi.Modules.DynamicForms.Models
     /// Dynamic Form Response - stores submitted form data
     /// </summary>
     [Table("DynamicFormResponses")]
-    public class DynamicFormResponse
+    public class DynamicFormResponse : ITenantEntity
     {
+        public int TenantId { get; set; }
         [Key]
         public int Id { get; set; }
 

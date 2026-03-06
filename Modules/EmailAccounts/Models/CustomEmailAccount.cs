@@ -1,10 +1,13 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using MyApi.Infrastructure;
 
 namespace MyApi.Modules.EmailAccounts.Models
 {
-    public class CustomEmailAccount
+    public class CustomEmailAccount : ITenantEntity
     {
+        public int TenantId { get; set; }
+
         [Key]
         public Guid Id { get; set; } = Guid.NewGuid();
 
@@ -20,28 +23,24 @@ namespace MyApi.Modules.EmailAccounts.Models
         [MaxLength(50)]
         public string Provider { get; set; } = "custom";
 
-        // SMTP
         [MaxLength(255)]
         public string? SmtpServer { get; set; }
         public int? SmtpPort { get; set; }
         [MaxLength(20)]
         public string? SmtpSecurity { get; set; }
 
-        // IMAP
         [MaxLength(255)]
         public string? ImapServer { get; set; }
         public int? ImapPort { get; set; }
         [MaxLength(20)]
         public string? ImapSecurity { get; set; }
 
-        // POP3
         [MaxLength(255)]
         public string? Pop3Server { get; set; }
         public int? Pop3Port { get; set; }
         [MaxLength(20)]
         public string? Pop3Security { get; set; }
 
-        // Encrypted credentials
         public string? EncryptedPassword { get; set; }
 
         public bool IsActive { get; set; } = true;

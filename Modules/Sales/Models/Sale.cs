@@ -2,12 +2,15 @@ using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using System;
 using System.Collections.Generic;
+using MyApi.Infrastructure;
 
 namespace MyApi.Modules.Sales.Models
 {
     [Table("Sales")]
-    public class Sale
+    public class Sale : ITenantEntity
     {
+        public int TenantId { get; set; }
+
         [Key]
         [Column("Id")]
         [DatabaseGenerated(DatabaseGeneratedOption.Identity)]

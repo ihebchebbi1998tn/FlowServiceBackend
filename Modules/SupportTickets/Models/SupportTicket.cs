@@ -1,10 +1,12 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using MyApi.Infrastructure;
 
 namespace MyApi.Modules.SupportTickets.Models
 {
-    public class SupportTicket
+    public class SupportTicket : ITenantEntity
     {
+        public int TenantId { get; set; }
         [Key]
         [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
         public int Id { get; set; }
@@ -43,8 +45,9 @@ namespace MyApi.Modules.SupportTickets.Models
         public virtual ICollection<SupportTicketAttachment> Attachments { get; set; } = new List<SupportTicketAttachment>();
     }
 
-    public class SupportTicketAttachment
+    public class SupportTicketAttachment : ITenantEntity
     {
+        public int TenantId { get; set; }
         [Key]
         [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
         public int Id { get; set; }
@@ -70,8 +73,9 @@ namespace MyApi.Modules.SupportTickets.Models
         public virtual SupportTicket Ticket { get; set; } = null!;
     }
 
-    public class SupportTicketComment
+    public class SupportTicketComment : ITenantEntity
     {
+        public int TenantId { get; set; }
         [Key]
         [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
         public int Id { get; set; }
@@ -95,8 +99,9 @@ namespace MyApi.Modules.SupportTickets.Models
         public virtual SupportTicket Ticket { get; set; } = null!;
     }
 
-    public class SupportTicketLink
+    public class SupportTicketLink : ITenantEntity
     {
+        public int TenantId { get; set; }
         [Key]
         [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
         public int Id { get; set; }

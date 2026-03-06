@@ -196,21 +196,27 @@ builder.Services.AddScoped<ApplicationDbContext>(sp =>
 {
     var httpContextAccessor = sp.GetRequiredService<IHttpContextAccessor>();
     var tenant = httpContextAccessor.HttpContext?.Items["Tenant"] as string;
+    var tenantId = httpContextAccessor.HttpContext?.Items["TenantId"] as int? ?? 0;
 
+    ApplicationDbContext ctx;
     if (!string.IsNullOrEmpty(tenant))
     {
         // Tenant path: resolve via factory (connection string is cached)
         var factory = sp.GetRequiredService<ITenantDbContextFactory>();
-        var ctx = factory.CreateDbContext(tenant);
-        // ✅ PERFORMANCE: Downgraded from Warning→Debug — fires on EVERY request
+        ctx = factory.CreateDbContext(tenant);
         var tenantLogger = sp.GetRequiredService<ILogger<TenantDbContextFactory>>();
         tenantLogger.LogDebug("🏢 TENANT-DB-SWITCH: DbContext created for tenant '{Tenant}'", tenant);
-        return ctx;
+    }
+    else
+    {
+        // Default path: use pre-built options
+        var options = sp.GetRequiredService<DbContextOptions<ApplicationDbContext>>();
+        ctx = new ApplicationDbContext(options);
     }
 
-    // Default path: use pre-built options
-    var options = sp.GetRequiredService<DbContextOptions<ApplicationDbContext>>();
-    return new ApplicationDbContext(options);
+    // ═══ MULTI-TENANCY: Set TenantId for global query filters ═══
+    ctx.SetTenantId(tenantId);
+    return ctx;
 });
 
 // Allow services to depend on the base DbContext type (maps to ApplicationDbContext)
@@ -261,6 +267,9 @@ builder.Services.AddScoped<ICalendarService, CalendarService>();
 
 // Lookups Module Services
 builder.Services.AddScoped<ILookupService, LookupService>();
+
+// Tenant Seeder (clones default data for new tenants)
+builder.Services.AddScoped<MyApi.Modules.Tenants.Services.TenantSeeder>();
 
 // Tasks Module Services
 builder.Services.AddScoped<IProjectService, ProjectService>();
@@ -410,6 +419,23 @@ var app = builder.Build();
 var logStore = app.Services.GetRequiredService<IInMemoryLogStore>();
 app.Services.GetRequiredService<ILoggerFactory>().AddProvider(new InMemoryLogProvider(logStore));
 
+// ═══ MULTI-TENANCY: Initialize tenant slug → ID cache at startup ═══
+using (var tenantScope = app.Services.CreateScope())
+{
+    try
+    {
+        var tenantDb = tenantScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        TenantSlugCache.Initialize(tenantDb);
+        var tenantLogger = tenantScope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+        tenantLogger.LogInformation("🏢 TenantSlugCache initialized successfully");
+    }
+    catch (Exception ex)
+    {
+        var tenantLogger = tenantScope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+        tenantLogger.LogWarning(ex, "🏢 TenantSlugCache initialization failed (Tenants table may not exist yet)");
+    }
+}
+
 // Render port
 var port = Environment.GetEnvironmentVariable("PORT") ?? "10000";
 app.Urls.Add($"http://0.0.0.0:{port}");
@@ -446,6 +472,8 @@ using (var scope = app.Services.CreateScope())
         var expectedTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "__EFMigrationsHistory",
+            // Multi-tenancy
+            "Tenants",
             // Auth & users
             "MainAdminUsers",
             "Users",

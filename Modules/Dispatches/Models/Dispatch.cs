@@ -2,13 +2,15 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using MyApi.Infrastructure;
 using MyApi.Modules.Contacts.Models;
 
 namespace MyApi.Modules.Dispatches.Models
 {
     [Table("Dispatches")]
-    public class Dispatch
+    public class Dispatch : ITenantEntity
     {
+        public int TenantId { get; set; }
         [Key]
         [Column("Id")]
         [DatabaseGenerated(DatabaseGeneratedOption.Identity)]

@@ -1,11 +1,14 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using MyApi.Infrastructure;
 
 namespace MyApi.Modules.Calendar.Models
 {
     [Table("event_types")]
-    public class EventType
+    public class EventType : ITenantEntity
     {
+        public int TenantId { get; set; }
+
         [Key]
         [MaxLength(50)]
         public string Id { get; set; } = string.Empty;

@@ -34,9 +34,15 @@ public class TenantMiddleware
         if (!string.IsNullOrEmpty(tenant))
         {
             context.Items["Tenant"] = tenant;
-            // ✅ PERFORMANCE: Downgraded from Warning→Debug to reduce log volume at scale
-            _logger.LogDebug("🏢 TENANT-MIDDLEWARE: Request {Method} {Path} → tenant='{Tenant}'",
-                context.Request.Method, context.Request.Path, tenant);
+            // Resolve slug → numeric TenantId from cache
+            var tenantId = TenantSlugCache.GetTenantId(tenant);
+            context.Items["TenantId"] = tenantId;
+            _logger.LogDebug("🏢 TENANT-MIDDLEWARE: Request {Method} {Path} → tenant='{Tenant}' (TenantId={TenantId})",
+                context.Request.Method, context.Request.Path, tenant, tenantId);
+        }
+        else
+        {
+            context.Items["TenantId"] = 0; // Default tenant
         }
 
         await _next(context);

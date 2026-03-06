@@ -1,11 +1,13 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using MyApi.Infrastructure;
 
 namespace MyApi.Modules.Payments.Models
 {
     [Table("payment_plans")]
-    public class PaymentPlan
+    public class PaymentPlan : ITenantEntity
     {
+        public int TenantId { get; set; }
         [Key]
         [Column("id")]
         [MaxLength(50)]
@@ -61,8 +63,9 @@ namespace MyApi.Modules.Payments.Models
     }
 
     [Table("payment_plan_installments")]
-    public class PaymentPlanInstallment
+    public class PaymentPlanInstallment : ITenantEntity
     {
+        public int TenantId { get; set; }
         [Key]
         [Column("id")]
         [MaxLength(50)]
@@ -107,8 +110,9 @@ namespace MyApi.Modules.Payments.Models
     }
 
     [Table("payments")]
-    public class Payment
+    public class Payment : ITenantEntity
     {
+        public int TenantId { get; set; }
         [Key]
         [Column("id")]
         [MaxLength(50)]
@@ -184,8 +188,9 @@ namespace MyApi.Modules.Payments.Models
     }
 
     [Table("payment_item_allocations")]
-    public class PaymentItemAllocation
+    public class PaymentItemAllocation : ITenantEntity
     {
+        public int TenantId { get; set; }
         [Key]
         [Column("id")]
         [MaxLength(50)]

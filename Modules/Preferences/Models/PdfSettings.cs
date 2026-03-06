@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using MyApi.Infrastructure;
 
 namespace MyApi.Modules.Preferences.Models
 {
@@ -7,8 +8,9 @@ namespace MyApi.Modules.Preferences.Models
     /// Global PDF Settings - applies to the entire application (not per-user)
     /// </summary>
     [Table("PdfSettings")]
-    public class PdfSettings
+    public class PdfSettings : ITenantEntity
     {
+        public int TenantId { get; set; }
         [Key]
         [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
         public int Id { get; set; }

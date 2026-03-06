@@ -1,12 +1,14 @@
 using System;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using MyApi.Infrastructure;
 
 namespace MyApi.Modules.Planning.Models
 {
     [Table("user_status_history")]
-    public class UserStatusHistory
+    public class UserStatusHistory : ITenantEntity
     {
+        public int TenantId { get; set; }
         [Key]
         [Column("id")]
         public int Id { get; set; }

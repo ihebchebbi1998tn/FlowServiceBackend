@@ -1,14 +1,13 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using MyApi.Infrastructure;
 
 namespace MyApi.Modules.Projects.Models
 {
-    /// <summary>
-    /// ProjectColumn model matching database schema:
-    /// Id, ProjectId, Name, DisplayOrder, Color
-    /// </summary>
-    public class ProjectColumn
+    public class ProjectColumn : ITenantEntity
     {
+        public int TenantId { get; set; }
+
         [Key]
         [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
         public int Id { get; set; }
@@ -26,7 +25,6 @@ namespace MyApi.Modules.Projects.Models
         [StringLength(7)]
         public string? Color { get; set; }
 
-        // Navigation properties
         [ForeignKey("ProjectId")]
         public virtual Project Project { get; set; } = null!;
         public virtual ICollection<ProjectTask> Tasks { get; set; } = new List<ProjectTask>();

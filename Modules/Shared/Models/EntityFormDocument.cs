@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using MyApi.Infrastructure;
 using MyApi.Modules.DynamicForms.Models;
 using MyApi.Modules.Shared.Domain.Common;
 
@@ -19,8 +20,9 @@ namespace MyApi.Modules.Shared.Models
     /// Allows multiple form documents per entity, same form can be filled multiple times
     /// </summary>
     [Table("EntityFormDocuments")]
-    public class EntityFormDocument : BaseEntityWithSoftDelete
+    public class EntityFormDocument : BaseEntityWithSoftDelete, ITenantEntity
     {
+        public int TenantId { get; set; }
         /// <summary>
         /// Type of entity: 'offer' or 'sale'
         /// </summary>

@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using MyApi.Infrastructure;
 
 namespace MyApi.Modules.Projects.Models
 {
@@ -7,8 +8,9 @@ namespace MyApi.Modules.Projects.Models
     /// TaskTimeEntry model for tracking time spent on tasks
     /// Supports both Project Tasks and Daily Tasks
     /// </summary>
-    public class TaskTimeEntry
+    public class TaskTimeEntry : ITenantEntity
     {
+        public int TenantId { get; set; }
         [Key]
         [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
         public int Id { get; set; }

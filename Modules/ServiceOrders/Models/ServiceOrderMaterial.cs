@@ -1,6 +1,7 @@
 using System;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using MyApi.Infrastructure;
 
 namespace MyApi.Modules.ServiceOrders.Models
 {
@@ -9,8 +10,9 @@ namespace MyApi.Modules.ServiceOrders.Models
     /// This is separate from DispatchMaterials which are used during dispatch execution.
     /// </summary>
     [Table("ServiceOrderMaterials")]
-    public class ServiceOrderMaterial
+    public class ServiceOrderMaterial : ITenantEntity
     {
+        public int TenantId { get; set; }
         [Key]
         [Column("Id")]
         [DatabaseGenerated(DatabaseGeneratedOption.Identity)]

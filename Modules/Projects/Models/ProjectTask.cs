@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using MyApi.Infrastructure;
 
 namespace MyApi.Modules.Projects.Models
 {
@@ -7,8 +8,9 @@ namespace MyApi.Modules.Projects.Models
     /// ProjectTask model matching database schema:
     /// Id, ProjectId, ColumnId, Title, Description, Priority, DueDate, AssignedUserId, DisplayOrder, CreatedDate, CreatedBy, ModifiedDate, ModifiedBy
     /// </summary>
-    public class ProjectTask
+    public class ProjectTask : ITenantEntity
     {
+        public int TenantId { get; set; }
         [Key]
         [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
         public int Id { get; set; }

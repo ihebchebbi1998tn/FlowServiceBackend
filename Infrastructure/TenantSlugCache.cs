@@ -1,0 +1,81 @@
+using System.Collections.Concurrent;
+using Microsoft.EntityFrameworkCore;
+using MyApi.Data;
+
+namespace MyApi.Infrastructure;
+
+/// <summary>
+/// In-memory cache mapping tenant slugs to their numeric TenantId.
+/// Populated at startup and refreshed on tenant CRUD operations.
+/// 
+/// IMPORTANT: TenantId in data tables does NOT equal Tenant.Id.
+/// - TenantId = 0 means "default tenant" (existing data before multi-tenancy)
+/// - TenantId = Tenant.Id for all other tenants
+/// - The "default" tenant (Slug="default", IsDefault=true) maps to TenantId = 0
+/// </summary>
+public static class TenantSlugCache
+{
+    private static readonly ConcurrentDictionary<string, int> _slugToId = new(StringComparer.OrdinalIgnoreCase);
+    private static bool _initialized = false;
+
+    /// <summary>
+    /// Load all active tenants from the database into cache.
+    /// Call this at application startup.
+    /// </summary>
+    public static void Initialize(ApplicationDbContext db)
+    {
+        try
+        {
+            // Use IgnoreQueryFilters since Tenant table doesn't have TenantId filter
+            var tenants = db.Tenants
+                .Where(t => t.IsActive)
+                .Select(t => new { t.Slug, t.Id, t.IsDefault })
+                .ToList();
+
+            _slugToId.Clear();
+            foreach (var t in tenants)
+            {
+                // The "default" tenant (IsDefault=true) maps to TenantId = 0
+                // All other tenants map to their actual Tenant.Id
+                var tenantId = t.IsDefault ? 0 : t.Id;
+                _slugToId[t.Slug] = tenantId;
+            }
+
+            _initialized = true;
+        }
+        catch (Exception ex)
+        {
+            // If Tenants table doesn't exist yet (pre-migration), silently continue
+            Console.WriteLine($"[TenantSlugCache] Could not initialize: {ex.Message}");
+            _initialized = true; // Mark as initialized to prevent repeated failures
+        }
+    }
+
+    /// <summary>
+    /// Refresh the cache (call after tenant CRUD operations).
+    /// </summary>
+    public static void Refresh(ApplicationDbContext db)
+    {
+        Initialize(db);
+    }
+
+    /// <summary>
+    /// Get the numeric TenantId for a slug. Returns 0 (default) if unknown.
+    /// </summary>
+    public static int GetTenantId(string? slug)
+    {
+        if (string.IsNullOrEmpty(slug))
+            return 0;
+
+        if (_slugToId.TryGetValue(slug, out var id))
+            return id;
+
+        // Unknown slug → default tenant
+        return 0;
+    }
+
+    /// <summary>
+    /// Check if a slug exists in the cache.
+    /// </summary>
+    public static bool HasTenant(string slug) => _slugToId.ContainsKey(slug);
+}

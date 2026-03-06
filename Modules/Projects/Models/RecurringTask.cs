@@ -1,10 +1,12 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using MyApi.Infrastructure;
 
 namespace MyApi.Modules.Projects.Models
 {
-    public class RecurringTask
+    public class RecurringTask : ITenantEntity
     {
+        public int TenantId { get; set; }
         [Key]
         public int Id { get; set; }
 
@@ -60,8 +62,9 @@ namespace MyApi.Modules.Projects.Models
         public virtual DailyTask? DailyTask { get; set; }
     }
 
-    public class RecurringTaskLog
+    public class RecurringTaskLog : ITenantEntity
     {
+        public int TenantId { get; set; }
         [Key]
         public int Id { get; set; }
 

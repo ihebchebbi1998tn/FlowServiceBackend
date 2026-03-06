@@ -1,12 +1,14 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using MyApi.Infrastructure;
 using MyApi.Modules.Roles.Models;
 
 namespace MyApi.Modules.Users.Models
 {
     [Table("UserRoles")]
-    public class UserRole
+    public class UserRole : ITenantEntity
     {
+        public int TenantId { get; set; }
         [Key]
         public int Id { get; set; }
 

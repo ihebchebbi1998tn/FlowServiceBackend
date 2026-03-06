@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
+using MyApi.Infrastructure;
 using MyApi.Modules.Auth.Models;
+using MyApi.Modules.Tenants.Models;
 using MyApi.Modules.Users.Models;
 using MyApi.Modules.Roles.Models;
 using MyApi.Modules.Skills.Models;
@@ -49,9 +51,19 @@ namespace MyApi.Data
 {
     public partial class ApplicationDbContext : DbContext
     {
+        // ═══ MULTI-TENANCY: Current tenant ID for this request scope ═══
+        private int _currentTenantId = 0; // Default tenant
+
         public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : base(options)
         {
         }
+
+        /// <summary>Set the tenant ID for this context instance (called from DI registration).</summary>
+        public void SetTenantId(int tenantId) { _currentTenantId = tenantId; }
+        public int GetTenantId() => _currentTenantId;
+
+        // Tenants Module
+        public DbSet<Tenant> Tenants { get; set; }
 
         // Users Module
         public DbSet<MainAdminUser> MainAdminUsers { get; set; }
@@ -239,6 +251,67 @@ namespace MyApi.Data
             
             // Apply seed data
             ApplySeedData(modelBuilder);
+
+            // ═══ MULTI-TENANCY: Global Query Filters ═══
+            // Automatically append WHERE "TenantId" = @current to every query
+            // on entities implementing ITenantEntity.
+            foreach (var entityType in modelBuilder.Model.GetEntityTypes())
+            {
+                if (typeof(ITenantEntity).IsAssignableFrom(entityType.ClrType))
+                {
+                    var method = typeof(ApplicationDbContext)
+                        .GetMethod(nameof(ApplyTenantQueryFilter),
+                            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!
+                        .MakeGenericMethod(entityType.ClrType);
+                    method.Invoke(null, new object[] { modelBuilder, this });
+                }
+            }
+        }
+
+        /// <summary>
+        /// Apply a global query filter for tenant isolation on a specific entity type.
+        /// Uses expression tree that captures 'this' so EF re-evaluates _currentTenantId per query.
+        /// </summary>
+        private static void ApplyTenantQueryFilter<T>(ModelBuilder modelBuilder, ApplicationDbContext ctx)
+            where T : class, ITenantEntity
+        {
+            modelBuilder.Entity<T>().HasQueryFilter(e => e.TenantId == ctx._currentTenantId);
+        }
+
+        // ═══ MULTI-TENANCY: Auto-set TenantId on insert ═══
+        public override int SaveChanges()
+        {
+            StampTenantIdOnNewEntities();
+            return base.SaveChanges();
+        }
+
+        public override int SaveChanges(bool acceptAllChangesOnSuccess)
+        {
+            StampTenantIdOnNewEntities();
+            return base.SaveChanges(acceptAllChangesOnSuccess);
+        }
+
+        public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        {
+            StampTenantIdOnNewEntities();
+            return base.SaveChangesAsync(cancellationToken);
+        }
+
+        public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+        {
+            StampTenantIdOnNewEntities();
+            return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+        }
+
+        private void StampTenantIdOnNewEntities()
+        {
+            foreach (var entry in ChangeTracker.Entries<ITenantEntity>())
+            {
+                if (entry.State == Microsoft.EntityFrameworkCore.EntityState.Added)
+                {
+                    entry.Entity.TenantId = _currentTenantId;
+                }
+            }
         }
 
         private void ApplyEntityConfigurations(ModelBuilder modelBuilder)

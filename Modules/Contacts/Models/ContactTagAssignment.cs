@@ -1,11 +1,14 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using MyApi.Infrastructure;
 
 namespace MyApi.Modules.Contacts.Models
 {
     [Table("ContactTagAssignments")]
-    public class ContactTagAssignment
+    public class ContactTagAssignment : ITenantEntity
     {
+        public int TenantId { get; set; }
+
         [Key]
         [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
         public int Id { get; set; }
