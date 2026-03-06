@@ -4,9 +4,8 @@ namespace MyApi.Modules.Projects.Services
 {
     public interface ITaskService
     {
-        // Project Task CRUD operations
-        Task<List<ProjectTaskResponseDto>> GetProjectTasksAsync(int projectId);
-        Task<List<ProjectTaskResponseDto>> GetColumnTasksAsync(int columnId);
+        // Project Task (Activity) CRUD operations
+        Task<List<ProjectTaskResponseDto>> GetTasksByEntityAsync(string entityType, int entityId);
         Task<ProjectTaskResponseDto?> GetProjectTaskByIdAsync(int id);
         Task<ProjectTaskResponseDto> CreateProjectTaskAsync(CreateProjectTaskRequestDto createDto, string createdByUser);
         Task<ProjectTaskResponseDto?> UpdateProjectTaskAsync(int id, UpdateProjectTaskRequestDto updateDto, string modifiedByUser);
@@ -23,14 +22,12 @@ namespace MyApi.Modules.Projects.Services
 
         // Task search and filtering
         Task<TaskListResponseDto> SearchTasksAsync(TaskSearchRequestDto searchRequest);
-        Task<List<ProjectTaskResponseDto>> GetTasksByAssigneeAsync(int assigneeId, int? projectId = null);
-        Task<List<ProjectTaskResponseDto>> GetOverdueTasksAsync(int? projectId = null, int? assigneeId = null);
+        Task<List<ProjectTaskResponseDto>> GetTasksByAssigneeAsync(int assigneeId, string? entityType = null, int? entityId = null);
+        Task<List<ProjectTaskResponseDto>> GetOverdueTasksAsync(string? entityType = null, int? entityId = null, int? assigneeId = null);
 
         // Task movement and positioning
-        Task<bool> MoveTaskAsync(int taskId, MoveTaskRequestDto moveDto, string movedByUser);
-        Task<bool> BulkMoveTasksAsync(BulkMoveTasksRequestDto bulkMoveDto, string movedByUser);
-        Task<int> GetNextTaskDisplayOrderAsync(int columnId);
-        Task<bool> ReorderTasksInColumnAsync(int columnId, List<int> taskIds, string updatedByUser);
+        Task<bool> MoveTaskStatusAsync(int taskId, MoveTaskRequestDto moveDto, string movedByUser);
+        Task<bool> BulkMoveTaskStatusesAsync(BulkMoveTasksRequestDto bulkMoveDto, string movedByUser);
 
         // Task assignment
         Task<bool> AssignTaskAsync(int taskId, AssignTaskRequestDto assignDto, string assignedByUser);
@@ -41,7 +38,7 @@ namespace MyApi.Modules.Projects.Services
         Task<bool> BulkUpdateTaskStatusAsync(BulkUpdateTaskStatusDto bulkUpdateDto, string updatedByUser);
 
         // Task statistics
-        Task<TaskStatisticsDto> GetTaskStatisticsAsync(int? projectId = null);
+        Task<TaskStatisticsDto> GetTaskStatisticsAsync(string? entityType = null, int? entityId = null);
         Task<bool> TaskExistsAsync(int id, bool isProjectTask = true);
     }
 }

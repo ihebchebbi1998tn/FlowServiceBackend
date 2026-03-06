@@ -23,38 +23,20 @@ namespace MyApi.Modules.Projects.Controllers
         #region Project Tasks
 
         /// <summary>
-        /// Get all tasks for a project
+        /// Get all tasks for an entity
         /// </summary>
-        [HttpGet("project/{projectId}")]
-        public async Task<ActionResult<List<ProjectTaskResponseDto>>> GetProjectTasks(int projectId)
+        [HttpGet("entity/{entityType}/{entityId}")]
+        public async Task<ActionResult<List<ProjectTaskResponseDto>>> GetEntityTasks(string entityType, int entityId)
         {
             try
             {
-                var tasks = await _taskService.GetProjectTasksAsync(projectId);
+                var tasks = await _taskService.GetTasksByEntityAsync(entityType, entityId);
                 return Ok(tasks);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error getting tasks for project {ProjectId}", projectId);
-                return StatusCode(500, "An error occurred while retrieving project tasks");
-            }
-        }
-
-        /// <summary>
-        /// Get all tasks for a column
-        /// </summary>
-        [HttpGet("column/{columnId}")]
-        public async Task<ActionResult<List<ProjectTaskResponseDto>>> GetColumnTasks(int columnId)
-        {
-            try
-            {
-                var tasks = await _taskService.GetColumnTasksAsync(columnId);
-                return Ok(tasks);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error getting tasks for column {ColumnId}", columnId);
-                return StatusCode(500, "An error occurred while retrieving column tasks");
+                _logger.LogError(ex, "Error getting tasks for entity {EntityType} {EntityId}", entityType, entityId);
+                return StatusCode(500, "An error occurred while retrieving entity tasks");
             }
         }
 
@@ -334,11 +316,11 @@ namespace MyApi.Modules.Projects.Controllers
         /// Get tasks by assignee
         /// </summary>
         [HttpGet("assignee/{assigneeId}")]
-        public async Task<ActionResult<List<ProjectTaskResponseDto>>> GetTasksByAssignee(int assigneeId, [FromQuery] int? projectId = null)
+        public async Task<ActionResult<List<ProjectTaskResponseDto>>> GetTasksByAssignee(int assigneeId, [FromQuery] string? entityType = null, [FromQuery] int? entityId = null)
         {
             try
             {
-                var tasks = await _taskService.GetTasksByAssigneeAsync(assigneeId, projectId);
+                var tasks = await _taskService.GetTasksByAssigneeAsync(assigneeId, entityType, entityId);
                 return Ok(tasks);
             }
             catch (Exception ex)
@@ -352,11 +334,11 @@ namespace MyApi.Modules.Projects.Controllers
         /// Get overdue tasks
         /// </summary>
         [HttpGet("overdue")]
-        public async Task<ActionResult<List<ProjectTaskResponseDto>>> GetOverdueTasks([FromQuery] int? projectId = null, [FromQuery] int? assigneeId = null)
+        public async Task<ActionResult<List<ProjectTaskResponseDto>>> GetOverdueTasks([FromQuery] string? entityType = null, [FromQuery] int? entityId = null, [FromQuery] int? assigneeId = null)
         {
             try
             {
-                var tasks = await _taskService.GetOverdueTasksAsync(projectId, assigneeId);
+                var tasks = await _taskService.GetOverdueTasksAsync(entityType, entityId, assigneeId);
                 return Ok(tasks);
             }
             catch (Exception ex)
@@ -373,7 +355,7 @@ namespace MyApi.Modules.Projects.Controllers
         #region Task Movement and Positioning
 
         /// <summary>
-        /// Move a task to a different column/position
+        /// Move a task's status
         /// </summary>
         [HttpPut("{taskId}/move")]
         public async Task<ActionResult> MoveTask(int taskId, [FromBody] MoveTaskRequestDto moveDto)
@@ -386,24 +368,24 @@ namespace MyApi.Modules.Projects.Controllers
                 }
 
                 var currentUser = GetCurrentUser();
-                var success = await _taskService.MoveTaskAsync(taskId, moveDto, currentUser);
+                var success = await _taskService.MoveTaskStatusAsync(taskId, moveDto, currentUser);
 
                 if (!success)
                 {
-                    return BadRequest("Failed to move task");
+                    return BadRequest("Failed to move task status");
                 }
 
                 return NoContent();
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error moving task {TaskId}", taskId);
-                return StatusCode(500, "An error occurred while moving the task");
+                _logger.LogError(ex, "Error moving task status {TaskId}", taskId);
+                return StatusCode(500, "An error occurred while moving the task status");
             }
         }
 
         /// <summary>
-        /// Bulk move multiple tasks
+        /// Bulk move multiple task statuses
         /// </summary>
         [HttpPut("bulk/move")]
         public async Task<ActionResult> BulkMoveTasks([FromBody] BulkMoveTasksRequestDto bulkMoveDto)
@@ -416,19 +398,19 @@ namespace MyApi.Modules.Projects.Controllers
                 }
 
                 var currentUser = GetCurrentUser();
-                var success = await _taskService.BulkMoveTasksAsync(bulkMoveDto, currentUser);
+                var success = await _taskService.BulkMoveTaskStatusesAsync(bulkMoveDto, currentUser);
 
                 if (!success)
                 {
-                    return BadRequest("Failed to move tasks");
+                    return BadRequest("Failed to move tasks statuses");
                 }
 
                 return NoContent();
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error during bulk task move");
-                return StatusCode(500, "An error occurred during bulk task move");
+                _logger.LogError(ex, "Error during bulk task status move");
+                return StatusCode(500, "An error occurred during bulk task status move");
             }
         }
 

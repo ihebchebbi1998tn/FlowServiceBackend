@@ -8,22 +8,17 @@ namespace MyApi.Modules.Projects.DTOs
         public int Id { get; set; }
         public string Title { get; set; } = string.Empty;
         public string? Description { get; set; }
-        public int ProjectId { get; set; }
-        public string ProjectName { get; set; } = string.Empty;
-        public int ColumnId { get; set; }
-        public string ColumnName { get; set; } = string.Empty;
-        public string? ColumnColor { get; set; }
-        public string? Priority { get; set; }
+        public string TaskType { get; set; } = string.Empty;
+        public string Status { get; set; } = string.Empty;
+        public string? RelatedEntityType { get; set; }
+        public int? RelatedEntityId { get; set; }
         public DateTime? DueDate { get; set; }
         public int? AssignedUserId { get; set; }
         public string? AssignedUserName { get; set; }
-        public int DisplayOrder { get; set; }
         public DateTime CreatedDate { get; set; }
         public string CreatedBy { get; set; } = string.Empty;
         public DateTime? ModifiedDate { get; set; }
         public string? ModifiedBy { get; set; }
-        public int CommentsCount { get; set; }
-        public int AttachmentsCount { get; set; }
     }
 
     public class DailyTaskResponseDto
@@ -66,19 +61,20 @@ namespace MyApi.Modules.Projects.DTOs
         public string? Description { get; set; }
 
         [Required]
-        public int ProjectId { get; set; }
+        [StringLength(50)]
+        public string TaskType { get; set; } = "follow-up";
 
-        [Required]
-        public int ColumnId { get; set; }
+        [StringLength(50)]
+        public string Status { get; set; } = "open";
 
-        [StringLength(20)]
-        public string? Priority { get; set; }
+        [StringLength(50)]
+        public string? RelatedEntityType { get; set; }
+
+        public int? RelatedEntityId { get; set; }
 
         public DateTime? DueDate { get; set; }
 
         public int? AssignedUserId { get; set; }
-
-        public int? DisplayOrder { get; set; }
     }
 
     public class CreateDailyTaskRequestDto
@@ -111,16 +107,20 @@ namespace MyApi.Modules.Projects.DTOs
 
         public string? Description { get; set; }
 
-        public int? ColumnId { get; set; }
+        [StringLength(50)]
+        public string? TaskType { get; set; }
 
-        [StringLength(20)]
-        public string? Priority { get; set; }
+        [StringLength(50)]
+        public string? Status { get; set; }
+
+        [StringLength(50)]
+        public string? RelatedEntityType { get; set; }
+
+        public int? RelatedEntityId { get; set; }
 
         public DateTime? DueDate { get; set; }
 
         public int? AssignedUserId { get; set; }
-
-        public int? DisplayOrder { get; set; }
     }
 
     public class UpdateDailyTaskRequestDto
@@ -151,10 +151,8 @@ namespace MyApi.Modules.Projects.DTOs
     public class MoveTaskRequestDto
     {
         [Required]
-        public int ColumnId { get; set; }
-
-        [Required]
-        public int DisplayOrder { get; set; }
+        [StringLength(50)]
+        public string Status { get; set; } = string.Empty;
     }
 
     public class BulkMoveTasksRequestDto
@@ -168,18 +166,17 @@ namespace MyApi.Modules.Projects.DTOs
         public int Id { get; set; }
 
         [Required]
-        public int ColumnId { get; set; }
-
-        [Required]
-        public int DisplayOrder { get; set; }
+        [StringLength(50)]
+        public string Status { get; set; } = string.Empty;
     }
 
     public class TaskSearchRequestDto
     {
         public string? SearchTerm { get; set; }
-        public string? Priority { get; set; }
-        public int? ProjectId { get; set; }
-        public int? ColumnId { get; set; }
+        public string? TaskType { get; set; }
+        public string? Status { get; set; }
+        public string? RelatedEntityType { get; set; }
+        public int? RelatedEntityId { get; set; }
         public int? AssignedUserId { get; set; }
         public DateTime? DueDateFrom { get; set; }
         public DateTime? DueDateTo { get; set; }
@@ -216,7 +213,7 @@ namespace MyApi.Modules.Projects.DTOs
         public int OverdueTasks { get; set; }
         public int TasksDueToday { get; set; }
         public int TasksDueThisWeek { get; set; }
-        public Dictionary<string, int> TasksByPriority { get; set; } = new Dictionary<string, int>();
-        public Dictionary<string, int> TasksByColumn { get; set; } = new Dictionary<string, int>();
+        public Dictionary<string, int> TasksByType { get; set; } = new Dictionary<string, int>();
+        public Dictionary<string, int> TasksByStatus { get; set; } = new Dictionary<string, int>();
     }
 }

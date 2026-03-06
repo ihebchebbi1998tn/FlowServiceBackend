@@ -5,8 +5,8 @@ using MyApi.Infrastructure;
 namespace MyApi.Modules.Projects.Models
 {
     /// <summary>
-    /// ProjectTask model matching database schema:
-    /// Id, ProjectId, ColumnId, Title, Description, Priority, DueDate, AssignedUserId, DisplayOrder, CreatedDate, CreatedBy, ModifiedDate, ModifiedBy
+    /// ProjectTask refactored to represent a lightweight Activity:
+    /// Id, Title, Description, DueDate, AssignedUserId, TaskType, Status, RelatedEntityType, RelatedEntityId, CreatedDate, CreatedBy, ModifiedDate, ModifiedBy
     /// </summary>
     public class ProjectTask : ITenantEntity
     {
@@ -16,26 +16,28 @@ namespace MyApi.Modules.Projects.Models
         public int Id { get; set; }
 
         [Required]
-        public int ProjectId { get; set; }
-
-        [Required]
-        public int ColumnId { get; set; }
-
-        [Required]
         [StringLength(200)]
         public string Title { get; set; } = string.Empty;
 
         public string? Description { get; set; }
 
-        [StringLength(20)]
-        public string? Priority { get; set; }
-
         public DateTime? DueDate { get; set; }
 
         public int? AssignedUserId { get; set; }
 
+        // New Activity Fields
         [Required]
-        public int DisplayOrder { get; set; }
+        [StringLength(50)]
+        public string TaskType { get; set; } = "follow-up"; // call, visit, meeting, follow-up
+
+        [Required]
+        [StringLength(50)]
+        public string Status { get; set; } = "open"; // open, in progress, completed, cancelled
+
+        [StringLength(50)]
+        public string? RelatedEntityType { get; set; } // project, service_order, company, etc.
+
+        public int? RelatedEntityId { get; set; }
 
         public DateTime CreatedDate { get; set; } = DateTime.UtcNow;
 
@@ -49,16 +51,7 @@ namespace MyApi.Modules.Projects.Models
         public string? ModifiedBy { get; set; }
 
         // Navigation properties
-        [ForeignKey("ProjectId")]
-        public virtual Project Project { get; set; } = null!;
-
-        [ForeignKey("ColumnId")]
-        public virtual ProjectColumn Column { get; set; } = null!;
-
         [ForeignKey("AssignedUserId")]
         public virtual MyApi.Modules.Users.Models.User? AssignedUser { get; set; }
-
-        public virtual ICollection<TaskComment> Comments { get; set; } = new List<TaskComment>();
-        public virtual ICollection<TaskAttachment> TaskAttachments { get; set; } = new List<TaskAttachment>();
     }
 }

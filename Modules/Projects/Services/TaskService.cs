@@ -21,47 +21,22 @@ namespace MyApi.Modules.Projects.Services
 
         #region Project Tasks
 
-        public async Task<List<ProjectTaskResponseDto>> GetProjectTasksAsync(int projectId)
+        public async Task<List<ProjectTaskResponseDto>> GetTasksByEntityAsync(string entityType, int entityId)
         {
             try
             {
                 var tasks = await _context.ProjectTasks
                     .AsNoTracking()
-                    .Include(t => t.Project)
-                    .Include(t => t.Column)
                     .Include(t => t.AssignedUser)
-                    .Where(t => t.ProjectId == projectId)
-                    .OrderBy(t => t.Column.DisplayOrder)
-                    .ThenBy(t => t.DisplayOrder)
+                    .Where(t => t.RelatedEntityType == entityType && t.RelatedEntityId == entityId)
+                    .OrderByDescending(t => t.CreatedDate)
                     .ToListAsync();
 
                 return tasks.Select(MapToProjectTaskDto).ToList();
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error getting tasks for project {ProjectId}", projectId);
-                throw;
-            }
-        }
-
-        public async Task<List<ProjectTaskResponseDto>> GetColumnTasksAsync(int columnId)
-        {
-            try
-            {
-                var tasks = await _context.ProjectTasks
-                    .AsNoTracking()
-                    .Include(t => t.Project)
-                    .Include(t => t.Column)
-                    .Include(t => t.AssignedUser)
-                    .Where(t => t.ColumnId == columnId)
-                    .OrderBy(t => t.DisplayOrder)
-                    .ToListAsync();
-
-                return tasks.Select(MapToProjectTaskDto).ToList();
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error getting tasks for column {ColumnId}", columnId);
+                _logger.LogError(ex, "Error getting tasks for entity {EntityType} {EntityId}", entityType, entityId);
                 throw;
             }
         }
@@ -72,8 +47,6 @@ namespace MyApi.Modules.Projects.Services
             {
                 var task = await _context.ProjectTasks
                     .AsNoTracking()
-                    .Include(t => t.Project)
-                    .Include(t => t.Column)
                     .Include(t => t.AssignedUser)
                     .Where(t => t.Id == id)
                     .FirstOrDefaultAsync();
@@ -91,27 +64,16 @@ namespace MyApi.Modules.Projects.Services
         {
             try
             {
-                // Validate project and column exist
-                var column = await _context.ProjectColumns
-                    .Where(c => c.Id == createDto.ColumnId && c.ProjectId == createDto.ProjectId)
-                    .FirstOrDefaultAsync();
-
-                if (column == null)
-                    throw new InvalidOperationException("Column not found or doesn't belong to the project");
-
-                // Get next display order in column
-                var displayOrder = createDto.DisplayOrder ?? await GetNextTaskDisplayOrderAsync(createDto.ColumnId);
-
                 var task = new ProjectTask
                 {
                     Title = createDto.Title,
                     Description = createDto.Description,
-                    ProjectId = createDto.ProjectId,
-                    ColumnId = createDto.ColumnId,
-                    Priority = createDto.Priority,
+                    TaskType = createDto.TaskType,
+                    Status = createDto.Status,
+                    RelatedEntityType = createDto.RelatedEntityType,
+                    RelatedEntityId = createDto.RelatedEntityId,
                     DueDate = createDto.DueDate,
                     AssignedUserId = createDto.AssignedUserId,
-                    DisplayOrder = displayOrder,
                     CreatedBy = createdByUser,
                     CreatedDate = DateTime.UtcNow
                 };
@@ -150,20 +112,23 @@ namespace MyApi.Modules.Projects.Services
                 if (updateDto.Description != null)
                     task.Description = updateDto.Description;
 
-                if (updateDto.ColumnId.HasValue)
-                    task.ColumnId = updateDto.ColumnId.Value;
+                if (!string.IsNullOrEmpty(updateDto.TaskType))
+                    task.TaskType = updateDto.TaskType;
 
-                if (!string.IsNullOrEmpty(updateDto.Priority))
-                    task.Priority = updateDto.Priority;
+                if (!string.IsNullOrEmpty(updateDto.Status))
+                    task.Status = updateDto.Status;
+
+                if (updateDto.RelatedEntityType != null)
+                    task.RelatedEntityType = updateDto.RelatedEntityType;
+
+                if (updateDto.RelatedEntityId.HasValue)
+                    task.RelatedEntityId = updateDto.RelatedEntityId.Value;
 
                 if (updateDto.DueDate.HasValue)
                     task.DueDate = updateDto.DueDate.Value;
 
                 if (updateDto.AssignedUserId.HasValue)
                     task.AssignedUserId = updateDto.AssignedUserId.Value;
-
-                if (updateDto.DisplayOrder.HasValue)
-                    task.DisplayOrder = updateDto.DisplayOrder.Value;
 
                 task.ModifiedBy = modifiedByUser;
                 task.ModifiedDate = DateTime.UtcNow;
@@ -425,8 +390,6 @@ namespace MyApi.Modules.Projects.Services
             try
             {
                 var projectTasksQuery = _context.ProjectTasks
-                    .Include(t => t.Project)
-                    .Include(t => t.Column)
                     .Include(t => t.AssignedUser)
                     .AsQueryable();
 
@@ -439,14 +402,17 @@ namespace MyApi.Modules.Projects.Services
                         (t.Description != null && t.Description.ToLower().Contains(searchTerm)));
                 }
 
-                if (!string.IsNullOrEmpty(searchRequest.Priority))
-                    projectTasksQuery = projectTasksQuery.Where(t => t.Priority == searchRequest.Priority);
+                if (!string.IsNullOrEmpty(searchRequest.TaskType))
+                    projectTasksQuery = projectTasksQuery.Where(t => t.TaskType == searchRequest.TaskType);
 
-                if (searchRequest.ProjectId.HasValue)
-                    projectTasksQuery = projectTasksQuery.Where(t => t.ProjectId == searchRequest.ProjectId.Value);
+                if (!string.IsNullOrEmpty(searchRequest.Status))
+                    projectTasksQuery = projectTasksQuery.Where(t => t.Status == searchRequest.Status);
 
-                if (searchRequest.ColumnId.HasValue)
-                    projectTasksQuery = projectTasksQuery.Where(t => t.ColumnId == searchRequest.ColumnId.Value);
+                if (!string.IsNullOrEmpty(searchRequest.RelatedEntityType))
+                    projectTasksQuery = projectTasksQuery.Where(t => t.RelatedEntityType == searchRequest.RelatedEntityType);
+
+                if (searchRequest.RelatedEntityId.HasValue)
+                    projectTasksQuery = projectTasksQuery.Where(t => t.RelatedEntityId == searchRequest.RelatedEntityId.Value);
 
                 if (searchRequest.AssignedUserId.HasValue)
                     projectTasksQuery = projectTasksQuery.Where(t => t.AssignedUserId == searchRequest.AssignedUserId.Value);
@@ -487,18 +453,19 @@ namespace MyApi.Modules.Projects.Services
             }
         }
 
-        public async Task<List<ProjectTaskResponseDto>> GetTasksByAssigneeAsync(int assigneeId, int? projectId = null)
+        public async Task<List<ProjectTaskResponseDto>> GetTasksByAssigneeAsync(int assigneeId, string? entityType = null, int? entityId = null)
         {
             try
             {
                 var query = _context.ProjectTasks
-                    .Include(t => t.Project)
-                    .Include(t => t.Column)
                     .Include(t => t.AssignedUser)
                     .Where(t => t.AssignedUserId == assigneeId);
 
-                if (projectId.HasValue)
-                    query = query.Where(t => t.ProjectId == projectId.Value);
+                if (!string.IsNullOrEmpty(entityType))
+                    query = query.Where(t => t.RelatedEntityType == entityType);
+
+                if (entityId.HasValue)
+                    query = query.Where(t => t.RelatedEntityId == entityId.Value);
 
                 var tasks = await query.ToListAsync();
                 return tasks.Select(MapToProjectTaskDto).ToList();
@@ -510,18 +477,19 @@ namespace MyApi.Modules.Projects.Services
             }
         }
 
-        public async Task<List<ProjectTaskResponseDto>> GetOverdueTasksAsync(int? projectId = null, int? assigneeId = null)
+        public async Task<List<ProjectTaskResponseDto>> GetOverdueTasksAsync(string? entityType = null, int? entityId = null, int? assigneeId = null)
         {
             try
             {
                 var query = _context.ProjectTasks
-                    .Include(t => t.Project)
-                    .Include(t => t.Column)
                     .Include(t => t.AssignedUser)
                     .Where(t => t.DueDate.HasValue && t.DueDate.Value < DateTime.UtcNow);
 
-                if (projectId.HasValue)
-                    query = query.Where(t => t.ProjectId == projectId.Value);
+                if (!string.IsNullOrEmpty(entityType))
+                    query = query.Where(t => t.RelatedEntityType == entityType);
+
+                if (entityId.HasValue)
+                    query = query.Where(t => t.RelatedEntityId == entityId.Value);
 
                 if (assigneeId.HasValue)
                     query = query.Where(t => t.AssignedUserId == assigneeId.Value);
@@ -540,7 +508,7 @@ namespace MyApi.Modules.Projects.Services
 
         #region Task Movement and Positioning
 
-        public async Task<bool> MoveTaskAsync(int taskId, MoveTaskRequestDto moveDto, string movedByUser)
+        public async Task<bool> MoveTaskStatusAsync(int taskId, MoveTaskRequestDto moveDto, string movedByUser)
         {
             try
             {
@@ -551,32 +519,23 @@ namespace MyApi.Modules.Projects.Services
                 if (task == null)
                     return false;
 
-                // Validate column exists and belongs to same project
-                var column = await _context.ProjectColumns
-                    .Where(c => c.Id == moveDto.ColumnId && c.ProjectId == task.ProjectId)
-                    .FirstOrDefaultAsync();
-
-                if (column == null)
-                    throw new InvalidOperationException("Target column not found or doesn't belong to the same project");
-
-                task.ColumnId = moveDto.ColumnId;
-                task.DisplayOrder = moveDto.DisplayOrder;
+                task.Status = moveDto.Status;
                 task.ModifiedBy = movedByUser;
                 task.ModifiedDate = DateTime.UtcNow;
 
                 await _context.SaveChangesAsync();
 
-                _logger.LogInformation("Task {TaskId} moved successfully", taskId);
+                _logger.LogInformation("Task {TaskId} status moved successfully", taskId);
                 return true;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error moving task {TaskId}", taskId);
+                _logger.LogError(ex, "Error moving task {TaskId} status", taskId);
                 throw;
             }
         }
 
-        public async Task<bool> BulkMoveTasksAsync(BulkMoveTasksRequestDto bulkMoveDto, string movedByUser)
+        public async Task<bool> BulkMoveTaskStatusesAsync(BulkMoveTasksRequestDto bulkMoveDto, string movedByUser)
         {
             using var transaction = await _context.Database.BeginTransactionAsync();
             try
@@ -585,65 +544,25 @@ namespace MyApi.Modules.Projects.Services
                 {
                     var moveDto = new MoveTaskRequestDto
                     {
-                        ColumnId = taskMove.ColumnId,
-                        DisplayOrder = taskMove.DisplayOrder
+                        Status = taskMove.Status
                     };
 
-                    await MoveTaskAsync(taskMove.Id, moveDto, movedByUser);
+                    await MoveTaskStatusAsync(taskMove.Id, moveDto, movedByUser);
                 }
 
                 await transaction.CommitAsync();
-                _logger.LogInformation("Bulk moved {Count} tasks", bulkMoveDto.Tasks.Count);
+                _logger.LogInformation("Bulk moved status for {Count} tasks", bulkMoveDto.Tasks.Count);
                 return true;
             }
             catch (Exception ex)
             {
                 await transaction.RollbackAsync();
-                _logger.LogError(ex, "Error during bulk task move");
+                _logger.LogError(ex, "Error during bulk task status move");
                 throw;
             }
         }
 
-        public async Task<int> GetNextTaskDisplayOrderAsync(int columnId)
-        {
-            var maxDisplayOrder = await _context.ProjectTasks
-                .Where(t => t.ColumnId == columnId)
-                .MaxAsync(t => (int?)t.DisplayOrder) ?? 0;
 
-            return maxDisplayOrder + 1;
-        }
-
-        public async Task<bool> ReorderTasksInColumnAsync(int columnId, List<int> taskIds, string updatedByUser)
-        {
-            try
-            {
-                var tasks = await _context.ProjectTasks
-                    .Where(t => taskIds.Contains(t.Id) && t.ColumnId == columnId)
-                    .ToListAsync();
-
-                for (int i = 0; i < taskIds.Count; i++)
-                {
-                    var task = tasks.FirstOrDefault(t => t.Id == taskIds[i]);
-                    if (task != null)
-                    {
-                        task.DisplayOrder = i + 1;
-                        task.ModifiedBy = updatedByUser;
-                        task.ModifiedDate = DateTime.UtcNow;
-                    }
-                }
-
-                await _context.SaveChangesAsync();
-                _logger.LogInformation("Reordered {Count} tasks in column {ColumnId}", tasks.Count, columnId);
-                return true;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error reordering tasks in column {ColumnId}", columnId);
-                throw;
-            }
-        }
-
-        #endregion
 
         #region Task Assignment
 
@@ -652,7 +571,6 @@ namespace MyApi.Modules.Projects.Services
             try
             {
                 var task = await _context.ProjectTasks
-                    .Include(t => t.Project)
                     .Where(t => t.Id == taskId)
                     .FirstOrDefaultAsync();
 
@@ -673,12 +591,13 @@ namespace MyApi.Modules.Projects.Services
                 {
                     try
                     {
+                        int fallbackEntityId = task.RelatedEntityId ?? 0;
                         await _notificationService.GenerateTaskAssignedNotificationAsync(
                             taskId,
                             task.Title,
                             assignDto.AssignedUserId.Value,
                             assignedByUser,
-                            task.ProjectId
+                            fallbackEntityId
                         );
                     }
                     catch (Exception notifyEx)
@@ -755,28 +674,37 @@ namespace MyApi.Modules.Projects.Services
 
         #region Task Statistics
 
-        public async Task<TaskStatisticsDto> GetTaskStatisticsAsync(int? projectId = null)
+        public async Task<TaskStatisticsDto> GetTaskStatisticsAsync(string? entityType = null, int? entityId = null)
         {
             try
             {
                 var query = _context.ProjectTasks.AsQueryable();
 
-                if (projectId.HasValue)
-                    query = query.Where(t => t.ProjectId == projectId.Value);
+                if (!string.IsNullOrEmpty(entityType))
+                    query = query.Where(t => t.RelatedEntityType == entityType);
+                
+                if (entityId.HasValue)
+                    query = query.Where(t => t.RelatedEntityId == entityId.Value);
 
                 var totalTasks = await query.CountAsync();
                 var overdueTasks = await query.CountAsync(t => t.DueDate.HasValue && t.DueDate.Value < DateTime.UtcNow);
 
-                var priorityCounts = await query
-                    .GroupBy(t => t.Priority ?? "none")
-                    .Select(g => new { Priority = g.Key, Count = g.Count() })
-                    .ToDictionaryAsync(x => x.Priority, x => x.Count);
+                var statusCounts = await query
+                    .GroupBy(t => t.Status ?? "open")
+                    .Select(g => new { Status = g.Key, Count = g.Count() })
+                    .ToDictionaryAsync(x => x.Status, x => x.Count);
+
+                var typeCounts = await query
+                    .GroupBy(t => t.TaskType ?? "follow-up")
+                    .Select(g => new { Type = g.Key, Count = g.Count() })
+                    .ToDictionaryAsync(x => x.Type, x => x.Count);
 
                 return new TaskStatisticsDto
                 {
                     TotalTasks = totalTasks,
                     OverdueTasks = overdueTasks,
-                    TasksByPriority = priorityCounts
+                    TasksByStatus = statusCounts,
+                    TasksByType = typeCounts
                 };
             }
             catch (Exception ex)
@@ -805,17 +733,6 @@ namespace MyApi.Modules.Projects.Services
                 if (bulkUpdateDto.TaskIds == null || !bulkUpdateDto.TaskIds.Any())
                     return false;
 
-                // Find the column that matches the status/name
-                var targetColumn = await _context.ProjectColumns
-                    .Where(c => c.Name == bulkUpdateDto.Status)
-                    .FirstOrDefaultAsync();
-
-                if (targetColumn == null)
-                {
-                    _logger.LogWarning("Column with name {Status} not found for bulk status update", bulkUpdateDto.Status);
-                    return false;
-                }
-
                 var tasks = await _context.ProjectTasks
                     .Where(t => bulkUpdateDto.TaskIds.Contains(t.Id))
                     .ToListAsync();
@@ -826,7 +743,7 @@ namespace MyApi.Modules.Projects.Services
                 var now = DateTime.UtcNow;
                 foreach (var task in tasks)
                 {
-                    task.ColumnId = targetColumn.Id;
+                    task.Status = bulkUpdateDto.Status;
                     task.ModifiedDate = now;
                     task.ModifiedBy = updatedByUser;
                 }
@@ -877,22 +794,17 @@ namespace MyApi.Modules.Projects.Services
                 Id = task.Id,
                 Title = task.Title,
                 Description = task.Description,
-                ProjectId = task.ProjectId,
-                ProjectName = task.Project?.Name ?? string.Empty,
-                ColumnId = task.ColumnId,
-                ColumnName = task.Column?.Name ?? string.Empty,
-                ColumnColor = task.Column?.Color,
-                Priority = task.Priority,
+                TaskType = task.TaskType,
+                Status = task.Status,
+                RelatedEntityType = task.RelatedEntityType,
+                RelatedEntityId = task.RelatedEntityId,
                 DueDate = task.DueDate,
                 AssignedUserId = task.AssignedUserId,
                 AssignedUserName = assignedUserName,
-                DisplayOrder = task.DisplayOrder,
                 CreatedDate = task.CreatedDate,
                 CreatedBy = task.CreatedBy,
                 ModifiedDate = task.ModifiedDate,
-                ModifiedBy = task.ModifiedBy,
-                CommentsCount = task.Comments?.Count ?? 0,
-                AttachmentsCount = task.TaskAttachments?.Count ?? 0
+                ModifiedBy = task.ModifiedBy
             };
         }
 
