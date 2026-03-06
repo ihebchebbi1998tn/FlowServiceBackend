@@ -263,14 +263,13 @@ namespace MyApi.Modules.Projects.Services
             // Get the parent task info
             var checklist = item.Checklist;
             int? projectId = null;
-            int? columnId = null;
 
             if (checklist.ProjectTaskId.HasValue)
             {
                 var parentTask = await _context.ProjectTasks.FindAsync(checklist.ProjectTaskId.Value);
-                if (parentTask != null && parentTask.RelatedEntityType == "project" && int.TryParse(parentTask.RelatedEntityId, out var parsedProjectId))
+                if (parentTask != null && parentTask.RelatedEntityType == "project" && parentTask.RelatedEntityId.HasValue)
                 {
-                    projectId = parsedProjectId;
+                    projectId = parentTask.RelatedEntityId.Value;
                 }
             }
 
@@ -282,7 +281,7 @@ namespace MyApi.Modules.Projects.Services
                     Title = item.Title,
                     Description = $"Created from checklist: {checklist.Title}",
                     RelatedEntityType = "project",
-                    RelatedEntityId = projectId.Value.ToString(),
+                    RelatedEntityId = projectId.Value,
                     Status = "open",
                     TaskType = "other",
                     CreatedBy = createdBy,

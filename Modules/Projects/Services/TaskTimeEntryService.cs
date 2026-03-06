@@ -173,8 +173,7 @@ namespace MyApi.Modules.Projects.Services
         public async Task<List<TaskTimeEntryResponseDto>> GetTimeEntriesByProjectAsync(int projectId, DateTime? fromDate = null, DateTime? toDate = null)
         {
             var query = _context.TaskTimeEntries
-                .Include(e => e.ProjectTask)
-                .Where(e => e.ProjectTask != null && e.ProjectTask.RelatedEntityType == "project" && e.ProjectTask.RelatedEntityId == projectId.ToString());
+                .Where(e => e.ProjectTask != null && e.ProjectTask.RelatedEntityType == "project" && e.ProjectTask.RelatedEntityId == projectId);
 
             if (fromDate.HasValue)
                 query = query.Where(e => e.StartTime >= fromDate.Value);
@@ -205,9 +204,7 @@ namespace MyApi.Modules.Projects.Services
             if (query.UserId.HasValue)
                 queryable = queryable.Where(e => e.UserId == query.UserId);
 
-            if (query.ProjectId.HasValue)
-                queryable = queryable.Include(e => e.ProjectTask)
-                    .Where(e => e.ProjectTask != null && e.ProjectTask.RelatedEntityType == "project" && e.ProjectTask.RelatedEntityId == query.ProjectId.Value.ToString());
+                    .Where(e => e.ProjectTask != null && e.ProjectTask.RelatedEntityType == "project" && e.ProjectTask.RelatedEntityId == query.ProjectId);
 
             if (query.FromDate.HasValue)
                 queryable = queryable.Where(e => e.StartTime >= query.FromDate.Value);

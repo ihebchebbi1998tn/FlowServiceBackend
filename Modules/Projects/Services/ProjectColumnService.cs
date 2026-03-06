@@ -166,21 +166,6 @@ namespace MyApi.Modules.Projects.Services
 
                         if (targetColumn == null)
                             throw new InvalidOperationException("Target column not found or doesn't belong to the same project");
-
-                        // Move tasks to target column
-                        var nextDisplayOrder = await GetNextTaskDisplayOrderInColumnAsync(moveTasksToColumnId.Value);
-                        foreach (var task in tasksInColumn)
-                        {
-                            task.ColumnId = moveTasksToColumnId.Value;
-                            task.DisplayOrder = nextDisplayOrder++;
-                            task.ModifiedBy = deletedByUser;
-                            task.ModifiedDate = DateTime.UtcNow;
-                        }
-                    }
-                    else
-                    {
-                        // Delete all tasks in the column
-                        _context.ProjectTasks.RemoveRange(tasksInColumn);
                     }
                 }
 
@@ -269,8 +254,7 @@ namespace MyApi.Modules.Projects.Services
 
         public async Task<bool> CanDeleteColumnAsync(int columnId)
         {
-            // Check if column has tasks
-            var hasActiveTasks = false; // Stubbed
+
 
             // Check if it's the only column in the project
             var column = await _context.ProjectColumns.FindAsync(columnId);
@@ -284,9 +268,9 @@ namespace MyApi.Modules.Projects.Services
             return columnCount > 1;
         }
 
-        public async Task<int> GetColumnTaskCountAsync(int columnId)
+        public Task<int> GetColumnTaskCountAsync(int columnId)
         {
-            return 0;
+            return Task.FromResult(0);
         }
 
         public async Task<bool> CreateDefaultColumnsAsync(int projectId, string createdByUser)
@@ -374,11 +358,11 @@ namespace MyApi.Modules.Projects.Services
             }
         }
 
-        private async Task<int> GetNextTaskDisplayOrderInColumnAsync(int columnId)
+        private Task<int> GetNextTaskDisplayOrderInColumnAsync(int columnId)
         {
             var maxDisplayOrder = 0;
 
-            return maxDisplayOrder + 1;
+            return Task.FromResult(maxDisplayOrder + 1);
         }
 
         private static ProjectColumnResponseDto MapToColumnDto(ProjectColumn column, int taskCount)
