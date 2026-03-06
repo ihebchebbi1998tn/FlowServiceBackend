@@ -33,7 +33,11 @@ namespace MyApi.Modules.Tenants.Controllers
             var loginType = User.FindFirst("login_type")?.Value;
             if (loginType != "admin") return null;
 
-            var userIdClaim = User.FindFirst("user_id")?.Value ?? User.FindFirst("sub")?.Value;
+            var userIdClaim = User.FindFirst("UserId")?.Value 
+                           ?? User.FindFirst("user_id")?.Value 
+                           ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value 
+                           ?? User.FindFirst("sub")?.Value;
+                           
             if (int.TryParse(userIdClaim, out var userId))
                 return userId;
 
