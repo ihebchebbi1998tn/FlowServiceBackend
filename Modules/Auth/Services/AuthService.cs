@@ -4,6 +4,9 @@ using MyApi.Modules.Auth.Models;
 using MyApi.Modules.Users.Models;
 using MyApi.Modules.WorkflowEngine.Services;
 using MyApi.Modules.Shared.Services;
+using MyApi.Modules.Tenants.Models;
+using MyApi.Modules.Tenants.Services;
+using MyApi.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
@@ -43,19 +46,22 @@ namespace MyApi.Modules.Auth.Services
         private readonly ILogger<AuthService> _logger;
         private readonly IDefaultWorkflowSeeder _workflowSeeder;
         private readonly IForgotEmailService _forgotEmailService;
+        private readonly TenantSeeder _tenantSeeder;
 
         public AuthService(
             ApplicationDbContext context, 
             IConfiguration configuration, 
             ILogger<AuthService> logger,
             IDefaultWorkflowSeeder workflowSeeder,
-            IForgotEmailService forgotEmailService)
+            IForgotEmailService forgotEmailService,
+            TenantSeeder tenantSeeder)
         {
             _context = context;
             _configuration = configuration;
             _logger = logger;
             _workflowSeeder = workflowSeeder;
             _forgotEmailService = forgotEmailService;
+            _tenantSeeder = tenantSeeder;
         }
 
         public async Task<AuthResponseDto> LoginAsync(LoginRequestDto loginDto)
@@ -638,7 +644,60 @@ namespace MyApi.Modules.Auth.Services
                 if (!string.IsNullOrEmpty(updateDto.Preferences))
                     user.PreferencesJson = updateDto.Preferences;
                 if (updateDto.OnboardingCompleted.HasValue)
+                {
+                    bool wasAlreadyCompleted = user.OnboardingCompleted;
                     user.OnboardingCompleted = updateDto.OnboardingCompleted.Value;
+                    
+                    // If Onboarding has just been completed, create the default tenant
+                    if (updateDto.OnboardingCompleted.Value && !wasAlreadyCompleted)
+                    {
+                        var hasTenants = await _context.Tenants.AnyAsync(t => t.MainAdminUserId == user.Id);
+                        
+                        if (!hasTenants)
+                        {
+                            var companyNameStr = !string.IsNullOrWhiteSpace(user.CompanyName) ? user.CompanyName : "Default Company";
+                            
+                            // Create a url-friendly slug
+                            string slug = System.Text.RegularExpressions.Regex.Replace(companyNameStr.ToLower(), @"[^a-z0-9\s-]", "");
+                            slug = System.Text.RegularExpressions.Regex.Replace(slug, @"\s+", "-").Trim('-');
+                            
+                            // Handle potential slug collision
+                            var slugExists = await _context.Tenants.AnyAsync(t => t.Slug == slug);
+                            if (slugExists) slug += "-" + user.Id;
+                            
+                            var newTenant = new Tenant
+                            {
+                                MainAdminUserId = user.Id,
+                                Slug = slug,
+                                CompanyName = companyNameStr,
+                                CompanyLogoUrl = user.CompanyLogoUrl,
+                                CompanyWebsite = user.CompanyWebsite,
+                                CompanyCountry = user.Country,
+                                Industry = user.Industry,
+                                IsActive = true,
+                                IsDefault = true,
+                                CreatedAt = DateTime.UtcNow
+                            };
+                            
+                            _context.Tenants.Add(newTenant);
+                            
+                            // Save so we obtain an Id for the Tenant Seeder
+                            await _context.SaveChangesAsync();
+                            
+                            try
+                            {
+                                await _tenantSeeder.SeedForNewTenantAsync(newTenant.Id);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "Tenant seeding failed for auto-created tenant {Slug} (Id={Id})", newTenant.Slug, newTenant.Id);
+                            }
+                            
+                            TenantSlugCache.Refresh(_context);
+                            _logger.LogInformation("Auto-created default Tenant {Slug} for new admin {UserId}", newTenant.Slug, user.Id);
+                        }
+                    }
+                }
 
                 user.UpdatedAt = DateTime.UtcNow;
                 await _context.SaveChangesAsync();
