@@ -204,6 +204,8 @@ namespace MyApi.Modules.Projects.Services
             if (query.UserId.HasValue)
                 queryable = queryable.Where(e => e.UserId == query.UserId);
 
+            if (query.ProjectId.HasValue)
+                queryable = queryable.Include(e => e.ProjectTask)
                     .Where(e => e.ProjectTask != null && e.ProjectTask.RelatedEntityType == "project" && e.ProjectTask.RelatedEntityId == query.ProjectId);
 
             if (query.FromDate.HasValue)
