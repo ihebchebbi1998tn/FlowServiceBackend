@@ -125,7 +125,6 @@ namespace MyApi.Modules.Projects.Services
             try
             {
                 var project = await _context.Projects
-                    .Include(p => p.Columns)
                     .Include(p => p.Contact)
                     .Where(p => p.Id == id)
                     .FirstOrDefaultAsync();
@@ -288,7 +287,6 @@ namespace MyApi.Modules.Projects.Services
             {
                 var searchLower = searchTerm.ToLower();
                 var projects = await _context.Projects
-                    .Include(p => p.Columns)
                     .Include(p => p.Contact)
                     .Where(p => p.Name.ToLower().Contains(searchLower) ||
                                (p.Description != null && p.Description.ToLower().Contains(searchLower)))
@@ -461,13 +459,7 @@ namespace MyApi.Modules.Projects.Services
                 CreatedBy = project.CreatedBy,
                 ModifiedDate = project.ModifiedDate,
                 ModifiedBy = project.ModifiedBy,
-                Columns = project.Columns?.Select(c => new ProjectColumnDto
-                {
-                    Id = c.Id,
-                    Name = c.Name,
-                    DisplayOrder = c.DisplayOrder,
-                    Color = c.Color
-                }).OrderBy(c => c.DisplayOrder).ToList() ?? new List<ProjectColumnDto>()
+                Columns = new List<ProjectColumnDto>()
             };
         }
     }

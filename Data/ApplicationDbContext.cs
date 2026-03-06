@@ -110,7 +110,6 @@ namespace MyApi.Data
 
         // Tasks Module
         public DbSet<Project> Projects { get; set; }
-        public DbSet<ProjectColumn> ProjectColumns { get; set; }
         public DbSet<ProjectNote> ProjectNotes { get; set; }
         public DbSet<ProjectActivity> ProjectActivities { get; set; }
         public DbSet<ProjectTask> ProjectTasks { get; set; }
@@ -539,18 +538,6 @@ namespace MyApi.Data
                     .OnDelete(DeleteBehavior.SetNull);
             });
 
-            // Project Column entity configuration - matches actual ProjectColumn model
-            modelBuilder.Entity<ProjectColumn>(entity =>
-            {
-                entity.HasKey(e => e.Id);
-                entity.Property(e => e.Name).IsRequired().HasMaxLength(255);
-                entity.Property(e => e.Color).HasMaxLength(7);
-                
-                entity.HasOne(e => e.Project)
-                    .WithMany(p => p.Columns)
-                    .HasForeignKey(e => e.ProjectId)
-                    .OnDelete(DeleteBehavior.Cascade);
-            });
 
             // Project Task entity configuration - simplified to match actual database
             modelBuilder.Entity<ProjectTask>(entity =>

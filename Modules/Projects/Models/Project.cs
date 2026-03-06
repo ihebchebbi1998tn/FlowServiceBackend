@@ -49,7 +49,6 @@ namespace MyApi.Modules.Projects.Models
         public string? ModifiedBy { get; set; }
 
         // Navigation properties
-        public virtual ICollection<ProjectColumn> Columns { get; set; } = new List<ProjectColumn>();
         public virtual ICollection<ProjectTask> Tasks { get; set; } = new List<ProjectTask>();
         public virtual Contact? Contact { get; set; }
     }
