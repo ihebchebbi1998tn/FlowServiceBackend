@@ -295,12 +295,12 @@ namespace MyApi.Modules.Projects.Services
                 {
                     Title = source.Title,
                     Description = source.Description,
-                    ProjectId = source.ProjectId,
-                    ColumnId = source.ColumnId,
-                    Priority = source.Priority,
+                    RelatedEntityType = source.RelatedEntityType,
+                    RelatedEntityId = source.RelatedEntityId,
+                    Status = source.Status,
+                    TaskType = source.TaskType,
                     AssignedUserId = source.AssignedUserId,
                     DueDate = recurring.NextOccurrence?.AddDays(1),
-                    DisplayOrder = 0,
                     CreatedDate = DateTime.UtcNow,
                     CreatedBy = "RecurringTaskService"
                 };

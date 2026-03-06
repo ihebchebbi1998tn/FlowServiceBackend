@@ -174,7 +174,7 @@ namespace MyApi.Modules.Projects.Services
         {
             var query = _context.TaskTimeEntries
                 .Include(e => e.ProjectTask)
-                .Where(e => e.ProjectTask != null && e.ProjectTask.ProjectId == projectId);
+                .Where(e => e.ProjectTask != null && e.ProjectTask.RelatedEntityType == "project" && e.ProjectTask.RelatedEntityId == projectId.ToString());
 
             if (fromDate.HasValue)
                 query = query.Where(e => e.StartTime >= fromDate.Value);
@@ -207,7 +207,7 @@ namespace MyApi.Modules.Projects.Services
 
             if (query.ProjectId.HasValue)
                 queryable = queryable.Include(e => e.ProjectTask)
-                    .Where(e => e.ProjectTask != null && e.ProjectTask.ProjectId == query.ProjectId);
+                    .Where(e => e.ProjectTask != null && e.ProjectTask.RelatedEntityType == "project" && e.ProjectTask.RelatedEntityId == query.ProjectId.Value.ToString());
 
             if (query.FromDate.HasValue)
                 queryable = queryable.Where(e => e.StartTime >= query.FromDate.Value);

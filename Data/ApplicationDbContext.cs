@@ -558,19 +558,8 @@ namespace MyApi.Data
                 entity.HasKey(e => e.Id);
                 entity.Property(e => e.Title).IsRequired().HasMaxLength(255);
                 entity.Property(e => e.Description).HasMaxLength(2000);
-                entity.Property(e => e.Priority).HasMaxLength(10);
                 entity.Property(e => e.CreatedBy).HasMaxLength(255);
                 entity.Property(e => e.ModifiedBy).HasMaxLength(255);
-                
-                entity.HasOne(e => e.Project)
-                    .WithMany(p => p.Tasks)
-                    .HasForeignKey(e => e.ProjectId)
-                    .OnDelete(DeleteBehavior.Cascade);
-                
-                entity.HasOne(e => e.Column)
-                    .WithMany(c => c.Tasks)
-                    .HasForeignKey(e => e.ColumnId)
-                    .OnDelete(DeleteBehavior.Restrict);
             });
 
             // Daily Task entity configuration - simplified to match actual database

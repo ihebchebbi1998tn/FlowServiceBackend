@@ -28,8 +28,7 @@ namespace MyApi.Modules.Projects.Services
                 var columnDtos = new List<ProjectColumnResponseDto>();
                 foreach (var column in columns)
                 {
-                    var taskCount = await _context.ProjectTasks
-                        .CountAsync(t => t.ColumnId == column.Id);
+                    var taskCount = 0; // Stubbed, tasks no longer use ColumnId
 
                     columnDtos.Add(MapToColumnDto(column, taskCount));
                 }
@@ -58,8 +57,7 @@ namespace MyApi.Modules.Projects.Services
                 if (column == null)
                     return null;
 
-                var taskCount = await _context.ProjectTasks
-                    .CountAsync(t => t.ColumnId == id);
+                var taskCount = 0; // Stubbed, tasks no longer use ColumnId
 
                 return MapToColumnDto(column, taskCount);
             }
@@ -130,8 +128,7 @@ namespace MyApi.Modules.Projects.Services
 
                 await _context.SaveChangesAsync();
 
-                var taskCount = await _context.ProjectTasks
-                    .CountAsync(t => t.ColumnId == id);
+                var taskCount = 0; // Stubbed
 
                 _logger.LogInformation("Column updated successfully with ID {ColumnId}", id);
                 return MapToColumnDto(column, taskCount);
@@ -156,9 +153,7 @@ namespace MyApi.Modules.Projects.Services
                     return false;
 
                 // Handle tasks in the column
-                var tasksInColumn = await _context.ProjectTasks
-                    .Where(t => t.ColumnId == id)
-                    .ToListAsync();
+                var tasksInColumn = new List<ProjectTask>();
 
                 if (tasksInColumn.Any())
                 {
@@ -275,8 +270,7 @@ namespace MyApi.Modules.Projects.Services
         public async Task<bool> CanDeleteColumnAsync(int columnId)
         {
             // Check if column has tasks
-            var hasActiveTasks = await _context.ProjectTasks
-                .AnyAsync(t => t.ColumnId == columnId);
+            var hasActiveTasks = false; // Stubbed
 
             // Check if it's the only column in the project
             var column = await _context.ProjectColumns.FindAsync(columnId);
@@ -292,8 +286,7 @@ namespace MyApi.Modules.Projects.Services
 
         public async Task<int> GetColumnTaskCountAsync(int columnId)
         {
-            return await _context.ProjectTasks
-                .CountAsync(t => t.ColumnId == columnId);
+            return 0;
         }
 
         public async Task<bool> CreateDefaultColumnsAsync(int projectId, string createdByUser)
@@ -383,9 +376,7 @@ namespace MyApi.Modules.Projects.Services
 
         private async Task<int> GetNextTaskDisplayOrderInColumnAsync(int columnId)
         {
-            var maxDisplayOrder = await _context.ProjectTasks
-                .Where(t => t.ColumnId == columnId)
-                .MaxAsync(t => (int?)t.DisplayOrder) ?? 0;
+            var maxDisplayOrder = 0;
 
             return maxDisplayOrder + 1;
         }
