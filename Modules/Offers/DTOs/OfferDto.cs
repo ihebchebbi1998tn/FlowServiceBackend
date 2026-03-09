@@ -58,6 +58,9 @@ namespace MyApi.Modules.Offers.DTOs
         public string? ConvertedToSaleId { get; set; }
         public string? ConvertedToServiceOrderId { get; set; }
         public DateTime? ConvertedAt { get; set; }
+        
+        // Tracking
+        public int SentCount { get; set; }
     }
 
     public class ContactSummaryDto

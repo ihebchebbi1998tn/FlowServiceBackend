@@ -163,6 +163,9 @@ namespace MyApi.Modules.Offers.Models
         [Column("ConvertedAt")]
         public DateTime? ConvertedAt { get; set; }
 
+        [Column("SentCount")]
+        public int SentCount { get; set; } = 0;
+
         // Contact geolocation (copied from contact for map display)
         [Column("ContactLatitude", TypeName = "decimal(10,7)")]
         public decimal? ContactLatitude { get; set; }

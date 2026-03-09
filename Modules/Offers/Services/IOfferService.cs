@@ -25,6 +25,7 @@ namespace MyApi.Modules.Offers.Services
         Task<OfferDto> RenewOfferAsync(int id, string userId);
         Task<object> ConvertOfferAsync(int id, ConvertOfferDto convertDto, string userId);
         Task<OfferStatsDto> GetOfferStatsAsync(DateTime? dateFrom = null, DateTime? dateTo = null);
+        Task<OfferDto> MarkOfferAsSentAsync(int id, string userId);
         
         // Offer Items
         Task<OfferItemDto> AddOfferItemAsync(int offerId, CreateOfferItemDto itemDto);

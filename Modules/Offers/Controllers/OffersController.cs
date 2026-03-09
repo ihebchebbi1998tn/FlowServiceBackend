@@ -207,6 +207,30 @@ namespace MyApi.Modules.Offers.Controllers
             }
         }
 
+        [HttpPost("{id:int}/send")]
+        public async Task<IActionResult> MarkOfferAsSent(int id)
+        {
+            try
+            {
+                var userId = GetCurrentUserId();
+                var sentOffer = await _offerService.MarkOfferAsSentAsync(id, userId);
+
+                await _systemLogService.LogSuccessAsync($"Offer marked as sent: {sentOffer.OfferNumber}", "Offers", "update", userId, GetCurrentUserName(), "Offer", id.ToString());
+
+                return Ok(new { success = true, data = sentOffer });
+            }
+            catch (KeyNotFoundException)
+            {
+                return NotFound(new { success = false, error = new { code = "OFFER_NOT_FOUND", message = "Offer not found" } });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error marking offer {OfferId} as sent", id);
+                await _systemLogService.LogErrorAsync($"Failed to mark offer {id} as sent", "Offers", "update", GetCurrentUserId(), GetCurrentUserName(), "Offer", id.ToString(), ex.Message);
+                return StatusCode(500, new { success = false, error = new { code = "INTERNAL_ERROR", message = "An error occurred while marking the offer as sent" } });
+            }
+        }
+
         [HttpPost("{id:int}/convert")]
         public async Task<IActionResult> ConvertOffer(int id, [FromBody] ConvertOfferDto convertDto)
         {
