@@ -26,18 +26,17 @@ namespace MyApi.Modules.Projects.DTOs
         public int Id { get; set; }
         public string Title { get; set; } = string.Empty;
         public string? Description { get; set; }
-        public DateTime DueDate { get; set; }
-        public bool IsCompleted { get; set; }
-        public DateTime? CompletedDate { get; set; }
+        public string TaskType { get; set; } = string.Empty;
+        public string Status { get; set; } = string.Empty;
+        public string? RelatedEntityType { get; set; }
+        public int? RelatedEntityId { get; set; }
+        public DateTime? DueDate { get; set; }
         public int? AssignedUserId { get; set; }
         public string? AssignedUserName { get; set; }
-        public string? Priority { get; set; }
-        /// <summary>
-        /// Task status: todo, in-progress, done
-        /// </summary>
-        public string Status { get; set; } = "todo";
         public DateTime CreatedDate { get; set; }
         public string CreatedBy { get; set; } = string.Empty;
+        public DateTime? ModifiedDate { get; set; }
+        public string? ModifiedBy { get; set; }
     }
 
     public class TaskListResponseDto
@@ -86,18 +85,20 @@ namespace MyApi.Modules.Projects.DTOs
         public string? Description { get; set; }
 
         [Required]
-        public DateTime DueDate { get; set; }
+        [StringLength(50)]
+        public string TaskType { get; set; } = "follow-up";
+
+        [StringLength(50)]
+        public string Status { get; set; } = "open";
+
+        [StringLength(50)]
+        public string? RelatedEntityType { get; set; }
+
+        public int? RelatedEntityId { get; set; }
+
+        public DateTime? DueDate { get; set; }
 
         public int? AssignedUserId { get; set; }
-
-        [StringLength(20)]
-        public string? Priority { get; set; }
-
-        /// <summary>
-        /// Task status: todo, in-progress, done. Defaults to "todo"
-        /// </summary>
-        [StringLength(20)]
-        public string? Status { get; set; }
     }
 
     public class UpdateProjectTaskRequestDto
@@ -130,14 +131,21 @@ namespace MyApi.Modules.Projects.DTOs
 
         public string? Description { get; set; }
 
+        [StringLength(50)]
+        public string? TaskType { get; set; }
+
+        [StringLength(50)]
+        public string? Status { get; set; }
+
+        [StringLength(50)]
+        public string? RelatedEntityType { get; set; }
+
+        public int? RelatedEntityId { get; set; }
+
         public DateTime? DueDate { get; set; }
 
-        public bool? IsCompleted { get; set; }
-
-        public DateTime? CompletedDate { get; set; }
-
         public int? AssignedUserId { get; set; }
-
+        
         [StringLength(20)]
         public string? Priority { get; set; }
 

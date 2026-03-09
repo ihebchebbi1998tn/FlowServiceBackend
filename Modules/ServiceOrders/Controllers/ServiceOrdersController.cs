@@ -290,7 +290,8 @@ namespace MyApi.Modules.ServiceOrders.Controllers
         {
             try
             {
-                var result = await _serviceOrderService.DeleteAsync(id);
+                var userId = GetCurrentUserId();
+                var result = await _serviceOrderService.DeleteAsync(id, userId);
                 if (!result)
                     return NotFound(new { success = false, error = new { code = "NOT_FOUND", message = "Service order not found" } });
 

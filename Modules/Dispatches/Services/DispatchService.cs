@@ -815,28 +815,24 @@ namespace MyApi.Modules.Dispatches.Services
                 allJobIds.Add(legacyJobId);
             }
 
-            // Hard delete all child records first
+            // Soft delete all child records first
             if (dispatch.DispatchJobs != null && dispatch.DispatchJobs.Any())
-                _db.Set<DispatchJob>().RemoveRange(dispatch.DispatchJobs);
+            {
+                foreach (var dj in dispatch.DispatchJobs) dj.IsDeleted = true;
+            }
             if (dispatch.AssignedTechnicians.Any())
-                _db.Set<DispatchTechnician>().RemoveRange(dispatch.AssignedTechnicians);
-            if (dispatch.TimeEntries.Any())
-                _db.TimeEntries.RemoveRange(dispatch.TimeEntries);
-            if (dispatch.Expenses.Any())
-                _db.DispatchExpenses.RemoveRange(dispatch.Expenses);
-            if (dispatch.MaterialsUsed.Any())
-                _db.DispatchMaterials.RemoveRange(dispatch.MaterialsUsed);
-            if (dispatch.Attachments.Any())
-                _db.DispatchAttachments.RemoveRange(dispatch.Attachments);
-            if (dispatch.Notes.Any())
-                _db.DispatchNotes.RemoveRange(dispatch.Notes);
+            {
+                foreach (var dt in dispatch.AssignedTechnicians) dt.IsDeleted = true;
+            }
 
-            // Hard delete the dispatch itself
-            _db.Dispatches.Remove(dispatch);
+            // Soft delete the dispatch itself
+            dispatch.IsDeleted = true;
+            dispatch.DeletedAt = DateTime.UtcNow;
+            dispatch.DeletedBy = userId;
+            
             await _db.SaveChangesAsync();
 
-            _logger.LogInformation(
-                "[DISPATCH-DELETE] Hard deleted dispatch {DispatchId} (JobId: {JobId}, SO: {ServiceOrderId}, LinkedJobs: {JobCount}) by user {UserId}",
+                "[DISPATCH-DELETE] Soft deleted dispatch {DispatchId} (JobId: {JobId}, SO: {ServiceOrderId}, LinkedJobs: {JobCount}) by user {UserId}",
                 dispatchId, jobIdStr, serviceOrderId, allJobIds.Count, userId);
 
             // Reset ALL associated jobs back to 'unscheduled'

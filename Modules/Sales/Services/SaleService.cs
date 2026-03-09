@@ -44,7 +44,7 @@ namespace MyApi.Modules.Sales.Services
             string sortOrder = "desc"
         )
         {
-            var query = _context.Sales.AsNoTracking().AsQueryable();
+            var query = _context.Sales.AsNoTracking().Where(s => !s.IsDeleted).AsQueryable();
 
             if (!string.IsNullOrEmpty(status))
                 query = query.Where(s => s.Status == status);
@@ -115,7 +115,7 @@ namespace MyApi.Modules.Sales.Services
             var sale = await _context.Sales
                 .AsNoTracking()
                 .Include(s => s.Items)
-                .FirstOrDefaultAsync(s => s.Id == id);
+                .FirstOrDefaultAsync(s => s.Id == id && !s.IsDeleted);
 
             if (sale == null) return null;
             
@@ -485,7 +485,7 @@ namespace MyApi.Modules.Sales.Services
                     .Include(s => s.Items)
                     .FirstOrDefaultAsync(s => s.Id == id);
                     
-                if (sale == null)
+                if (sale == null || sale.IsDeleted)
                     return false;
 
                 // Get user name for activity logging
@@ -548,7 +548,9 @@ namespace MyApi.Modules.Sales.Services
                     }
                 }
 
-                _context.Sales.Remove(sale);
+                sale.IsDeleted = true;
+                sale.DeletedAt = DateTime.UtcNow;
+                sale.DeletedBy = userId;
                 await _context.SaveChangesAsync();
                 await transaction.CommitAsync();
                 return true;

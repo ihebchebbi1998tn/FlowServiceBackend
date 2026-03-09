@@ -21,23 +21,23 @@ namespace MyApi.Modules.Projects.Models
 
         public string? Description { get; set; }
 
-        [Required]
-        public DateTime DueDate { get; set; }
-
-        public bool IsCompleted { get; set; } = false;
-
-        public DateTime? CompletedDate { get; set; }
+        public DateTime? DueDate { get; set; }
 
         public int? AssignedUserId { get; set; }
 
-        [StringLength(20)]
-        public string? Priority { get; set; }
+        // New Activity Fields
+        [Required]
+        [StringLength(50)]
+        public string TaskType { get; set; } = "follow-up"; // call, visit, meeting, follow-up
 
-        /// <summary>
-        /// Task status: todo, in-progress, done
-        /// </summary>
-        [StringLength(20)]
-        public string Status { get; set; } = "todo";
+        [Required]
+        [StringLength(50)]
+        public string Status { get; set; } = "open"; // open, in progress, completed, cancelled
+
+        [StringLength(50)]
+        public string? RelatedEntityType { get; set; } // project, service_order, company, etc.
+
+        public int? RelatedEntityId { get; set; }
 
         public DateTime CreatedDate { get; set; } = DateTime.UtcNow;
 

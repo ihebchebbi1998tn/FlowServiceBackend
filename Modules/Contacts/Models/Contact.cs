@@ -5,9 +5,12 @@ using MyApi.Infrastructure;
 namespace MyApi.Modules.Contacts.Models
 {
     [Table("Contacts")]
-    public class Contact : ITenantEntity
+    public class Contact : ITenantEntity, MyApi.Modules.Shared.Models.ISoftDeletable
     {
         public int TenantId { get; set; }
+        
+        public DateTime? DeletedAt { get; set; }
+        public string? DeletedBy { get; set; }
 
         [Key]
         [DatabaseGenerated(DatabaseGeneratedOption.Identity)]

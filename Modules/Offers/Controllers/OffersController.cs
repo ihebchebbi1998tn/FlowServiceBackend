@@ -164,7 +164,8 @@ namespace MyApi.Modules.Offers.Controllers
         {
             try
             {
-                var result = await _offerService.DeleteOfferAsync(id);
+                var userId = GetCurrentUserId();
+                var result = await _offerService.DeleteOfferAsync(id, userId);
                 if (!result)
                 {
                     return NotFound(new { success = false, error = new { code = "OFFER_NOT_FOUND", message = "Offer not found" } });

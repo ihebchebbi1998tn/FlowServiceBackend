@@ -296,7 +296,7 @@ namespace MyApi.Modules.ServiceOrders.Services
             string sortOrder = "desc"
         )
         {
-            var query = _context.ServiceOrders.AsNoTracking().AsQueryable();
+            var query = _context.ServiceOrders.AsNoTracking().Where(s => !s.IsDeleted).AsQueryable();
 
             if (!string.IsNullOrEmpty(status))
                 query = query.Where(s => s.Status == status);
@@ -419,7 +419,7 @@ namespace MyApi.Modules.ServiceOrders.Services
 
         public async Task<ServiceOrderDto?> GetServiceOrderByIdAsync(int id, bool includeJobs = true)
         {
-            var query = _context.ServiceOrders.AsNoTracking().AsQueryable();
+            var query = _context.ServiceOrders.AsNoTracking().Where(s => !s.IsDeleted).AsQueryable();
             if (includeJobs)
                 query = query.Include(s => s.Jobs).Include(s => s.Materials);
 
@@ -684,25 +684,18 @@ namespace MyApi.Modules.ServiceOrders.Services
             return result!;
         }
 
-        public async Task<bool> DeleteAsync(int id)
+        public async Task<bool> DeleteAsync(int id, string userId)
         {
             var serviceOrder = await _context.ServiceOrders.FindAsync(id);
-            if (serviceOrder == null)
+            if (serviceOrder == null || serviceOrder.IsDeleted)
                 return false;
 
             // Store sale ID before deletion for resetting
             var saleId = serviceOrder.SaleId;
 
-            // Delete related entities first
-            var jobs = await _context.ServiceOrderJobs.Where(j => j.ServiceOrderId == id).ToListAsync();
-            var materials = await _context.ServiceOrderMaterials.Where(m => m.ServiceOrderId == id).ToListAsync();
-            var notes = await _context.ServiceOrderNotes.Where(n => n.ServiceOrderId == id).ToListAsync();
-            
-            _context.ServiceOrderJobs.RemoveRange(jobs);
-            _context.ServiceOrderMaterials.RemoveRange(materials);
-            _context.ServiceOrderNotes.RemoveRange(notes);
-            
-            _context.ServiceOrders.Remove(serviceOrder);
+            serviceOrder.IsDeleted = true;
+            serviceOrder.DeletedAt = DateTime.UtcNow;
+            serviceOrder.DeletedBy = userId;
             await _context.SaveChangesAsync();
 
             // Reset the sale's serviceOrdersStatus if linked

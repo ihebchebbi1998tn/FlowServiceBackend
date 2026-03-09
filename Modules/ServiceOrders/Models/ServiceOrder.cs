@@ -5,9 +5,13 @@ using MyApi.Infrastructure;
 namespace MyApi.Modules.ServiceOrders.Models
 {
     [Table("ServiceOrders")]
-    public class ServiceOrder : ITenantEntity
+    public class ServiceOrder : ITenantEntity, MyApi.Modules.Shared.Models.ISoftDeletable
     {
         public int TenantId { get; set; }
+
+        public bool IsDeleted { get; set; } = false;
+        public DateTime? DeletedAt { get; set; }
+        public string? DeletedBy { get; set; }
 
         [Key]
         [Column("Id")]

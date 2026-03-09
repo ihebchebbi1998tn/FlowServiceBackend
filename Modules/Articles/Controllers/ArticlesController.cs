@@ -166,7 +166,8 @@ namespace MyApi.Modules.Articles.Controllers
         [HttpDelete("{id}")]
         public async Task<ActionResult> DeleteArticle(string id)
         {
-            var deleted = await _articleService.DeleteArticleAsync(id);
+            var userId = GetCurrentUserId();
+            var deleted = await _articleService.DeleteArticleAsync(id, userId);
             
             if (!deleted)
                 return NotFound(new { message = "Article not found" });

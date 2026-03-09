@@ -8,9 +8,12 @@ using MyApi.Modules.Contacts.Models;
 namespace MyApi.Modules.Dispatches.Models
 {
     [Table("Dispatches")]
-    public class Dispatch : ITenantEntity
+    public class Dispatch : ITenantEntity, MyApi.Modules.Shared.Models.ISoftDeletable
     {
         public int TenantId { get; set; }
+        
+        public DateTime? DeletedAt { get; set; }
+        public string? DeletedBy { get; set; }
         [Key]
         [Column("Id")]
         [DatabaseGenerated(DatabaseGeneratedOption.Identity)]

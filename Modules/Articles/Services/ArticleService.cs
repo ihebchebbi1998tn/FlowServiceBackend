@@ -35,7 +35,7 @@ namespace MyApi.Modules.Articles.Services
             string? sortBy = null,
             string? sortOrder = "asc")
         {
-            var query = _context.Set<Article>().AsNoTracking().AsQueryable();
+            var query = _context.Set<Article>().AsNoTracking().Where(a => !a.IsDeleted).AsQueryable();
 
             // Apply filters
             if (!string.IsNullOrEmpty(category))
@@ -97,7 +97,7 @@ namespace MyApi.Modules.Articles.Services
 
             var article = await _context.Set<Article>()
                 .AsNoTracking()
-                .FirstOrDefaultAsync(a => a.Id == articleId);
+                .FirstOrDefaultAsync(a => a.Id == articleId && !a.IsDeleted);
 
             return article != null ? MapArticleToDto(article) : null;
         }
@@ -150,7 +150,7 @@ namespace MyApi.Modules.Articles.Services
                 return null;
 
             var article = await _context.Set<Article>()
-                .FirstOrDefaultAsync(a => a.Id == articleId);
+                .FirstOrDefaultAsync(a => a.Id == articleId && !a.IsDeleted);
 
             if (article == null)
                 return null;
@@ -181,7 +181,7 @@ namespace MyApi.Modules.Articles.Services
             return MapArticleToDto(article);
         }
 
-        public async Task<bool> DeleteArticleAsync(string id)
+        public async Task<bool> DeleteArticleAsync(string id, string userId)
         {
             if (!int.TryParse(id, out int articleId))
                 return false;
@@ -189,10 +189,13 @@ namespace MyApi.Modules.Articles.Services
             var article = await _context.Set<Article>()
                 .FirstOrDefaultAsync(a => a.Id == articleId);
 
-            if (article == null)
+            if (article == null || article.IsDeleted)
                 return false;
 
-            _context.Set<Article>().Remove(article);
+            article.IsDeleted = true;
+            article.DeletedAt = DateTime.UtcNow;
+            article.DeletedBy = userId;
+            
             await _context.SaveChangesAsync();
 
             return true;

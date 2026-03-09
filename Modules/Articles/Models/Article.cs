@@ -6,9 +6,13 @@ using MyApi.Infrastructure;
 namespace MyApi.Modules.Articles.Models
 {
     [Table("Articles")]
-    public class Article : ITenantEntity
+    public class Article : ITenantEntity, MyApi.Modules.Shared.Models.ISoftDeletable
     {
         public int TenantId { get; set; }
+
+        public bool IsDeleted { get; set; } = false;
+        public DateTime? DeletedAt { get; set; }
+        public string? DeletedBy { get; set; }
 
         [Key]
         [DatabaseGenerated(DatabaseGeneratedOption.Identity)]

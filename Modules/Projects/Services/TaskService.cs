@@ -240,11 +240,12 @@ namespace MyApi.Modules.Projects.Services
                 {
                     Title = createDto.Title,
                     Description = createDto.Description,
+                    TaskType = createDto.TaskType,
+                    Status = createDto.Status ?? "open",
+                    RelatedEntityType = createDto.RelatedEntityType,
+                    RelatedEntityId = createDto.RelatedEntityId,
                     DueDate = createDto.DueDate,
                     AssignedUserId = createDto.AssignedUserId,
-                    Priority = createDto.Priority,
-                    Status = createDto.Status ?? "todo",
-                    IsCompleted = false,
                     CreatedBy = createdByUser,
                     CreatedDate = DateTime.UtcNow
                 };
@@ -280,44 +281,23 @@ namespace MyApi.Modules.Projects.Services
                 if (updateDto.Description != null)
                     task.Description = updateDto.Description;
 
+                if (!string.IsNullOrEmpty(updateDto.TaskType))
+                    task.TaskType = updateDto.TaskType;
+
+                if (!string.IsNullOrEmpty(updateDto.Status))
+                    task.Status = updateDto.Status;
+
+                if (updateDto.RelatedEntityType != null)
+                    task.RelatedEntityType = updateDto.RelatedEntityType;
+
+                if (updateDto.RelatedEntityId.HasValue)
+                    task.RelatedEntityId = updateDto.RelatedEntityId.Value;
+
                 if (updateDto.DueDate.HasValue)
                     task.DueDate = updateDto.DueDate.Value;
 
-                if (updateDto.IsCompleted.HasValue)
-                {
-                    task.IsCompleted = updateDto.IsCompleted.Value;
-                    // Auto-update status based on completion
-                    if (updateDto.IsCompleted.Value)
-                    {
-                        task.Status = "done";
-                        task.CompletedDate = DateTime.UtcNow;
-                    }
-                }
-
-                if (updateDto.CompletedDate.HasValue)
-                    task.CompletedDate = updateDto.CompletedDate.Value;
-
                 if (updateDto.AssignedUserId.HasValue)
                     task.AssignedUserId = updateDto.AssignedUserId.Value;
-
-                if (!string.IsNullOrEmpty(updateDto.Priority))
-                    task.Priority = updateDto.Priority;
-
-                // Handle status update
-                if (!string.IsNullOrEmpty(updateDto.Status))
-                {
-                    task.Status = updateDto.Status;
-                    // Sync IsCompleted with status
-                    task.IsCompleted = updateDto.Status == "done";
-                    if (updateDto.Status == "done" && !task.CompletedDate.HasValue)
-                    {
-                        task.CompletedDate = DateTime.UtcNow;
-                    }
-                    else if (updateDto.Status != "done")
-                    {
-                        task.CompletedDate = null;
-                    }
-                }
 
                 await _context.SaveChangesAsync();
 
@@ -366,8 +346,8 @@ namespace MyApi.Modules.Projects.Services
                 if (task == null)
                     return false;
 
-                task.IsCompleted = true;
-                task.CompletedDate = DateTime.UtcNow;
+                // Removed IsCompleted and CompletedDate
+                task.Status = "completed";
 
                 await _context.SaveChangesAsync();
 
@@ -810,13 +790,6 @@ namespace MyApi.Modules.Projects.Services
 
         private DailyTaskResponseDto MapToDailyTaskDto(DailyTask task)
         {
-            // Derive status from Status field, with fallback logic for IsCompleted
-            var status = task.Status ?? "todo";
-            if (task.IsCompleted && status != "done")
-            {
-                status = "done";
-            }
-
             // Get assigned user name - check both Users table and MainAdminUsers table
             string? assignedUserName = null;
             
@@ -847,13 +820,13 @@ namespace MyApi.Modules.Projects.Services
                 Id = task.Id,
                 Title = task.Title,
                 Description = task.Description,
+                TaskType = task.TaskType,
+                Status = task.Status,
+                RelatedEntityType = task.RelatedEntityType,
+                RelatedEntityId = task.RelatedEntityId,
                 DueDate = task.DueDate,
-                IsCompleted = task.IsCompleted,
-                CompletedDate = task.CompletedDate,
                 AssignedUserId = task.AssignedUserId,
                 AssignedUserName = assignedUserName,
-                Priority = task.Priority,
-                Status = status,
                 CreatedDate = task.CreatedDate,
                 CreatedBy = task.CreatedBy
             };

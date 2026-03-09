@@ -26,7 +26,7 @@ namespace MyApi.Modules.Contacts.Services
                     // Removed: .Include(c => c.TagAssignments).ThenInclude(ta => ta.Tag)
                     // Removed: .Include(c => c.ContactNotes)
                     // These are only needed for detail view, not lists
-                    .Where(c => c.IsActive);
+                    .Where(c => !c.IsDeleted && c.IsActive);
 
                 // Apply filters
                 if (searchRequest != null)
@@ -139,7 +139,7 @@ namespace MyApi.Modules.Contacts.Services
                     .Include(c => c.TagAssignments)
                         .ThenInclude(ta => ta.Tag)
                     .Include(c => c.ContactNotes)
-                    .Where(c => c.Id == id && c.IsActive)
+                    .Where(c => c.Id == id && !c.IsDeleted && c.IsActive)
                     .FirstOrDefaultAsync();
 
                 return contact != null ? MapToContactDto(contact) : null;
@@ -242,7 +242,7 @@ namespace MyApi.Modules.Contacts.Services
             try
             {
                 var contact = await _context.Contacts
-                    .Where(c => c.Id == id && c.IsActive)
+                    .Where(c => c.Id == id && !c.IsDeleted && c.IsActive)
                     .FirstOrDefaultAsync();
 
                 if (contact == null)
@@ -393,7 +393,7 @@ namespace MyApi.Modules.Contacts.Services
             try
             {
                 var contact = await _context.Contacts
-                    .Where(c => c.Id == id && c.IsActive)
+                    .Where(c => c.Id == id && !c.IsDeleted)
                     .FirstOrDefaultAsync();
 
                 if (contact == null)
@@ -401,14 +401,17 @@ namespace MyApi.Modules.Contacts.Services
                     return false;
                 }
 
-                // Soft delete by setting IsActive = false
-                contact.IsActive = false;
-                contact.ModifiedBy = deletedByUser;
-                contact.ModifiedDate = DateTime.UtcNow;
+                // Soft delete by setting IsDeleted = true
+                contact.IsDeleted = true;
+                contact.DeletedAt = DateTime.UtcNow;
+                contact.DeletedBy = deletedByUser;
+                
+                // Keep IsActive logic as is if they want it inactive as well
+                contact.IsActive = false; 
 
                 await _context.SaveChangesAsync();
 
-                _logger.LogInformation("Contact soft deleted successfully with ID {ContactId}", id);
+                _logger.LogInformation("Contact soft deleted successfully with ID {ContactId} by user {UserId}", id, deletedByUser);
                 return true;
             }
             catch (Exception ex)
@@ -423,7 +426,7 @@ namespace MyApi.Modules.Contacts.Services
             try
             {
                 return await _context.Contacts
-                    .AnyAsync(c => c.Email != null && c.Email.ToLower() == email.ToLower() && c.IsActive);
+                    .AnyAsync(c => c.Email != null && c.Email.ToLower() == email.ToLower() && !c.IsDeleted && c.IsActive);
             }
             catch (Exception ex)
             {

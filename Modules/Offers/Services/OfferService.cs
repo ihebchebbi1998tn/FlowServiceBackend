@@ -48,7 +48,7 @@ namespace MyApi.Modules.Offers.Services
             string sortOrder = "desc"
         )
         {
-            var query = _context.Offers.AsNoTracking().AsQueryable();
+            var query = _context.Offers.AsNoTracking().Where(o => !o.IsDeleted).AsQueryable();
 
             if (!string.IsNullOrEmpty(status))
                 query = query.Where(o => o.Status == status);
@@ -140,7 +140,7 @@ namespace MyApi.Modules.Offers.Services
             var offer = await _context.Offers
                 .AsNoTracking()
                 .Include(o => o.Items)
-                .FirstOrDefaultAsync(o => o.Id == id);
+                .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted);
 
             if (offer == null) return null;
             
@@ -439,13 +439,16 @@ namespace MyApi.Modules.Offers.Services
             return updatedOffer!;
         }
 
-        public async Task<bool> DeleteOfferAsync(int id)
+        public async Task<bool> DeleteOfferAsync(int id, string userId)
         {
             var offer = await _context.Offers.FindAsync(id);
-            if (offer == null)
+            if (offer == null || offer.IsDeleted)
                 return false;
 
-            _context.Offers.Remove(offer);
+            offer.IsDeleted = true;
+            offer.DeletedAt = DateTime.UtcNow;
+            offer.DeletedBy = userId;
+            
             await _context.SaveChangesAsync();
             return true;
         }
