@@ -832,6 +832,7 @@ namespace MyApi.Modules.Dispatches.Services
             
             await _db.SaveChangesAsync();
 
+            _logger.LogInformation(
                 "[DISPATCH-DELETE] Soft deleted dispatch {DispatchId} (JobId: {JobId}, SO: {ServiceOrderId}, LinkedJobs: {JobCount}) by user {UserId}",
                 dispatchId, jobIdStr, serviceOrderId, allJobIds.Count, userId);
 
