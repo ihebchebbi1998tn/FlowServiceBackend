@@ -332,6 +332,7 @@ namespace MyApi.Modules.Dispatches.Services
                 .Include(d => d.AssignedTechnicians)
                 .Include(d => d.Contact)
                 .Include(d => d.DispatchJobs)
+                .AsSingleQuery()
                 .ToListAsync();
 
             // Get all technician IDs to fetch user names

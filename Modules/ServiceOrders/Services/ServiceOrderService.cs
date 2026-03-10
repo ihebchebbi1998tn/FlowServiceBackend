@@ -1014,6 +1014,7 @@ namespace MyApi.Modules.ServiceOrders.Services
             var dispatches = await _context.Dispatches
                 .Where(d => d.JobId != null && jobIdStrings.Contains(d.JobId))
                 .Include(d => d.AssignedTechnicians)
+                .AsSingleQuery()
                 .ToListAsync();
 
             // Get all technician IDs to fetch user names
