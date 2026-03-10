@@ -397,11 +397,33 @@ namespace MyApi.Modules.ServiceOrders.Services
                 }
             }
 
+            // Fetch user names for technicians assigned to jobs
+            var jobTechnicianIds = serviceOrders
+                .SelectMany(s => s.Jobs ?? Enumerable.Empty<MyApi.Modules.ServiceOrders.Models.ServiceOrderJob>())
+                .Where(j => j.AssignedTechnicianIds != null)
+                .SelectMany(j => j.AssignedTechnicianIds!)
+                .Where(id => int.TryParse(id, out _))
+                .Select(id => int.Parse(id))
+                .Distinct()
+                .ToList();
+
+            if (jobTechnicianIds.Any())
+            {
+                var techUsers = await _context.Users
+                    .Where(u => jobTechnicianIds.Contains(u.Id))
+                    .ToListAsync();
+                foreach (var user in techUsers)
+                {
+                    userNames[user.Id.ToString()] = $"{user.FirstName} {user.LastName}".Trim();
+                }
+            }
+
             var dtos = serviceOrders.Select(s => MapToDto(
                 s, 
                 contacts.GetValueOrDefault(s.ContactId), 
                 saleNumbers.GetValueOrDefault(s.SaleId ?? ""),
-                userNames.GetValueOrDefault(s.CreatedBy ?? "")
+                userNames.GetValueOrDefault(s.CreatedBy ?? ""),
+                userNames
             )).ToList();
 
             return new PaginatedServiceOrderResponse
@@ -470,7 +492,33 @@ namespace MyApi.Modules.ServiceOrders.Services
                 }
             }
             
-            return MapToDto(serviceOrder, contact, saleNumber, createdByName);
+            // Resolving technician names for jobs
+            var userNames = new Dictionary<string, string>();
+            if (createdByName != null && serviceOrder.CreatedBy != null)
+            {
+                userNames[serviceOrder.CreatedBy] = createdByName;
+            }
+
+            var jobTechnicianIds = serviceOrder.Jobs?
+                .Where(j => j.AssignedTechnicianIds != null)
+                .SelectMany(j => j.AssignedTechnicianIds!)
+                .Where(id => int.TryParse(id, out _))
+                .Select(id => int.Parse(id))
+                .Distinct()
+                .ToList() ?? new List<int>();
+
+            if (jobTechnicianIds.Any())
+            {
+                var techUsers = await _context.Users
+                    .Where(u => jobTechnicianIds.Contains(u.Id))
+                    .ToListAsync();
+                foreach (var user in techUsers)
+                {
+                    userNames[user.Id.ToString()] = $"{user.FirstName} {user.LastName}".Trim();
+                }
+            }
+
+            return MapToDto(serviceOrder, contact, saleNumber, createdByName, userNames);
         }
 
         public async Task<ServiceOrderDto> UpdateServiceOrderAsync(int id, UpdateServiceOrderDto updateDto, string userId)
@@ -808,7 +856,7 @@ namespace MyApi.Modules.ServiceOrders.Services
             return stats;
         }
 
-        private ServiceOrderDto MapToDto(ServiceOrder serviceOrder, Contact? contact, string? saleNumber = null, string? createdByName = null)
+        private ServiceOrderDto MapToDto(ServiceOrder serviceOrder, Contact? contact, string? saleNumber = null, string? createdByName = null, Dictionary<string, string>? userNames = null)
         {
             return new ServiceOrderDto
             {
@@ -863,7 +911,16 @@ namespace MyApi.Modules.ServiceOrders.Services
                     EstimatedDuration = j.EstimatedDuration,
                     EstimatedCost = j.EstimatedCost,
                     CompletionPercentage = j.CompletionPercentage,
-                    AssignedTechnicianIds = j.AssignedTechnicianIds
+                    CompletionPercentage = j.CompletionPercentage,
+                    AssignedTechnicianIds = j.AssignedTechnicianIds,
+                    AssignedTechnicians = j.AssignedTechnicianIds?.Select(id => {
+                        return new UserLightDto 
+                        {
+                            Id = int.TryParse(id, out var parsedId) ? parsedId : 0,
+                            Name = userNames?.GetValueOrDefault(id) ?? id,
+                            Email = null
+                        };
+                    }).ToList()
                 }).ToList(),
                 Materials = serviceOrder.Materials?.Select(m => new ServiceOrderMaterialDto
                 {

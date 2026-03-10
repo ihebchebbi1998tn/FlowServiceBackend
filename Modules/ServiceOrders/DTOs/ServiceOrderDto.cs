@@ -177,6 +177,7 @@ namespace MyApi.Modules.ServiceOrders.DTOs
         public decimal? EstimatedCost { get; set; }
         public int? CompletionPercentage { get; set; }
         public string[]? AssignedTechnicianIds { get; set; }
+        public List<UserLightDto>? AssignedTechnicians { get; set; }
     }
 
     public class CreateServiceOrderDto
