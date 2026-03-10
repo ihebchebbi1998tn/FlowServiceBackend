@@ -810,62 +810,6 @@ namespace MyApi.Modules.Offers.Services
             return updatedOffer!;
         }
 
-        public async Task<OfferDto> MarkOfferAsSentAsync(int id, string userId)
-        {
-            var offer = await _context.Offers.FindAsync(id);
-            if (offer == null)
-                throw new KeyNotFoundException($"Offer with ID {id} not found");
-
-            var oldStatus = offer.Status;
-
-            offer.SentCount++;
-            
-            if (offer.Status == "draft")
-            {
-                offer.Status = "sent";
-            }
-
-            offer.UpdatedAt = DateTime.UtcNow;
-            offer.ModifiedBy = userId;
-            offer.ModifiedDate = DateTime.UtcNow;
-
-            // Log activity
-            var activity = new OfferActivity
-            {
-                OfferId = id,
-                Type = "sent",
-                Description = $"Offer marked as sent (Count: {offer.SentCount})",
-                CreatedAt = DateTime.UtcNow,
-                CreatedByName = userId
-            };
-            _context.OfferActivities.Add(activity);
-
-            await _context.SaveChangesAsync();
-
-            // Trigger workflow automation for status change if applicable
-            if (_workflowTriggerService != null && oldStatus != offer.Status)
-            {
-                try
-                {
-                    await _workflowTriggerService.TriggerStatusChangeAsync(
-                        "offer",
-                        id,
-                        oldStatus,
-                        offer.Status,
-                        userId,
-                        new { offerId = id, offerNumber = offer.OfferNumber, title = offer.Title }
-                    );
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Failed to trigger workflow for offer {OfferId} status change", id);
-                }
-            }
-
-            var updatedOffer = await GetOfferByIdAsync(id);
-            return updatedOffer!;
-        }
-
         public async Task<OfferItemDto> AddOfferItemAsync(int offerId, CreateOfferItemDto itemDto)
         {
             var offer = await _context.Offers.FindAsync(offerId);

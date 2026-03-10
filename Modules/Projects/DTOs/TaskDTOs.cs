@@ -149,11 +149,6 @@ namespace MyApi.Modules.Projects.DTOs
         [StringLength(20)]
         public string? Priority { get; set; }
 
-        /// <summary>
-        /// Task status: todo, in-progress, done
-        /// </summary>
-        [StringLength(20)]
-        public string? Status { get; set; }
     }
 
     public class MoveTaskRequestDto

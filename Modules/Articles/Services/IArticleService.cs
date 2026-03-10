@@ -8,7 +8,7 @@ namespace MyApi.Modules.Articles.Services
         Task<ArticleDto?> GetArticleByIdAsync(string id);
         Task<ArticleDto> CreateArticleAsync(CreateArticleDto dto, string userId);
         Task<ArticleDto?> UpdateArticleAsync(string id, UpdateArticleDto dto, string userId);
-        Task<bool> DeleteArticleAsync(string id);
+        Task<bool> DeleteArticleAsync(string id, string userId);
         Task<InventoryTransactionDto> CreateTransactionAsync(CreateInventoryTransactionDto dto, string userId);
         Task<List<InventoryTransactionDto>> GetArticleTransactionsAsync(string articleId);
         Task<BatchOperationResultDto> BatchUpdateStockAsync(BatchUpdateStockDto dto, string userId);

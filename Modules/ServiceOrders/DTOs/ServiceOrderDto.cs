@@ -1,3 +1,5 @@
+using MyApi.Modules.Dispatches.DTOs;
+
 namespace MyApi.Modules.ServiceOrders.DTOs
 {
     public class ServiceOrderDto
