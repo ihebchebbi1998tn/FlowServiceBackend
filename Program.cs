@@ -718,7 +718,7 @@ app.MapGet("/health", (IServiceProvider sp) =>
 // DEBUG: Tenant resolution check (REMOVE after confirming multi-tenant works)
 app.MapGet("/api/debug/tenant", (HttpContext context, ITenantDbContextFactory factory) =>
 {
-    var tenant = context.Request.Headers["X-Tenant"].FirstOrDefault();
+    var tenant = context.Request.Headers[MyApi.Infrastructure.TenantMiddleware.TenantHeaderName].FirstOrDefault();
     var envKey = $"TENANT_{tenant?.ToUpperInvariant()}_DATABASE_URL";
     var envValue = Environment.GetEnvironmentVariable(envKey);
     var connStr = factory.GetConnectionString(tenant);

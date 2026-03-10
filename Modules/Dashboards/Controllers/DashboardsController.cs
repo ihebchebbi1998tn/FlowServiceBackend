@@ -29,7 +29,7 @@ namespace MyApi.Modules.Dashboards.Controllers
         }
 
         private string GetTenant() =>
-            Request.Headers.TryGetValue("X-Tenant", out var t) ? t.ToString() : "";
+            Request.Headers.TryGetValue(TenantMiddleware.TenantHeaderName, out var t) ? t.ToString() : "";
 
         private string GetUserId() =>
             User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "0";
@@ -260,7 +260,7 @@ namespace MyApi.Modules.Dashboards.Controllers
         public async Task<IActionResult> GetByShareToken(string token)
         {
             // Anonymous callers won't send X-Tenant — use default connection
-            var tenant = Request.Headers.TryGetValue("X-Tenant", out var t) ? t.ToString() : "";
+            var tenant = Request.Headers.TryGetValue(TenantMiddleware.TenantHeaderName, out var t) ? t.ToString() : "";
             await using var db = _dbFactory.CreateDbContext(tenant);
 
             var dashboard = await db.Dashboards

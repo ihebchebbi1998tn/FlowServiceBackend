@@ -18,6 +18,8 @@ namespace MyApi.Infrastructure;
 /// </summary>
 public class TenantMiddleware
 {
+    public const string TenantHeaderName = "X-Tenant";
+
     private readonly RequestDelegate _next;
     private readonly ILogger<TenantMiddleware> _logger;
 
@@ -29,7 +31,7 @@ public class TenantMiddleware
 
     public async Task InvokeAsync(HttpContext context)
     {
-        var tenant = context.Request.Headers["X-Tenant"].FirstOrDefault()?.Trim().ToLowerInvariant();
+        var tenant = context.Request.Headers[TenantHeaderName].FirstOrDefault()?.Trim().ToLowerInvariant();
 
         if (!string.IsNullOrEmpty(tenant))
         {

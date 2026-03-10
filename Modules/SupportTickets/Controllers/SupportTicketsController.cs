@@ -24,7 +24,7 @@ namespace MyApi.Modules.SupportTickets.Controllers
         }
 
         private string GetTenant() =>
-            Request.Headers.TryGetValue("X-Tenant", out var t) ? t.ToString() : "unknown";
+            Request.Headers.TryGetValue(TenantMiddleware.TenantHeaderName, out var t) ? t.ToString() : "unknown";
 
         /// <summary>
         /// POST /api/SupportTickets — Create a new support ticket (anonymous).
