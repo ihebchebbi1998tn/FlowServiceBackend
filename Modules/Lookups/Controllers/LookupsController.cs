@@ -183,6 +183,88 @@ namespace MyApi.Modules.Lookups.Controllers
             }
         }
 
+        // Document Types
+        [HttpGet("document-types")]
+        public async Task<ActionResult<LookupListResponseDto>> GetDocumentTypes()
+        {
+            try
+            {
+                var result = await _lookupService.GetDocumentTypesAsync();
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving document types");
+                return StatusCode(500, "An error occurred while retrieving document types.");
+            }
+        }
+
+        [HttpGet("document-types/{id}")]
+        public async Task<ActionResult<LookupItemDto>> GetDocumentType(int id)
+        {
+            try
+            {
+                var result = await _lookupService.GetDocumentTypeByIdAsync(id);
+                if (result == null)
+                    return NotFound();
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving document type with ID: {Id}", id);
+                return StatusCode(500, "An error occurred while retrieving the document type.");
+            }
+        }
+
+        [HttpPost("document-types")]
+        public async Task<ActionResult<LookupItemDto>> CreateDocumentType([FromBody] CreateLookupItemRequestDto createDto)
+        {
+            try
+            {
+                var result = await _lookupService.CreateDocumentTypeAsync(createDto, GetCurrentUser());
+                return CreatedAtAction(nameof(GetDocumentType), new { id = result.Id }, result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error creating document type");
+                return StatusCode(500, "An error occurred while creating the document type.");
+            }
+        }
+
+        [HttpPut("document-types/{id}")]
+        public async Task<ActionResult<LookupItemDto>> UpdateDocumentType(int id, [FromBody] UpdateLookupItemRequestDto updateDto)
+        {
+            try
+            {
+                var result = await _lookupService.UpdateDocumentTypeAsync(id, updateDto, GetCurrentUser());
+                if (result == null)
+                    return NotFound();
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error updating document type with ID: {Id}", id);
+                return StatusCode(500, "An error occurred while updating the document type.");
+            }
+        }
+
+        [HttpDelete("document-types/{id}")]
+        public async Task<IActionResult> DeleteDocumentType(int id)
+        {
+            try
+            {
+                var result = await _lookupService.DeleteDocumentTypeAsync(id, GetCurrentUser());
+                if (!result)
+                    return NotFound();
+                return NoContent();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error deleting document type with ID: {Id}", id);
+                return StatusCode(500, "An error occurred while deleting the document type.");
+            }
+        }
+
         // Article Statuses
         [HttpGet("article-statuses")]
         public async Task<ActionResult<LookupListResponseDto>> GetArticleStatuses()
