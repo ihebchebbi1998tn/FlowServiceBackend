@@ -45,6 +45,9 @@ namespace MyApi.Modules.Projects.Models
         [StringLength(100)]
         public string CreatedBy { get; set; } = string.Empty;
 
+        [StringLength(20)]
+        public string? Priority { get; set; } // low, medium, high
+
         // Navigation property
         [ForeignKey("AssignedUserId")]
         public virtual MyApi.Modules.Users.Models.User? AssignedUser { get; set; }

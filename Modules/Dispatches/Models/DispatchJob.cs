@@ -25,5 +25,15 @@ namespace MyApi.Modules.Dispatches.Models
         [Required]
         [Column("CreatedDate")]
         public DateTime CreatedDate { get; set; } = DateTime.UtcNow;
+
+        [Column("IsDeleted")]
+        public bool IsDeleted { get; set; } = false;
+
+        [Column("DeletedAt")]
+        public DateTime? DeletedAt { get; set; }
+
+        [Column("DeletedBy")]
+        [MaxLength(100)]
+        public string? DeletedBy { get; set; }
     }
 }

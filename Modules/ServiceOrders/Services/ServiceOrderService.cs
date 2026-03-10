@@ -911,7 +911,6 @@ namespace MyApi.Modules.ServiceOrders.Services
                     EstimatedDuration = j.EstimatedDuration,
                     EstimatedCost = j.EstimatedCost,
                     CompletionPercentage = j.CompletionPercentage,
-                    CompletionPercentage = j.CompletionPercentage,
                     AssignedTechnicianIds = j.AssignedTechnicianIds,
                     AssignedTechnicians = j.AssignedTechnicianIds?.Select(id => {
                         return new UserLightDto 

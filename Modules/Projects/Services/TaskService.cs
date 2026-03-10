@@ -201,7 +201,7 @@ namespace MyApi.Modules.Projects.Services
             {
                 var tasks = await _context.DailyTasks
                     .Include(t => t.AssignedUser)
-                    .Where(t => t.DueDate.Date == date.Date)
+                    .Where(t => t.DueDate.HasValue && t.DueDate.Value.Date == date.Date)
                     .OrderBy(t => t.DueDate)
                     .ToListAsync();
 
