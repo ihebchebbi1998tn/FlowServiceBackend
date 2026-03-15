@@ -17,10 +17,6 @@ public static class TenantSlugCache
 {
     private static readonly ConcurrentDictionary<string, int> _slugToId = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>
-    /// Load all active tenants from the database into cache.
-    /// Call this at application startup.
-    /// </summary>
     public static void Initialize(ApplicationDbContext db)
     {
         try
@@ -32,12 +28,15 @@ public static class TenantSlugCache
                 .ToList();
 
             _slugToId.Clear();
+
+            // We no longer force the "default" tenant to map to TenantId = 0.
+            // If the user chooses a different default company, we must respect its actual ID
+            // so that its isolated data is loaded correctly. 
+            // Only the very first automatic tenant (if specifically handled elsewhere) 
+            // or the fallback system uses 0. Here, every stored tenant maps to its real database ID.
             foreach (var t in tenants)
             {
-                // The "default" tenant (IsDefault=true) maps to TenantId = 0
-                // All other tenants map to their actual Tenant.Id
-                var tenantId = t.IsDefault ? 0 : t.Id;
-                _slugToId[t.Slug] = tenantId;
+                _slugToId[t.Slug] = t.Id;
             }
         }
         catch (Exception ex)
