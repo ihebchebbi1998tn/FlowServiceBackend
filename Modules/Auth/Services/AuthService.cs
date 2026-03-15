@@ -963,6 +963,21 @@ namespace MyApi.Modules.Auth.Services
             }
         }
 
+        private string? GetTenantResolvedLogoUrl(string? fallbackLogoUrl)
+        {
+            var tenantId = _context.GetTenantId();
+            if (tenantId > 0)
+            {
+                var tenantLogo = _context.Tenants
+                    .Where(t => t.Id == tenantId && t.IsActive)
+                    .Select(t => t.CompanyLogoUrl)
+                    .FirstOrDefault();
+                if (!string.IsNullOrEmpty(tenantLogo))
+                    return tenantLogo;
+            }
+            return fallbackLogoUrl;
+        }
+
         private UserDto MapToUserDto(MainAdminUser user)
         {
             return new UserDto
@@ -976,7 +991,7 @@ namespace MyApi.Modules.Auth.Services
                 Industry = user.Industry ?? "",
                 CompanyName = user.CompanyName,
                 CompanyWebsite = user.CompanyWebsite,
-                CompanyLogoUrl = user.CompanyLogoUrl,
+                CompanyLogoUrl = GetTenantResolvedLogoUrl(user.CompanyLogoUrl),
                 ProfilePictureUrl = user.ProfilePictureUrl,
                 Preferences = user.PreferencesJson,
                 CreatedAt = user.CreatedAt,
@@ -987,6 +1002,9 @@ namespace MyApi.Modules.Auth.Services
 
         private UserDto MapUserToUserDto(User user)
         {
+            // Fallback to the main admin's logo if the tenant hasn't overridden it
+            var fallbackLogo = _context.MainAdminUsers.Where(a => a.IsActive).Select(a => a.CompanyLogoUrl).FirstOrDefault();
+
             return new UserDto
             {
                 Id = user.Id,
@@ -998,6 +1016,7 @@ namespace MyApi.Modules.Auth.Services
                 Industry = user.Role ?? "User",
                 CompanyName = "",
                 CompanyWebsite = "",
+                CompanyLogoUrl = GetTenantResolvedLogoUrl(fallbackLogo),
                 ProfilePictureUrl = user.ProfilePictureUrl,
                 Preferences = "",
                 CreatedAt = user.CreatedDate,
