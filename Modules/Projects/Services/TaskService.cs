@@ -369,6 +369,10 @@ namespace MyApi.Modules.Projects.Services
         {
             try
             {
+                searchRequest ??= new TaskSearchRequestDto();
+                if (searchRequest.PageNumber <= 0) searchRequest.PageNumber = 1;
+                if (searchRequest.PageSize <= 0) searchRequest.PageSize = 20;
+                if (searchRequest.PageSize > 200) searchRequest.PageSize = 200;
                 var projectTasksQuery = _context.ProjectTasks
                     .Include(t => t.AssignedUser)
                     .AsQueryable();
@@ -378,7 +382,7 @@ namespace MyApi.Modules.Projects.Services
                 {
                     var searchTerm = searchRequest.SearchTerm.ToLower();
                     projectTasksQuery = projectTasksQuery.Where(t => 
-                        t.Title.ToLower().Contains(searchTerm) ||
+                        (t.Title ?? string.Empty).ToLower().Contains(searchTerm) ||
                         (t.Description != null && t.Description.ToLower().Contains(searchTerm)));
                 }
 
