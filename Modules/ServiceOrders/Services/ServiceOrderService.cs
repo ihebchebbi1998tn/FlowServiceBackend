@@ -72,6 +72,7 @@ namespace MyApi.Modules.ServiceOrders.Services
                     OrderNumber = orderNumber,
                     SaleId = saleId.ToString(),
                     OfferId = sale.OfferId,
+                    ProjectId = createDto.ProjectId ?? sale.ProjectId,
                     ContactId = sale.ContactId,
                     ServiceType = serviceItems.FirstOrDefault()?.ItemName ?? "maintenance",
                     Status = "pending",  // Initial status after creation - workflow: pending → ready_for_planning → scheduled → in_progress...
@@ -528,6 +529,7 @@ namespace MyApi.Modules.ServiceOrders.Services
                 throw new KeyNotFoundException($"Service order with ID {id} not found");
 
             if (updateDto.Status != null) serviceOrder.Status = updateDto.Status;
+            if (updateDto.ProjectId.HasValue) serviceOrder.ProjectId = updateDto.ProjectId.Value;
             if (updateDto.Priority != null) serviceOrder.Priority = updateDto.Priority;
             if (updateDto.Description != null) serviceOrder.Description = updateDto.Description;
             if (updateDto.Notes != null) serviceOrder.Notes = updateDto.Notes;
@@ -865,6 +867,7 @@ namespace MyApi.Modules.ServiceOrders.Services
                 SaleId = serviceOrder.SaleId,
                 SaleNumber = saleNumber,
                 OfferId = serviceOrder.OfferId,
+                ProjectId = serviceOrder.ProjectId,
                 ContactId = serviceOrder.ContactId,
                 Status = serviceOrder.Status,
                 Priority = serviceOrder.Priority,
@@ -1035,6 +1038,7 @@ namespace MyApi.Modules.ServiceOrders.Services
                 DispatchNumber = d.DispatchNumber,
                 JobId = int.TryParse(d.JobId, out var jid) ? jid : 0,
                 ServiceOrderId = d.ServiceOrderId,
+                ProjectId = d.ProjectId,
                 Status = d.Status ?? "pending",
                 Priority = d.Priority ?? "medium",
                 AssignedTechnicians = d.AssignedTechnicians.Select(at => {

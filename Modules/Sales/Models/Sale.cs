@@ -35,6 +35,9 @@ namespace MyApi.Modules.Sales.Models
         [Column("ContactId")]
         public int ContactId { get; set; }
 
+        [Column("ProjectId")]
+        public int? ProjectId { get; set; }
+
         [Column("SaleDate")]
         public DateTime SaleDate { get; set; } = DateTime.UtcNow;
 

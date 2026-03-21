@@ -9,6 +9,7 @@ namespace MyApi.Modules.Offers.DTOs
         
         // Contact Information
         public int ContactId { get; set; }
+        public int? ProjectId { get; set; }
         public ContactSummaryDto? Contact { get; set; }
         
         // Financial Information
@@ -102,6 +103,7 @@ namespace MyApi.Modules.Offers.DTOs
         public string Title { get; set; } = string.Empty;
         public string? Description { get; set; }
         public int? ContactId { get; set; }
+        public int? ProjectId { get; set; }
         public string Status { get; set; } = "draft";
         public string? Category { get; set; }
         public string? Source { get; set; }
@@ -142,6 +144,7 @@ namespace MyApi.Modules.Offers.DTOs
         public string? Title { get; set; }
         public string? Description { get; set; }
         public int? ContactId { get; set; }
+        public int? ProjectId { get; set; }
         public string? Status { get; set; }
         public string? Category { get; set; }
         public string? Source { get; set; }

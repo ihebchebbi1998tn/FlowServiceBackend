@@ -9,6 +9,7 @@ namespace MyApi.Modules.Sales.DTOs
         
         // Contact Information
         public int ContactId { get; set; }
+        public int? ProjectId { get; set; }
         public ContactSummaryDto? Contact { get; set; }
         
         // Financial Information
@@ -115,6 +116,7 @@ namespace MyApi.Modules.Sales.DTOs
         public string Title { get; set; } = string.Empty;
         public string? Description { get; set; }
         public int ContactId { get; set; }
+        public int? ProjectId { get; set; }
         public string Status { get; set; } = "created";
         public string? Stage { get; set; } = "closed";
         public string? Priority { get; set; }
@@ -168,6 +170,7 @@ namespace MyApi.Modules.Sales.DTOs
     public class UpdateSaleDto
     {
         public string? Title { get; set; }
+        public int? ProjectId { get; set; }
         public string? Description { get; set; }
         public string? Status { get; set; }
         public string? Stage { get; set; }

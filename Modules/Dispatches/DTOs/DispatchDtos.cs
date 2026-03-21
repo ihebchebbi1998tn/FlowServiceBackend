@@ -26,6 +26,7 @@ namespace MyApi.Modules.Dispatches.DTOs
         public string DispatchNumber { get; set; } = null!;
         public int? JobId { get; set; }
         public int? ServiceOrderId { get; set; }
+        public int? ProjectId { get; set; }
         public int? ContactId { get; set; }
         public string? ContactName { get; set; }
         public string? SiteAddress { get; set; }

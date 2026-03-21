@@ -115,6 +115,7 @@ namespace MyApi.Modules.Dispatches.Services
                 JobId = jobId.ToString(),
                 ContactId = contactId,
                 ServiceOrderId = serviceOrderId,
+                ProjectId = job.ServiceOrder?.ProjectId,
                 Status = status,
                 Priority = dto.Priority ?? job.Priority ?? "medium",
                 ScheduledDate = dto.ScheduledDate,
@@ -242,6 +243,7 @@ namespace MyApi.Modules.Dispatches.Services
                 JobId = dto.JobIds.First().ToString(), // backward compat
                 ContactId = contactId,
                 ServiceOrderId = serviceOrderId,
+                ProjectId = jobs.FirstOrDefault()?.ServiceOrder?.ProjectId,
                 InstallationId = dto.InstallationId,
                 InstallationName = dto.InstallationName,
                 Status = status,
@@ -353,6 +355,7 @@ namespace MyApi.Modules.Dispatches.Services
                 DispatchNumber = d.DispatchNumber,
                 JobId = int.TryParse(d.JobId, out var jid) ? jid : null,
                 ServiceOrderId = d.ServiceOrderId,
+                ProjectId = d.ProjectId,
                 ContactId = d.ContactId,
                 ContactName = d.Contact != null 
                     ? (!string.IsNullOrEmpty(d.Contact.FirstName) || !string.IsNullOrEmpty(d.Contact.LastName)

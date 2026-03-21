@@ -188,6 +188,7 @@ namespace MyApi.Modules.Offers.Services
                 Title = createDto.Title ?? "Untitled Offer",
                 Description = createDto.Description,
                 ContactId = createDto.ContactId ?? 0,
+                ProjectId = createDto.ProjectId,
                 Status = createDto.Status ?? "draft",
                 Category = createDto.Category,
                 Source = createDto.Source,
@@ -283,6 +284,7 @@ namespace MyApi.Modules.Offers.Services
             if (updateDto.Title != null) offer.Title = updateDto.Title;
             if (updateDto.Description != null) offer.Description = updateDto.Description;
             if (updateDto.ContactId.HasValue) offer.ContactId = updateDto.ContactId.Value;
+            if (updateDto.ProjectId.HasValue) offer.ProjectId = updateDto.ProjectId.Value;
             if (updateDto.Status != null) offer.Status = updateDto.Status;
             if (updateDto.Category != null) offer.Category = updateDto.Category;
             if (updateDto.Source != null) offer.Source = updateDto.Source;
@@ -492,6 +494,8 @@ namespace MyApi.Modules.Offers.Services
                 CreatedDate = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,
                 Tags = originalOffer.Tags
+                ,
+                ProjectId = originalOffer.ProjectId
             };
 
             _context.Offers.Add(renewedOffer);
@@ -595,6 +599,7 @@ namespace MyApi.Modules.Offers.Services
                     AssignedToName = offer.AssignedToName,
                     Tags = offer.Tags != null ? offer.Tags.Concat(new[] { "Converted" }).ToArray() : new[] { "Converted" },
                     OfferId = id.ToString(),
+                    ProjectId = offer.ProjectId,
                     ConvertedFromOfferAt = DateTime.UtcNow,
                     CreatedBy = userId,
                     CreatedByName = createdByName,
@@ -983,6 +988,7 @@ namespace MyApi.Modules.Offers.Services
                 Title = offer.Title ?? "",
                 Description = offer.Description,
                 ContactId = offer.ContactId,
+                ProjectId = offer.ProjectId,
                 Contact = contact != null ? new ContactSummaryDto
                 {
                     Id = contact.Id,

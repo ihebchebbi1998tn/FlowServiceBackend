@@ -28,6 +28,9 @@ namespace MyApi.Modules.Dispatches.Models
         [Column("ContactId")]
         public int ContactId { get; set; }
 
+        [Column("ProjectId")]
+        public int? ProjectId { get; set; }
+
         [Column("ServiceOrderId")]
         public int? ServiceOrderId { get; set; }
 

@@ -9,6 +9,7 @@ namespace MyApi.Modules.ServiceOrders.DTOs
         public string? SaleId { get; set; }
         public string? SaleNumber { get; set; }
         public string? OfferId { get; set; }
+        public int? ProjectId { get; set; }
         public int ContactId { get; set; }
         public string Status { get; set; } = "draft";
         public string? Priority { get; set; }
@@ -184,6 +185,7 @@ namespace MyApi.Modules.ServiceOrders.DTOs
 
     public class CreateServiceOrderDto
     {
+        public int? ProjectId { get; set; }
         public int[]? InstallationIds { get; set; }
         public int[]? AssignedTechnicianIds { get; set; }
         public DateTime? StartDate { get; set; }
@@ -203,6 +205,7 @@ namespace MyApi.Modules.ServiceOrders.DTOs
 
     public class UpdateServiceOrderDto
     {
+        public int? ProjectId { get; set; }
         public string? Status { get; set; }
         public string? Priority { get; set; }
         public string? Description { get; set; }

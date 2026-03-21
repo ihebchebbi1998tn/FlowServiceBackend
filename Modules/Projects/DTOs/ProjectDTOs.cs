@@ -14,6 +14,7 @@ namespace MyApi.Modules.Projects.DTOs
         public string? Priority { get; set; }
         public DateTime? StartDate { get; set; }
         public DateTime? EndDate { get; set; }
+        public ProjectSettingsDto? Settings { get; set; }
 
         // Team members as user IDs
         public List<int> TeamMembers { get; set; } = new List<int>();
@@ -76,6 +77,10 @@ namespace MyApi.Modules.Projects.DTOs
 
         public DateTime? StartDate { get; set; }
         public DateTime? EndDate { get; set; }
+        public int? LinkOfferId { get; set; }
+        public int? LinkSaleId { get; set; }
+        public int? LinkServiceOrderId { get; set; }
+        public int? LinkDispatchId { get; set; }
 
         public bool CreateDefaultColumns { get; set; } = true;
     }
@@ -100,6 +105,47 @@ namespace MyApi.Modules.Projects.DTOs
 
         public DateTime? StartDate { get; set; }
         public DateTime? EndDate { get; set; }
+        public int? LinkOfferId { get; set; }
+        public int? LinkSaleId { get; set; }
+        public int? LinkServiceOrderId { get; set; }
+        public int? LinkDispatchId { get; set; }
+    }
+
+    public class ProjectLinkedEntityDto
+    {
+        public string EntityType { get; set; } = string.Empty;
+        public int EntityId { get; set; }
+        public string Number { get; set; } = string.Empty;
+        public string Title { get; set; } = string.Empty;
+        public string? Status { get; set; }
+        public DateTime? Date { get; set; }
+    }
+
+    public class ProjectLinksDto
+    {
+        public int ProjectId { get; set; }
+        public List<ProjectLinkedEntityDto> Offers { get; set; } = new();
+        public List<ProjectLinkedEntityDto> Sales { get; set; } = new();
+        public List<ProjectLinkedEntityDto> ServiceOrders { get; set; } = new();
+        public List<ProjectLinkedEntityDto> Dispatches { get; set; } = new();
+    }
+
+    public class LinkProjectEntityRequestDto
+    {
+        [Required]
+        public string EntityType { get; set; } = string.Empty;
+        [Required]
+        public int EntityId { get; set; }
+    }
+
+    public class ProjectSettingsDto
+    {
+        public bool AutoLinkConvertedEntities { get; set; } = true;
+        public bool RequireProjectBeforeConvertingOffer { get; set; }
+        public string DefaultTaskStatus { get; set; } = "todo";
+        public bool AllowCrossProjectDispatch { get; set; } = true;
+        public bool ShowFinancialDataInProjectTabs { get; set; } = true;
+        public string DefaultLinkedEntityType { get; set; } = "service_order";
     }
 
     public class ProjectNoteDto

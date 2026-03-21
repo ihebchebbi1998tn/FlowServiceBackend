@@ -27,6 +27,9 @@ namespace MyApi.Modules.ServiceOrders.Models
         [Column("ContactId")]
         public int ContactId { get; set; }
 
+        [Column("ProjectId")]
+        public int? ProjectId { get; set; }
+
         [Column("OrderDate")]
         public DateTime OrderDate { get; set; } = DateTime.UtcNow;
 

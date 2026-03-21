@@ -147,6 +147,7 @@ namespace MyApi.Modules.Sales.Services
                 Title = createDto.Title,
                 Description = createDto.Description,
                 ContactId = createDto.ContactId,
+                ProjectId = createDto.ProjectId,
                 Status = createDto.Status ?? "won",
                 Stage = createDto.Stage ?? "closed",
                 Priority = createDto.Priority,
@@ -252,6 +253,7 @@ namespace MyApi.Modules.Sales.Services
                 Title = offer.Title,
                 Description = offer.Description,
                 ContactId = offer.ContactId,
+                ProjectId = offer.ProjectId,
                 Status = "created",  // Start with 'created' status instead of 'won'
                 Stage = "offer",     // Start at 'offer' stage
                 Priority = "medium",
@@ -353,6 +355,7 @@ namespace MyApi.Modules.Sales.Services
                              (previousStatus == "closed" || previousStatus == "won" || previousStatus == "completed");
 
             if (updateDto.Title != null) sale.Title = updateDto.Title;
+            if (updateDto.ProjectId.HasValue) sale.ProjectId = updateDto.ProjectId.Value;
             if (updateDto.Description != null) sale.Description = updateDto.Description;
             if (updateDto.Status != null) sale.Status = updateDto.Status;
             if (updateDto.Stage != null) sale.Stage = updateDto.Stage;
@@ -702,6 +705,7 @@ namespace MyApi.Modules.Sales.Services
                 Title = sale.Title ?? "",
                 Description = sale.Description,
                 ContactId = sale.ContactId,
+                ProjectId = sale.ProjectId,
                 Contact = contact != null ? new ContactSummaryDto
                 {
                     Id = contact.Id,

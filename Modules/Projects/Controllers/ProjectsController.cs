@@ -288,6 +288,111 @@ namespace MyApi.Modules.Projects.Controllers
             }
         }
 
+        [HttpGet("{projectId}/links")]
+        public async Task<ActionResult<ProjectLinksDto>> GetProjectLinks(int projectId)
+        {
+            try
+            {
+                var links = await _projectService.GetProjectLinksAsync(projectId);
+                return Ok(links);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                _logger.LogWarning(ex, "Project not found while getting links for project {ProjectId}", projectId);
+                return NotFound(ex.Message);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting project links");
+                return StatusCode(500, "An error occurred while retrieving project links");
+            }
+        }
+
+        [HttpPost("{projectId}/links")]
+        public async Task<ActionResult<ProjectLinksDto>> LinkEntityToProject(int projectId, [FromBody] LinkProjectEntityRequestDto dto)
+        {
+            try
+            {
+                if (!ModelState.IsValid) return BadRequest(ModelState);
+                if (dto.EntityId <= 0) return BadRequest("entityId must be greater than 0");
+                if (string.IsNullOrWhiteSpace(dto.EntityType)) return BadRequest("entityType is required");
+                var links = await _projectService.LinkEntityToProjectAsync(projectId, dto, GetCurrentUser());
+                return Ok(links);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                _logger.LogWarning(ex, "Entity or project not found while linking to project {ProjectId}", projectId);
+                return NotFound(ex.Message);
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogWarning(ex, "Invalid link request for project {ProjectId}", projectId);
+                return BadRequest(ex.Message);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error linking entity to project");
+                return StatusCode(500, "An error occurred while linking entity");
+            }
+        }
+
+        [HttpDelete("{projectId}/links/{entityType}/{entityId:int}")]
+        public async Task<ActionResult<ProjectLinksDto>> UnlinkEntityFromProject(int projectId, string entityType, int entityId)
+        {
+            try
+            {
+                if (entityId <= 0) return BadRequest("entityId must be greater than 0");
+                if (string.IsNullOrWhiteSpace(entityType)) return BadRequest("entityType is required");
+                var links = await _projectService.UnlinkEntityFromProjectAsync(projectId, entityType, entityId, GetCurrentUser());
+                return Ok(links);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                _logger.LogWarning(ex, "Entity or project not found while unlinking from project {ProjectId}", projectId);
+                return NotFound(ex.Message);
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogWarning(ex, "Invalid unlink request for project {ProjectId}", projectId);
+                return BadRequest(ex.Message);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error unlinking entity from project");
+                return StatusCode(500, "An error occurred while unlinking entity");
+            }
+        }
+
+        [HttpGet("settings")]
+        public async Task<ActionResult<ProjectSettingsDto>> GetProjectSettings()
+        {
+            try
+            {
+                var settings = await _projectService.GetProjectSettingsAsync();
+                return Ok(settings);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting project settings");
+                return StatusCode(500, "An error occurred while retrieving project settings");
+            }
+        }
+
+        [HttpPut("settings")]
+        public async Task<ActionResult<ProjectSettingsDto>> UpdateProjectSettings([FromBody] ProjectSettingsDto dto)
+        {
+            try
+            {
+                var settings = await _projectService.UpdateProjectSettingsAsync(dto, GetCurrentUser());
+                return Ok(settings);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error updating project settings");
+                return StatusCode(500, "An error occurred while updating project settings");
+            }
+        }
+
         private string GetCurrentUser()
         {
             return User.FindFirst(ClaimTypes.Email)?.Value ?? 

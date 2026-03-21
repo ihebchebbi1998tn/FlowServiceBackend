@@ -122,6 +122,7 @@ namespace MyApi.Data
         public DbSet<TaskChecklistItem> TaskChecklistItems { get; set; }
         public DbSet<RecurringTask> RecurringTasks { get; set; }
         public DbSet<RecurringTaskLog> RecurringTaskLogs { get; set; }
+        public DbSet<ProjectSettings> ProjectSettings { get; set; }
 
         // Lookups Module
         public DbSet<LookupItem> LookupItems { get; set; }
@@ -719,6 +720,13 @@ namespace MyApi.Data
 
                 entity.HasIndex(e => e.RecurringTaskId);
                 entity.HasIndex(e => e.GeneratedDate);
+            });
+
+            modelBuilder.Entity<ProjectSettings>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.HasIndex(e => e.TenantId).IsUnique();
+                entity.Property(e => e.SettingsJson).HasColumnType("text");
             });
 
             // AI Conversation entity configuration

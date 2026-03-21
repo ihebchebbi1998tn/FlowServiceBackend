@@ -17,6 +17,7 @@ namespace MyApi.Modules.Dispatches.Mapping
                 DispatchNumber = src.DispatchNumber,
                 JobId = int.TryParse(src.JobId, out var jid) ? jid : null,
                 ServiceOrderId = src.ServiceOrderId,
+                ProjectId = src.ProjectId,
                 Status = src.Status,
                 Priority = src.Priority,
                 CompletionPercentage = src.CompletionPercentage,

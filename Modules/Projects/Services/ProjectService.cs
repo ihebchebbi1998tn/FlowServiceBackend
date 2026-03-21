@@ -2,6 +2,10 @@ using MyApi.Data;
 using MyApi.Modules.Projects.DTOs;
 using MyApi.Modules.Projects.Models;
 using MyApi.Modules.Contacts.Models;
+using MyApi.Modules.Offers.Models;
+using MyApi.Modules.Sales.Models;
+using MyApi.Modules.ServiceOrders.Models;
+using MyApi.Modules.Dispatches.Models;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 
@@ -129,7 +133,10 @@ namespace MyApi.Modules.Projects.Services
                     .Where(p => p.Id == id)
                     .FirstOrDefaultAsync();
 
-                return project != null ? MapToProjectDto(project) : null;
+                if (project == null) return null;
+                var dto = MapToProjectDto(project);
+                dto.Settings = await GetProjectSettingsAsync();
+                return dto;
             }
             catch (Exception ex)
             {
@@ -158,6 +165,8 @@ namespace MyApi.Modules.Projects.Services
 
                 _context.Projects.Add(project);
                 await _context.SaveChangesAsync();
+
+                await SetProjectIdForLinkedEntitiesAsync(project.Id, createDto.LinkOfferId, createDto.LinkSaleId, createDto.LinkServiceOrderId, createDto.LinkDispatchId);
 
                 // Create default columns if needed
                 if (createDto.CreateDefaultColumns)
@@ -218,6 +227,7 @@ namespace MyApi.Modules.Projects.Services
                 project.ModifiedDate = DateTime.UtcNow;
 
                 await _context.SaveChangesAsync();
+                await SetProjectIdForLinkedEntitiesAsync(id, updateDto.LinkOfferId, updateDto.LinkSaleId, updateDto.LinkServiceOrderId, updateDto.LinkDispatchId);
 
                 var updatedProject = await GetProjectByIdAsync(id);
                 _logger.LogInformation("Project updated successfully with ID {ProjectId}", id);
@@ -439,6 +449,150 @@ namespace MyApi.Modules.Projects.Services
             }
         }
 
+        public async Task<ProjectLinksDto> GetProjectLinksAsync(int projectId)
+        {
+            var project = await _context.Projects.FirstOrDefaultAsync(p => p.Id == projectId);
+            if (project == null) throw new KeyNotFoundException($"Project with ID {projectId} not found");
+
+            var offers = await _context.Offers
+                .Where(o => !o.IsDeleted && o.ProjectId == projectId)
+                .OrderByDescending(o => o.CreatedDate)
+                .Take(100)
+                .ToListAsync();
+            var sales = await _context.Sales
+                .Where(s => !s.IsDeleted && s.ProjectId == projectId)
+                .OrderByDescending(s => s.CreatedDate)
+                .Take(100)
+                .ToListAsync();
+            var serviceOrders = await _context.ServiceOrders
+                .Where(s => !s.IsDeleted && s.ProjectId == projectId)
+                .OrderByDescending(s => s.CreatedDate)
+                .Take(100)
+                .ToListAsync();
+            var dispatches = await _context.Dispatches
+                .Where(d => !d.IsDeleted && d.ProjectId == projectId)
+                .OrderByDescending(d => d.CreatedDate)
+                .Take(100)
+                .ToListAsync();
+
+            return new ProjectLinksDto
+            {
+                ProjectId = projectId,
+                Offers = offers.Select(o => new ProjectLinkedEntityDto
+                {
+                    EntityType = "offer",
+                    EntityId = o.Id,
+                    Number = o.OfferNumber ?? $"OFR-{o.Id}",
+                    Title = o.Title ?? "Offer",
+                    Status = o.Status,
+                    Date = o.CreatedDate
+                }).ToList(),
+                Sales = sales.Select(s => new ProjectLinkedEntityDto
+                {
+                    EntityType = "sale",
+                    EntityId = s.Id,
+                    Number = s.SaleNumber ?? $"SAL-{s.Id}",
+                    Title = s.Title ?? "Sale",
+                    Status = s.Status,
+                    Date = s.CreatedDate
+                }).ToList(),
+                ServiceOrders = serviceOrders.Select(s => new ProjectLinkedEntityDto
+                {
+                    EntityType = "service_order",
+                    EntityId = s.Id,
+                    Number = s.OrderNumber ?? $"SO-{s.Id}",
+                    Title = s.Description ?? "Service Order",
+                    Status = s.Status,
+                    Date = s.CreatedDate
+                }).ToList(),
+                Dispatches = dispatches.Select(d => new ProjectLinkedEntityDto
+                {
+                    EntityType = "dispatch",
+                    EntityId = d.Id,
+                    Number = d.DispatchNumber ?? $"DSP-{d.Id}",
+                    Title = d.Description ?? "Dispatch",
+                    Status = d.Status,
+                    Date = d.CreatedDate
+                }).ToList()
+            };
+        }
+
+        public async Task<ProjectLinksDto> LinkEntityToProjectAsync(int projectId, LinkProjectEntityRequestDto dto, string userId)
+        {
+            var project = await _context.Projects.FirstOrDefaultAsync(p => p.Id == projectId);
+            if (project == null) throw new KeyNotFoundException($"Project with ID {projectId} not found");
+
+            await SetEntityProjectAsync(dto.EntityType, dto.EntityId, projectId, userId);
+            await _context.Set<ProjectActivity>().AddAsync(new ProjectActivity
+            {
+                ProjectId = projectId,
+                ActionType = "linked_entity",
+                Description = $"Linked {dto.EntityType} #{dto.EntityId} to project",
+                CreatedDate = DateTime.UtcNow,
+                CreatedBy = userId,
+                RelatedEntityId = dto.EntityId,
+                RelatedEntityType = dto.EntityType
+            });
+            await _context.SaveChangesAsync();
+
+            return await GetProjectLinksAsync(projectId);
+        }
+
+        public async Task<ProjectLinksDto> UnlinkEntityFromProjectAsync(int projectId, string entityType, int entityId, string userId)
+        {
+            var project = await _context.Projects.FirstOrDefaultAsync(p => p.Id == projectId);
+            if (project == null) throw new KeyNotFoundException($"Project with ID {projectId} not found");
+
+            await SetEntityProjectAsync(entityType, entityId, null, userId);
+            await _context.Set<ProjectActivity>().AddAsync(new ProjectActivity
+            {
+                ProjectId = projectId,
+                ActionType = "unlinked_entity",
+                Description = $"Unlinked {entityType} #{entityId} from project",
+                CreatedDate = DateTime.UtcNow,
+                CreatedBy = userId,
+                RelatedEntityId = entityId,
+                RelatedEntityType = entityType
+            });
+            await _context.SaveChangesAsync();
+
+            return await GetProjectLinksAsync(projectId);
+        }
+
+        public async Task<ProjectSettingsDto> GetProjectSettingsAsync()
+        {
+            var settings = await _context.Set<ProjectSettings>().FirstOrDefaultAsync();
+            if (settings == null)
+            {
+                return new ProjectSettingsDto();
+            }
+            try
+            {
+                return JsonSerializer.Deserialize<ProjectSettingsDto>(settings.SettingsJson) ?? new ProjectSettingsDto();
+            }
+            catch
+            {
+                return new ProjectSettingsDto();
+            }
+        }
+
+        public async Task<ProjectSettingsDto> UpdateProjectSettingsAsync(ProjectSettingsDto dto, string userId)
+        {
+            var settings = await _context.Set<ProjectSettings>().FirstOrDefaultAsync();
+            if (settings == null)
+            {
+                settings = new ProjectSettings();
+                _context.Set<ProjectSettings>().Add(settings);
+            }
+
+            settings.SettingsJson = JsonSerializer.Serialize(dto);
+            settings.UpdatedAt = DateTime.UtcNow;
+            settings.UpdatedBy = userId;
+            await _context.SaveChangesAsync();
+
+            return dto;
+        }
+
         private ProjectResponseDto MapToProjectDto(Project project)
         {
             return new ProjectResponseDto
@@ -461,6 +615,75 @@ namespace MyApi.Modules.Projects.Services
                 ModifiedBy = project.ModifiedBy,
                 Columns = new List<ProjectColumnDto>()
             };
+        }
+
+        private async Task SetProjectIdForLinkedEntitiesAsync(int projectId, int? offerId, int? saleId, int? serviceOrderId, int? dispatchId)
+        {
+            if (offerId.HasValue)
+            {
+                var offer = await _context.Offers.FirstOrDefaultAsync(o => o.Id == offerId.Value && !o.IsDeleted);
+                if (offer != null) offer.ProjectId = projectId;
+            }
+            if (saleId.HasValue)
+            {
+                var sale = await _context.Sales.FirstOrDefaultAsync(s => s.Id == saleId.Value && !s.IsDeleted);
+                if (sale != null) sale.ProjectId = projectId;
+            }
+            if (serviceOrderId.HasValue)
+            {
+                var serviceOrder = await _context.ServiceOrders.FirstOrDefaultAsync(s => s.Id == serviceOrderId.Value && !s.IsDeleted);
+                if (serviceOrder != null) serviceOrder.ProjectId = projectId;
+            }
+            if (dispatchId.HasValue)
+            {
+                var dispatch = await _context.Dispatches.FirstOrDefaultAsync(d => d.Id == dispatchId.Value && !d.IsDeleted);
+                if (dispatch != null) dispatch.ProjectId = projectId;
+            }
+            await _context.SaveChangesAsync();
+        }
+
+        private async Task SetEntityProjectAsync(string entityType, int entityId, int? projectId, string userId)
+        {
+            switch (entityType.Trim().ToLowerInvariant())
+            {
+                case "offer":
+                case "offers":
+                    var offer = await _context.Offers.FirstOrDefaultAsync(o => o.Id == entityId && !o.IsDeleted);
+                    if (offer == null) throw new KeyNotFoundException($"Offer {entityId} not found");
+                    offer.ProjectId = projectId;
+                    offer.ModifiedBy = userId;
+                    offer.ModifiedDate = DateTime.UtcNow;
+                    offer.UpdatedAt = DateTime.UtcNow;
+                    break;
+                case "sale":
+                case "sales":
+                    var sale = await _context.Sales.FirstOrDefaultAsync(s => s.Id == entityId && !s.IsDeleted);
+                    if (sale == null) throw new KeyNotFoundException($"Sale {entityId} not found");
+                    sale.ProjectId = projectId;
+                    sale.ModifiedBy = userId;
+                    sale.ModifiedDate = DateTime.UtcNow;
+                    sale.UpdatedAt = DateTime.UtcNow;
+                    break;
+                case "service_order":
+                case "serviceorder":
+                case "service-orders":
+                    var so = await _context.ServiceOrders.FirstOrDefaultAsync(s => s.Id == entityId && !s.IsDeleted);
+                    if (so == null) throw new KeyNotFoundException($"Service Order {entityId} not found");
+                    so.ProjectId = projectId;
+                    so.ModifiedBy = userId;
+                    so.ModifiedDate = DateTime.UtcNow;
+                    break;
+                case "dispatch":
+                case "dispatches":
+                    var dispatch = await _context.Dispatches.FirstOrDefaultAsync(d => d.Id == entityId && !d.IsDeleted);
+                    if (dispatch == null) throw new KeyNotFoundException($"Dispatch {entityId} not found");
+                    dispatch.ProjectId = projectId;
+                    dispatch.ModifiedBy = userId;
+                    dispatch.ModifiedDate = DateTime.UtcNow;
+                    break;
+                default:
+                    throw new InvalidOperationException($"Unsupported entityType '{entityType}'");
+            }
         }
     }
 }
