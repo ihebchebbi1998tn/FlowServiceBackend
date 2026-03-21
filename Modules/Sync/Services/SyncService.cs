@@ -253,6 +253,15 @@ namespace MyApi.Modules.Sync.Services
         {
             var value = (entityType ?? string.Empty).Trim().ToLowerInvariant();
             var ep = (endpoint ?? string.Empty).ToLowerInvariant();
+            // Prefer specific sync entity types before broad "task"/"project"/etc checks.
+            if (value == "support_ticket_comment") return "support_ticket_comment";
+            if (value == "support_ticket_link") return "support_ticket_link";
+            if (value == "support_ticket") return "support_ticket";
+            if (value == "task_checklist_item") return "task_checklist_item";
+            if (value == "task_checklist") return "task_checklist";
+            if (value == "lookup_bulk") return "lookup_bulk";
+            if (value == "lookup_item") return "lookup_item";
+            if (value == "currency") return "currency";
             if (value.Contains("dynamic_form_response") || (ep.Contains("dynamicforms") && ep.Contains("/responses") && !ep.Contains("/responses/count"))) return "dynamic_form_response";
             if (value.Contains("synced_email") || ep.Contains("/emails/")) return "synced_email";
             if (value.Contains("service")) return "service_order";
@@ -420,6 +429,14 @@ namespace MyApi.Modules.Sync.Services
             if (string.IsNullOrWhiteSpace(endpoint)) return null;
             var match = System.Text.RegularExpressions.Regex.Match(endpoint, @"lookups/([^/?]+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
             return match.Success ? match.Groups[1].Value : null;
+        }
+
+        private static int? ParseLookupItemIdFromEndpoint(string? endpoint)
+        {
+            if (string.IsNullOrWhiteSpace(endpoint)) return null;
+            // Matches /api/lookups/{type}/{id}
+            var match = System.Text.RegularExpressions.Regex.Match(endpoint, @"lookups/[^/?]+/(\d+)(?:/|$|\?)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            return match.Success && int.TryParse(match.Groups[1].Value, out var id) ? id : null;
         }
 
         private async Task<int?> ApplyInstallationAsync(SyncOperationDto op, string operation, string user)
@@ -725,7 +742,7 @@ namespace MyApi.Modules.Sync.Services
         private async Task<int?> ApplyLookupItemAsync(SyncOperationDto op, string operation, string user)
         {
             LookupItem? item = null;
-            var id = op.EntityId ?? ParseIdFromEndpoint(op.Endpoint, "lookups");
+            var id = op.EntityId ?? ParseLookupItemIdFromEndpoint(op.Endpoint);
             var lookupType = ParseLookupTypeFromEndpoint(op.Endpoint);
             if (id.HasValue) item = await _context.LookupItems.FirstOrDefaultAsync(x => x.Id == id.Value && !x.IsDeleted);
             if (item == null && operation != "delete")
