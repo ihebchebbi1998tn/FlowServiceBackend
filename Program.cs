@@ -27,6 +27,7 @@ using MyApi.Modules.WorkflowEngine.Hubs;
 using MyApi.Modules.WebsiteBuilder;
 using MyApi.Modules.EmailAccounts.Services;
 using MyApi.Modules.UserAiSettings.Services;
+using MyApi.Modules.OfflineHydration.Services;
 using MyApi.Modules.WebsiteBuilder.Services;
 using MyApi.Modules.Sync.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -331,6 +332,12 @@ builder.Services.AddScoped<IPdfSettingsService, PdfSettingsService>();
 // App Settings Service (Global key-value application settings)
 builder.Services.AddScoped<IAppSettingsService, AppSettingsService>();
 
+// Offline hydration module preferences (per user / tenant)
+builder.Services.AddScoped<IOfflineHydrationPreferencesService, OfflineHydrationPreferencesService>();
+
+// User UI preferences (theme, layout) — /api/Preferences
+builder.Services.AddScoped<MyApi.Modules.Preferences.Services.IPreferenceService, MyApi.Modules.Preferences.Services.PreferenceService>();
+
 // Numbering Service (Configurable document numbering)
 builder.Services.AddScoped<MyApi.Modules.Numbering.Services.INumberingService, MyApi.Modules.Numbering.Services.NumberingService>();
 
@@ -482,6 +489,7 @@ using (var scope = app.Services.CreateScope())
             "MainAdminUsers",
             "Users",
             "UserPreferences",
+            "OfflineHydrationPreferences",
             // Roles & skills
             "Roles",
             "UserRoles",

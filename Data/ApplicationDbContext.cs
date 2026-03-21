@@ -48,6 +48,7 @@ using MyApi.Modules.SupportTickets.Models;
 using MyApi.Modules.Settings.Models;
 using MyApi.Modules.HR.Models;
 using MyApi.Modules.Sync.Models;
+using MyApi.Modules.OfflineHydration.Models;
 
 namespace MyApi.Data
 {
@@ -255,6 +256,8 @@ namespace MyApi.Data
         public DbSet<SyncOperationReceipt> SyncOperationReceipts { get; set; }
         public DbSet<SyncChange> SyncChanges { get; set; }
 
+        public DbSet<OfflineHydrationPreference> OfflineHydrationPreferences { get; set; }
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
@@ -420,6 +423,14 @@ namespace MyApi.Data
                 entity.HasKey(e => e.Id);
                 entity.HasIndex(e => new { e.TenantId, e.ChangedAt });
                 entity.HasIndex(e => new { e.TenantId, e.EntityType, e.EntityId });
+            });
+
+            modelBuilder.Entity<OfflineHydrationPreference>(entity =>
+            {
+                entity.ToTable("OfflineHydrationPreferences");
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.ModulesJson).HasColumnType("jsonb").IsRequired();
+                entity.HasIndex(e => new { e.TenantId, e.UserId }).IsUnique();
             });
         }
 
