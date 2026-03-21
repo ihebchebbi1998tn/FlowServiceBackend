@@ -19,6 +19,7 @@ using MyApi.Modules.EmailAccounts.Models;
 using MyApi.Modules.Installations.Models;
 using MyApi.Modules.Articles.Models;
 using MyApi.Modules.HR.Models;
+using MyApi.Modules.Lookups.Models;
 using MyApi.Modules.SupportTickets.Models;
 using MyApi.Modules.Sync.DTOs;
 using MyApi.Modules.Sync.Models;
@@ -225,6 +226,9 @@ namespace MyApi.Modules.Sync.Services
                 "hr_department" => await ApplyHrDepartmentAsync(op, operation, currentUser),
                 "hr_attendance" => await ApplyHrAttendanceAsync(op, operation, currentUser),
                 "document" => await ApplyDocumentAsync(op, operation, currentUser),
+                "lookup_item" => await ApplyLookupItemAsync(op, operation, currentUser),
+                "lookup_bulk" => await ApplyLookupBulkAsync(op, operation, currentUser),
+                "currency" => await ApplyCurrencyAsync(op, operation, currentUser),
                 "dynamic_form" => await ApplyDynamicFormAsync(op, operation, currentUser),
                 "dynamic_form_response" => await ApplyDynamicFormResponseAsync(op, operation, currentUser),
                 "calendar_event" => await ApplyCalendarEventAsync(op, operation, currentUser),
@@ -276,6 +280,9 @@ namespace MyApi.Modules.Sync.Services
             if (ep.Contains("hr/departments")) return "hr_department";
             if (ep.Contains("hr/attendance")) return "hr_attendance";
             if (ep.Contains("documents")) return "document";
+            if (ep.Contains("lookups/currencies")) return "currency";
+            if (ep.Contains("lookups") && ep.Contains("/bulk")) return "lookup_bulk";
+            if (ep.Contains("lookups")) return "lookup_item";
             if (ep.Contains("supporttickets") && ep.Contains("/comments")) return "support_ticket_comment";
             if (ep.Contains("supporttickets") && ep.Contains("/links")) return "support_ticket_link";
             if (ep.Contains("supporttickets")) return "support_ticket";
@@ -406,6 +413,13 @@ namespace MyApi.Modules.Sync.Services
             if (string.IsNullOrWhiteSpace(endpoint)) return null;
             var match = System.Text.RegularExpressions.Regex.Match(endpoint, $@"{segment}/(\d+)(?:/|$|\?)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
             return match.Success && int.TryParse(match.Groups[1].Value, out var id) ? id : null;
+        }
+
+        private static string? ParseLookupTypeFromEndpoint(string? endpoint)
+        {
+            if (string.IsNullOrWhiteSpace(endpoint)) return null;
+            var match = System.Text.RegularExpressions.Regex.Match(endpoint, @"lookups/([^/?]+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            return match.Success ? match.Groups[1].Value : null;
         }
 
         private async Task<int?> ApplyInstallationAsync(SyncOperationDto op, string operation, string user)
@@ -706,6 +720,157 @@ namespace MyApi.Modules.Sync.Services
             await _context.SaveChangesAsync();
             await RecordChangeAsync("document", doc.Id, operation, doc, user);
             return doc.Id;
+        }
+
+        private async Task<int?> ApplyLookupItemAsync(SyncOperationDto op, string operation, string user)
+        {
+            LookupItem? item = null;
+            var id = op.EntityId ?? ParseIdFromEndpoint(op.Endpoint, "lookups");
+            var lookupType = ParseLookupTypeFromEndpoint(op.Endpoint);
+            if (id.HasValue) item = await _context.LookupItems.FirstOrDefaultAsync(x => x.Id == id.Value && !x.IsDeleted);
+            if (item == null && operation != "delete")
+            {
+                item = new LookupItem
+                {
+                    LookupType = lookupType,
+                    Name = ReadString(op.Payload, "name") ?? ReadString(op.Payload, "Name") ?? "Offline Lookup",
+                    Description = ReadString(op.Payload, "description") ?? ReadString(op.Payload, "Description"),
+                    Color = ReadString(op.Payload, "color") ?? ReadString(op.Payload, "Color"),
+                    IsActive = ReadBool(op.Payload, "isActive") ?? ReadBool(op.Payload, "IsActive") ?? true,
+                    SortOrder = ReadInt(op.Payload, "sortOrder") ?? ReadInt(op.Payload, "SortOrder") ?? 0,
+                    Category = ReadString(op.Payload, "category") ?? ReadString(op.Payload, "Category"),
+                    Value = ReadString(op.Payload, "value") ?? ReadString(op.Payload, "Value"),
+                    IsDefault = ReadBool(op.Payload, "isDefault") ?? ReadBool(op.Payload, "IsDefault") ?? false,
+                    IsPaid = ReadBool(op.Payload, "isPaid") ?? ReadBool(op.Payload, "IsPaid"),
+                    CreatedUser = user,
+                    CreatedDate = DateTime.UtcNow
+                };
+                _context.LookupItems.Add(item);
+            }
+            if (item == null) return null;
+            if (operation == "delete")
+            {
+                item.IsDeleted = true;
+                item.IsActive = false;
+                item.ModifyUser = user;
+                item.ModifiedDate = DateTime.UtcNow;
+                item.UpdatedAt = DateTime.UtcNow;
+            }
+            else
+            {
+                item.Name = ReadString(op.Payload, "name") ?? ReadString(op.Payload, "Name") ?? item.Name;
+                item.Description = ReadString(op.Payload, "description") ?? ReadString(op.Payload, "Description") ?? item.Description;
+                item.Color = ReadString(op.Payload, "color") ?? ReadString(op.Payload, "Color") ?? item.Color;
+                item.IsActive = ReadBool(op.Payload, "isActive") ?? ReadBool(op.Payload, "IsActive") ?? item.IsActive;
+                item.SortOrder = ReadInt(op.Payload, "sortOrder") ?? ReadInt(op.Payload, "SortOrder") ?? item.SortOrder;
+                item.Category = ReadString(op.Payload, "category") ?? ReadString(op.Payload, "Category") ?? item.Category;
+                item.Value = ReadString(op.Payload, "value") ?? ReadString(op.Payload, "Value") ?? item.Value;
+                item.IsDefault = ReadBool(op.Payload, "isDefault") ?? ReadBool(op.Payload, "IsDefault") ?? item.IsDefault;
+                item.IsPaid = ReadBool(op.Payload, "isPaid") ?? ReadBool(op.Payload, "IsPaid") ?? item.IsPaid;
+                item.LookupType = lookupType ?? item.LookupType;
+                item.ModifyUser = user;
+                item.ModifiedDate = DateTime.UtcNow;
+                item.UpdatedAt = DateTime.UtcNow;
+            }
+            await _context.SaveChangesAsync();
+            await RecordChangeAsync("lookup_item", item.Id, operation, item, user);
+            return item.Id;
+        }
+
+        private async Task<int?> ApplyLookupBulkAsync(SyncOperationDto op, string operation, string user)
+        {
+            if (!op.Payload.HasValue || op.Payload.Value.ValueKind != JsonValueKind.Object) return null;
+            var lookupType = ParseLookupTypeFromEndpoint(op.Endpoint);
+            var payload = op.Payload.Value;
+            if (operation == "delete")
+            {
+                if (payload.TryGetProperty("ids", out var ids) && ids.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var idEl in ids.EnumerateArray())
+                    {
+                        if (idEl.ValueKind != JsonValueKind.String && idEl.ValueKind != JsonValueKind.Number) continue;
+                        if (!int.TryParse(idEl.ToString(), out var id)) continue;
+                        var existing = await _context.LookupItems.FirstOrDefaultAsync(x => x.Id == id && !x.IsDeleted);
+                        if (existing == null) continue;
+                        existing.IsDeleted = true;
+                        existing.IsActive = false;
+                        existing.ModifyUser = user;
+                        existing.ModifiedDate = DateTime.UtcNow;
+                        existing.UpdatedAt = DateTime.UtcNow;
+                    }
+                    await _context.SaveChangesAsync();
+                }
+                return null;
+            }
+
+            if (!payload.TryGetProperty("items", out var items) || items.ValueKind != JsonValueKind.Array) return null;
+            foreach (var it in items.EnumerateArray())
+            {
+                if (operation == "upsert" && it.ValueKind == JsonValueKind.Object && it.TryGetProperty("id", out var idField) && it.TryGetProperty("data", out var dataField))
+                {
+                    var idParsed = int.TryParse(idField.ToString(), out var parsedId) ? parsedId : (int?)null;
+                    var inner = new SyncOperationDto
+                    {
+                        EntityId = idParsed,
+                        Endpoint = op.Endpoint,
+                        Operation = "upsert",
+                        Payload = dataField
+                    };
+                    await ApplyLookupItemAsync(inner, "upsert", user);
+                }
+                else if (it.ValueKind == JsonValueKind.Object)
+                {
+                    var inner = new SyncOperationDto
+                    {
+                        Endpoint = op.Endpoint,
+                        Operation = "upsert",
+                        Payload = it
+                    };
+                    await ApplyLookupItemAsync(inner, "upsert", user);
+                }
+            }
+            return null;
+        }
+
+        private async Task<int?> ApplyCurrencyAsync(SyncOperationDto op, string operation, string user)
+        {
+            Currency? currency = null;
+            var id = op.EntityId ?? ParseIdFromEndpoint(op.Endpoint, "currencies");
+            if (id.HasValue) currency = await _context.Currencies.FirstOrDefaultAsync(x => x.Id == id.Value);
+            if (currency == null && operation != "delete")
+            {
+                currency = new Currency
+                {
+                    Name = ReadString(op.Payload, "name") ?? ReadString(op.Payload, "Name") ?? "Offline Currency",
+                    Symbol = ReadString(op.Payload, "symbol") ?? ReadString(op.Payload, "Symbol") ?? "$",
+                    Code = ReadString(op.Payload, "code") ?? ReadString(op.Payload, "Code") ?? "XXX",
+                    IsActive = ReadBool(op.Payload, "isActive") ?? ReadBool(op.Payload, "IsActive") ?? true,
+                    IsDefault = ReadBool(op.Payload, "isDefault") ?? ReadBool(op.Payload, "IsDefault") ?? false,
+                    SortOrder = ReadInt(op.Payload, "sortOrder") ?? ReadInt(op.Payload, "SortOrder") ?? 0,
+                    CreatedUser = user,
+                    CreatedAt = DateTime.UtcNow
+                };
+                _context.Currencies.Add(currency);
+            }
+            if (currency == null) return null;
+            if (operation == "delete")
+            {
+                _context.Currencies.Remove(currency);
+            }
+            else
+            {
+                currency.Name = ReadString(op.Payload, "name") ?? ReadString(op.Payload, "Name") ?? currency.Name;
+                currency.Symbol = ReadString(op.Payload, "symbol") ?? ReadString(op.Payload, "Symbol") ?? currency.Symbol;
+                currency.Code = ReadString(op.Payload, "code") ?? ReadString(op.Payload, "Code") ?? currency.Code;
+                currency.IsActive = ReadBool(op.Payload, "isActive") ?? ReadBool(op.Payload, "IsActive") ?? currency.IsActive;
+                currency.IsDefault = ReadBool(op.Payload, "isDefault") ?? ReadBool(op.Payload, "IsDefault") ?? currency.IsDefault;
+                currency.SortOrder = ReadInt(op.Payload, "sortOrder") ?? ReadInt(op.Payload, "SortOrder") ?? currency.SortOrder;
+                currency.ModifyUser = user;
+                currency.UpdatedAt = DateTime.UtcNow;
+            }
+            await _context.SaveChangesAsync();
+            await RecordChangeAsync("currency", currency.Id, operation, currency, user);
+            return currency.Id;
         }
 
         private async Task<int?> ApplySupportTicketAsync(SyncOperationDto op, string operation, string user)
