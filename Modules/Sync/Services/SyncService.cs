@@ -821,7 +821,7 @@ namespace MyApi.Modules.Sync.Services
                     DailyTaskId = ReadInt(op.Payload, "dailyTaskId") ?? ReadInt(op.Payload, "DailyTaskId"),
                     SortOrder = ReadInt(op.Payload, "sortOrder") ?? ReadInt(op.Payload, "SortOrder") ?? 1,
                     CreatedBy = user,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedDate = DateTime.UtcNow
                 };
                 _context.TaskChecklists.Add(checklist);
             }
@@ -835,7 +835,7 @@ namespace MyApi.Modules.Sync.Services
                 checklist.Title = ReadString(op.Payload, "title") ?? ReadString(op.Payload, "Title") ?? checklist.Title;
                 checklist.SortOrder = ReadInt(op.Payload, "sortOrder") ?? ReadInt(op.Payload, "SortOrder") ?? checklist.SortOrder;
                 checklist.ModifiedBy = user;
-                checklist.ModifiedAt = DateTime.UtcNow;
+                checklist.ModifiedDate = DateTime.UtcNow;
             }
             await _context.SaveChangesAsync();
             await RecordChangeAsync("task_checklist", checklist.Id, operation, checklist, user);
@@ -858,7 +858,7 @@ namespace MyApi.Modules.Sync.Services
                     IsCompleted = ReadBool(op.Payload, "isCompleted") ?? ReadBool(op.Payload, "IsCompleted") ?? false,
                     SortOrder = ReadInt(op.Payload, "sortOrder") ?? ReadInt(op.Payload, "SortOrder") ?? 1,
                     CreatedBy = user,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedDate = DateTime.UtcNow
                 };
                 _context.TaskChecklistItems.Add(item);
             }
@@ -881,7 +881,7 @@ namespace MyApi.Modules.Sync.Services
                     item.SortOrder = ReadInt(op.Payload, "sortOrder") ?? ReadInt(op.Payload, "SortOrder") ?? item.SortOrder;
                 }
                 item.ModifiedBy = user;
-                item.ModifiedAt = DateTime.UtcNow;
+                item.ModifiedDate = DateTime.UtcNow;
             }
             await _context.SaveChangesAsync();
             await RecordChangeAsync("task_checklist_item", item.Id, operation, item, user);
