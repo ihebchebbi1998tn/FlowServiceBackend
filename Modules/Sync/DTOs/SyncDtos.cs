@@ -77,6 +77,9 @@ namespace MyApi.Modules.Sync.DTOs
         public DateTime CreatedAt { get; set; }
         public string? Error { get; set; }
         public bool CanRetry { get; set; }
+        public string? Method { get; set; }
+        public string? OperationJson { get; set; }
+        public string? ResponseJson { get; set; }
     }
 
     public class SyncHistoryResponseDto

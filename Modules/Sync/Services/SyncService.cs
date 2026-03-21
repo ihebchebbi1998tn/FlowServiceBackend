@@ -19,6 +19,7 @@ using MyApi.Modules.EmailAccounts.Models;
 using MyApi.Modules.Installations.Models;
 using MyApi.Modules.Articles.Models;
 using MyApi.Modules.HR.Models;
+using MyApi.Modules.SupportTickets.Models;
 using MyApi.Modules.Sync.DTOs;
 using MyApi.Modules.Sync.Models;
 
@@ -164,9 +165,12 @@ namespace MyApi.Modules.Sync.Services
                     EntityType = op?.EntityType,
                     Operation = op?.Operation,
                     Endpoint = op?.Endpoint,
+                    Method = op?.Method,
                     CreatedAt = r.CreatedAt,
                     Error = result?.Error,
-                    CanRetry = r.Status == "rejected" && !string.IsNullOrWhiteSpace(r.OperationJson)
+                    CanRetry = r.Status == "rejected" && !string.IsNullOrWhiteSpace(r.OperationJson),
+                    OperationJson = r.OperationJson,
+                    ResponseJson = r.ResponseJson
                 };
             }).ToList();
 
@@ -232,6 +236,11 @@ namespace MyApi.Modules.Sync.Services
                 "sale" => await ApplySaleAsync(op, operation, currentUser),
                 "service_order" => await ApplyServiceOrderAsync(op, operation, currentUser),
                 "dispatch" => await ApplyDispatchAsync(op, operation, currentUser),
+                "support_ticket" => await ApplySupportTicketAsync(op, operation, currentUser),
+                "support_ticket_comment" => await ApplySupportTicketCommentAsync(op, operation, currentUser),
+                "support_ticket_link" => await ApplySupportTicketLinkAsync(op, operation, currentUser),
+                "task_checklist" => await ApplyTaskChecklistAsync(op, operation, currentUser),
+                "task_checklist_item" => await ApplyTaskChecklistItemAsync(op, operation, currentUser),
                 _ => throw new InvalidOperationException($"Unsupported entityType '{entityType}' for offline sync")
             };
         }
@@ -267,6 +276,11 @@ namespace MyApi.Modules.Sync.Services
             if (ep.Contains("hr/departments")) return "hr_department";
             if (ep.Contains("hr/attendance")) return "hr_attendance";
             if (ep.Contains("documents")) return "document";
+            if (ep.Contains("supporttickets") && ep.Contains("/comments")) return "support_ticket_comment";
+            if (ep.Contains("supporttickets") && ep.Contains("/links")) return "support_ticket_link";
+            if (ep.Contains("supporttickets")) return "support_ticket";
+            if (ep.Contains("taskchecklists") && ep.Contains("/items")) return "task_checklist_item";
+            if (ep.Contains("taskchecklists")) return "task_checklist";
             if (ep.Contains("dynamic-forms")) return "dynamic_form";
             if (ep.Contains("calendar")) return "calendar_event";
             if (ep.Contains("email")) return "email_account";
@@ -692,6 +706,186 @@ namespace MyApi.Modules.Sync.Services
             await _context.SaveChangesAsync();
             await RecordChangeAsync("document", doc.Id, operation, doc, user);
             return doc.Id;
+        }
+
+        private async Task<int?> ApplySupportTicketAsync(SyncOperationDto op, string operation, string user)
+        {
+            SupportTicket? ticket = null;
+            var id = op.EntityId ?? ParseIdFromEndpoint(op.Endpoint, "SupportTickets");
+            if (id.HasValue) ticket = await _context.SupportTickets.FirstOrDefaultAsync(x => x.Id == id.Value);
+            if (ticket == null && operation != "delete")
+            {
+                ticket = new SupportTicket
+                {
+                    Title = ReadString(op.Payload, "title") ?? ReadString(op.Payload, "Title") ?? "Offline Ticket",
+                    Description = ReadString(op.Payload, "description") ?? ReadString(op.Payload, "Description") ?? string.Empty,
+                    Urgency = ReadString(op.Payload, "urgency") ?? ReadString(op.Payload, "Urgency"),
+                    Category = ReadString(op.Payload, "category") ?? ReadString(op.Payload, "Category"),
+                    CurrentPage = ReadString(op.Payload, "currentPage") ?? ReadString(op.Payload, "CurrentPage"),
+                    RelatedUrl = ReadString(op.Payload, "relatedUrl") ?? ReadString(op.Payload, "RelatedUrl"),
+                    UserEmail = ReadString(op.Payload, "userEmail") ?? ReadString(op.Payload, "UserEmail"),
+                    Status = ReadString(op.Payload, "status") ?? ReadString(op.Payload, "Status") ?? "open",
+                    Tenant = ReadString(op.Payload, "tenant") ?? ReadString(op.Payload, "Tenant") ?? "default",
+                    CreatedAt = DateTime.UtcNow
+                };
+                _context.SupportTickets.Add(ticket);
+            }
+            if (ticket == null) return null;
+            if (operation == "delete")
+            {
+                _context.SupportTickets.Remove(ticket);
+            }
+            else
+            {
+                ticket.Status = ReadString(op.Payload, "status") ?? ReadString(op.Payload, "Status") ?? ticket.Status;
+                ticket.Title = ReadString(op.Payload, "title") ?? ReadString(op.Payload, "Title") ?? ticket.Title;
+                ticket.Description = ReadString(op.Payload, "description") ?? ReadString(op.Payload, "Description") ?? ticket.Description;
+                ticket.Urgency = ReadString(op.Payload, "urgency") ?? ReadString(op.Payload, "Urgency") ?? ticket.Urgency;
+                ticket.Category = ReadString(op.Payload, "category") ?? ReadString(op.Payload, "Category") ?? ticket.Category;
+                ticket.CurrentPage = ReadString(op.Payload, "currentPage") ?? ReadString(op.Payload, "CurrentPage") ?? ticket.CurrentPage;
+                ticket.RelatedUrl = ReadString(op.Payload, "relatedUrl") ?? ReadString(op.Payload, "RelatedUrl") ?? ticket.RelatedUrl;
+            }
+            await _context.SaveChangesAsync();
+            await RecordChangeAsync("support_ticket", ticket.Id, operation, ticket, user);
+            return ticket.Id;
+        }
+
+        private async Task<int?> ApplySupportTicketCommentAsync(SyncOperationDto op, string operation, string user)
+        {
+            if (operation == "delete") return null;
+            var ticketId = ReadInt(op.Payload, "ticketId")
+                ?? ReadInt(op.Payload, "TicketId")
+                ?? ReadInt(op.Payload, "supportTicketId")
+                ?? ParseIdFromEndpoint(op.Endpoint, "SupportTickets");
+            if (!ticketId.HasValue) throw new InvalidOperationException("Ticket id is required for support ticket comments");
+            var ticket = await _context.SupportTickets.FirstOrDefaultAsync(x => x.Id == ticketId.Value);
+            if (ticket == null) throw new KeyNotFoundException($"Support ticket '{ticketId.Value}' not found");
+            var comment = new SupportTicketComment
+            {
+                SupportTicketId = ticketId.Value,
+                Author = ReadString(op.Payload, "author") ?? ReadString(op.Payload, "Author") ?? user,
+                AuthorEmail = ReadString(op.Payload, "authorEmail") ?? ReadString(op.Payload, "AuthorEmail"),
+                Text = ReadString(op.Payload, "text") ?? ReadString(op.Payload, "Text") ?? string.Empty,
+                IsInternal = ReadBool(op.Payload, "isInternal") ?? ReadBool(op.Payload, "IsInternal") ?? false,
+                CreatedAt = DateTime.UtcNow
+            };
+            _context.SupportTicketComments.Add(comment);
+            await _context.SaveChangesAsync();
+            await RecordChangeAsync("support_ticket_comment", comment.Id, "create", comment, user);
+            return comment.Id;
+        }
+
+        private async Task<int?> ApplySupportTicketLinkAsync(SyncOperationDto op, string operation, string user)
+        {
+            var sourceTicketId = ReadInt(op.Payload, "sourceTicketId")
+                ?? ReadInt(op.Payload, "SourceTicketId")
+                ?? ParseIdFromEndpoint(op.Endpoint, "SupportTickets");
+            var targetTicketId = ReadInt(op.Payload, "targetTicketId") ?? ReadInt(op.Payload, "TargetTicketId");
+            if (!sourceTicketId.HasValue) throw new InvalidOperationException("Source ticket id is required");
+            if (operation == "delete")
+            {
+                var linkId = ParseIdFromEndpoint(op.Endpoint, "links");
+                if (!linkId.HasValue) return null;
+                var existing = await _context.SupportTicketLinks.FirstOrDefaultAsync(x => x.Id == linkId.Value && x.SourceTicketId == sourceTicketId.Value);
+                if (existing == null) return null;
+                _context.SupportTicketLinks.Remove(existing);
+                await _context.SaveChangesAsync();
+                await RecordChangeAsync("support_ticket_link", existing.Id, "delete", existing, user);
+                return existing.Id;
+            }
+            if (!targetTicketId.HasValue) throw new InvalidOperationException("Target ticket id is required");
+            var link = new SupportTicketLink
+            {
+                SourceTicketId = sourceTicketId.Value,
+                TargetTicketId = targetTicketId.Value,
+                LinkType = ReadString(op.Payload, "linkType") ?? ReadString(op.Payload, "LinkType") ?? "related",
+                CreatedAt = DateTime.UtcNow
+            };
+            _context.SupportTicketLinks.Add(link);
+            await _context.SaveChangesAsync();
+            await RecordChangeAsync("support_ticket_link", link.Id, "create", link, user);
+            return link.Id;
+        }
+
+        private async Task<int?> ApplyTaskChecklistAsync(SyncOperationDto op, string operation, string user)
+        {
+            TaskChecklist? checklist = null;
+            var id = op.EntityId ?? ParseIdFromEndpoint(op.Endpoint, "taskchecklists");
+            if (id.HasValue) checklist = await _context.TaskChecklists.FirstOrDefaultAsync(x => x.Id == id.Value);
+            if (checklist == null && operation != "delete")
+            {
+                checklist = new TaskChecklist
+                {
+                    Title = ReadString(op.Payload, "title") ?? ReadString(op.Payload, "Title") ?? "Offline checklist",
+                    ProjectTaskId = ReadInt(op.Payload, "projectTaskId") ?? ReadInt(op.Payload, "ProjectTaskId"),
+                    DailyTaskId = ReadInt(op.Payload, "dailyTaskId") ?? ReadInt(op.Payload, "DailyTaskId"),
+                    SortOrder = ReadInt(op.Payload, "sortOrder") ?? ReadInt(op.Payload, "SortOrder") ?? 1,
+                    CreatedBy = user,
+                    CreatedAt = DateTime.UtcNow
+                };
+                _context.TaskChecklists.Add(checklist);
+            }
+            if (checklist == null) return null;
+            if (operation == "delete")
+            {
+                _context.TaskChecklists.Remove(checklist);
+            }
+            else
+            {
+                checklist.Title = ReadString(op.Payload, "title") ?? ReadString(op.Payload, "Title") ?? checklist.Title;
+                checklist.SortOrder = ReadInt(op.Payload, "sortOrder") ?? ReadInt(op.Payload, "SortOrder") ?? checklist.SortOrder;
+                checklist.ModifiedBy = user;
+                checklist.ModifiedAt = DateTime.UtcNow;
+            }
+            await _context.SaveChangesAsync();
+            await RecordChangeAsync("task_checklist", checklist.Id, operation, checklist, user);
+            return checklist.Id;
+        }
+
+        private async Task<int?> ApplyTaskChecklistItemAsync(SyncOperationDto op, string operation, string user)
+        {
+            TaskChecklistItem? item = null;
+            var id = op.EntityId ?? ParseIdFromEndpoint(op.Endpoint, "items");
+            if (id.HasValue) item = await _context.TaskChecklistItems.FirstOrDefaultAsync(x => x.Id == id.Value);
+            if (item == null && operation != "delete")
+            {
+                var checklistId = ReadInt(op.Payload, "checklistId") ?? ReadInt(op.Payload, "ChecklistId");
+                if (!checklistId.HasValue) throw new InvalidOperationException("Checklist id is required");
+                item = new TaskChecklistItem
+                {
+                    ChecklistId = checklistId.Value,
+                    Title = ReadString(op.Payload, "title") ?? ReadString(op.Payload, "Title") ?? "Item",
+                    IsCompleted = ReadBool(op.Payload, "isCompleted") ?? ReadBool(op.Payload, "IsCompleted") ?? false,
+                    SortOrder = ReadInt(op.Payload, "sortOrder") ?? ReadInt(op.Payload, "SortOrder") ?? 1,
+                    CreatedBy = user,
+                    CreatedAt = DateTime.UtcNow
+                };
+                _context.TaskChecklistItems.Add(item);
+            }
+            if (item == null) return null;
+            if (operation == "delete")
+            {
+                _context.TaskChecklistItems.Remove(item);
+            }
+            else
+            {
+                if (op.Endpoint?.Contains("/toggle") == true)
+                {
+                    item.IsCompleted = !item.IsCompleted;
+                    item.CompletedAt = item.IsCompleted ? DateTime.UtcNow : null;
+                }
+                else
+                {
+                    item.Title = ReadString(op.Payload, "title") ?? ReadString(op.Payload, "Title") ?? item.Title;
+                    item.IsCompleted = ReadBool(op.Payload, "isCompleted") ?? ReadBool(op.Payload, "IsCompleted") ?? item.IsCompleted;
+                    item.SortOrder = ReadInt(op.Payload, "sortOrder") ?? ReadInt(op.Payload, "SortOrder") ?? item.SortOrder;
+                }
+                item.ModifiedBy = user;
+                item.ModifiedAt = DateTime.UtcNow;
+            }
+            await _context.SaveChangesAsync();
+            await RecordChangeAsync("task_checklist_item", item.Id, operation, item, user);
+            return item.Id;
         }
 
         private async Task<int?> ApplyDynamicFormAsync(SyncOperationDto op, string operation, string user)
