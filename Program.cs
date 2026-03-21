@@ -15,6 +15,7 @@ using MyApi.Modules.Sales.Services;
 using MyApi.Modules.Installations.Services;
 using MyApi.Modules.ServiceOrders.Services;
 using MyApi.Modules.Planning.Services;
+using MyApi.Modules.HR.Services;
 using MyApi.Modules.Shared.Services;
 using MyApi.Modules.Preferences.Services;
 using MyApi.Modules.Settings.Services;
@@ -298,6 +299,7 @@ builder.Services.AddScoped<MyApi.Modules.Dispatches.Services.IDispatchService, M
 
 // Planning Module Services
 builder.Services.AddScoped<IPlanningService, PlanningService>();
+builder.Services.AddScoped<IHrService, HrService>();
 
 // Upload Services (UploadThing integration)
 builder.Services.AddHttpClient();

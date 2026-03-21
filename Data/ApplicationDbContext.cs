@@ -46,6 +46,7 @@ using MyApi.Modules.RetenueSource.Models;
 using MyApi.Modules.RetenueSource.Data;
 using MyApi.Modules.SupportTickets.Models;
 using MyApi.Modules.Settings.Models;
+using MyApi.Modules.HR.Models;
 
 namespace MyApi.Data
 {
@@ -163,6 +164,15 @@ namespace MyApi.Data
         public DbSet<UserLeave> UserLeaves { get; set; }
         public DbSet<UserStatusHistory> UserStatusHistory { get; set; }
         public DbSet<DispatchHistory> DispatchHistory { get; set; }
+        
+        // HR Module
+        public DbSet<HrEmployeeSalaryConfig> HrEmployeeSalaryConfigs { get; set; }
+        public DbSet<HrAttendanceRecord> HrAttendanceRecords { get; set; }
+        public DbSet<HrAttendanceSettings> HrAttendanceSettings { get; set; }
+        public DbSet<HrDepartment> HrDepartments { get; set; }
+        public DbSet<HrLeaveBalance> HrLeaveBalances { get; set; }
+        public DbSet<HrPayrollRun> HrPayrollRuns { get; set; }
+        public DbSet<HrPayrollEntry> HrPayrollEntries { get; set; }
 
         // Notifications Module
         public DbSet<Notification> Notifications { get; set; }
@@ -377,6 +387,7 @@ namespace MyApi.Data
             ConfigureLookupEntities(modelBuilder);
             ConfigureTasksEntities(modelBuilder);
             ConfigurePlanningEntities(modelBuilder);
+            ConfigureHrEntities(modelBuilder);
 
             // Website Builder Module configurations
             new WBSiteConfiguration().Configure(modelBuilder);
@@ -810,6 +821,57 @@ namespace MyApi.Data
                 entity.Property(e => e.ChangedBy).HasColumnName("changed_by");
 
                 entity.HasIndex(e => e.UserId);
+            });
+        }
+
+        private void ConfigureHrEntities(ModelBuilder modelBuilder)
+        {
+            modelBuilder.Entity<HrEmployeeSalaryConfig>(entity =>
+            {
+                entity.ToTable("hr_employee_salary_configs");
+                entity.HasKey(e => e.Id);
+                entity.HasIndex(e => e.UserId).IsUnique();
+            });
+
+            modelBuilder.Entity<HrAttendanceRecord>(entity =>
+            {
+                entity.ToTable("hr_attendance_records");
+                entity.HasKey(e => e.Id);
+                entity.HasIndex(e => new { e.UserId, e.Date });
+            });
+
+            modelBuilder.Entity<HrAttendanceSettings>(entity =>
+            {
+                entity.ToTable("hr_attendance_settings");
+                entity.HasKey(e => e.Id);
+            });
+
+            modelBuilder.Entity<HrDepartment>(entity =>
+            {
+                entity.ToTable("hr_departments");
+                entity.HasKey(e => e.Id);
+                entity.HasIndex(e => e.Name);
+            });
+
+            modelBuilder.Entity<HrLeaveBalance>(entity =>
+            {
+                entity.ToTable("hr_leave_balances");
+                entity.HasKey(e => e.Id);
+                entity.HasIndex(e => new { e.UserId, e.Year, e.LeaveType }).IsUnique();
+            });
+
+            modelBuilder.Entity<HrPayrollRun>(entity =>
+            {
+                entity.ToTable("hr_payroll_runs");
+                entity.HasKey(e => e.Id);
+                entity.HasIndex(e => new { e.Year, e.Month });
+            });
+
+            modelBuilder.Entity<HrPayrollEntry>(entity =>
+            {
+                entity.ToTable("hr_payroll_entries");
+                entity.HasKey(e => e.Id);
+                entity.HasIndex(e => new { e.PayrollRunId, e.UserId });
             });
         }
 
