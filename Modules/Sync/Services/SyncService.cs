@@ -40,68 +40,240 @@ namespace MyApi.Modules.Sync.Services
         public async Task<SyncPushResponseDto> PushAsync(SyncPushRequestDto request, string currentUser)
         {
             var response = new SyncPushResponseDto();
-            foreach (var op in request.Operations)
+            var pending = new List<(int idx, SyncOperationDto op)>();
+            var groupsWithDuplicateMembers = new HashSet<string>(StringComparer.Ordinal);
+
+            for (var i = 0; i < request.Operations.Count; i++)
             {
+                var op = request.Operations[i];
                 var result = new SyncPushResultDto { OpId = op.OpId };
+                if (!string.IsNullOrWhiteSpace(op.DeviceId) && !string.Equals(op.DeviceId, request.DeviceId, StringComparison.Ordinal))
+                {
+                    result.Status = "rejected";
+                    result.Error = "Operation deviceId does not match request deviceId";
+                    response.Results.Add(result);
+                    continue;
+                }
                 var existing = await _context.Set<SyncOperationReceipt>()
                     .FirstOrDefaultAsync(r => r.DeviceId == request.DeviceId && r.OpId == op.OpId);
                 if (existing != null)
                 {
+                    if (!string.IsNullOrWhiteSpace(op.TransactionGroupId))
+                    {
+                        groupsWithDuplicateMembers.Add(op.TransactionGroupId);
+                    }
                     result.Status = "duplicate";
                     result.ServerEntityId = existing.ServerEntityId;
                     response.Results.Add(result);
                     continue;
                 }
+                pending.Add((i, op));
+            }
 
-                try
+            var grouped = pending
+                .GroupBy(x => !string.IsNullOrWhiteSpace(x.op.TransactionGroupId) ? $"g:{x.op.TransactionGroupId}" : $"o:{x.op.OpId}")
+                .Select(g => new
                 {
-                    result.ServerEntityId = await ApplyOperationAsync(op, currentUser);
-                    result.Status = "applied";
-                    _context.Set<SyncOperationReceipt>().Add(new SyncOperationReceipt
+                    Key = g.Key,
+                    FirstIndex = g.Min(x => x.idx),
+                    Items = g.OrderBy(x => x.idx).Select(x => x.op).ToList()
+                })
+                .OrderBy(g => g.FirstIndex)
+                .ToList();
+
+            foreach (var g in grouped)
+            {
+                if (g.Key.StartsWith("g:"))
+                {
+                    var groupId = g.Key.Substring(2);
+                    if (groupsWithDuplicateMembers.Contains(groupId))
+                    {
+                        foreach (var op in g.Items)
+                        {
+                            response.Results.Add(new SyncPushResultDto
+                            {
+                                OpId = op.OpId,
+                                Status = "rejected",
+                                Error = "Transaction group contains already-applied operations; replay whole group from a fresh queue."
+                            });
+                        }
+                        continue;
+                    }
+                }
+                // Single operation path keeps old behavior.
+                if (!g.Key.StartsWith("g:") || g.Items.Count <= 1)
+                {
+                    var op = g.Items[0];
+                    var result = new SyncPushResultDto { OpId = op.OpId };
+                    var receipt = new SyncOperationReceipt
                     {
                         DeviceId = request.DeviceId,
                         OpId = op.OpId,
-                        Status = result.Status,
-                        ServerEntityId = result.ServerEntityId,
-                        ResponseJson = JsonSerializer.Serialize(result),
+                        CreatedByUser = currentUser,
+                        Status = "processing",
                         OperationJson = JsonSerializer.Serialize(op)
-                    });
+                    };
+                    _context.Set<SyncOperationReceipt>().Add(receipt);
+                    try
+                    {
+                        await _context.SaveChangesAsync();
+                    }
+                    catch (DbUpdateException)
+                    {
+                        _context.Entry(receipt).State = EntityState.Detached;
+                        var existingDup = await _context.Set<SyncOperationReceipt>()
+                            .AsNoTracking()
+                            .FirstOrDefaultAsync(r => r.DeviceId == request.DeviceId && r.OpId == op.OpId);
+                        result.Status = "duplicate";
+                        result.ServerEntityId = existingDup?.ServerEntityId;
+                        response.Results.Add(result);
+                        continue;
+                    }
+                    try
+                    {
+                        result.ServerEntityId = await ApplyOperationWithConflictStrategyAsync(op, currentUser);
+                        result.Status = "applied";
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to apply sync operation {OpId}", op.OpId);
+                        result.Status = "rejected";
+                        result.Error = ex.Message;
+                    }
+                    receipt.Status = result.Status;
+                    receipt.ServerEntityId = result.ServerEntityId;
+                    receipt.ResponseJson = JsonSerializer.Serialize(result);
                     await _context.SaveChangesAsync();
+                    response.Results.Add(result);
+                    continue;
+                }
+
+                // Transaction group path: all-or-nothing apply.
+                await using var tx = await _context.Database.BeginTransactionAsync();
+                var groupResults = new List<SyncPushResultDto>();
+                try
+                {
+                    foreach (var op in g.Items)
+                    {
+                        var r = new SyncPushResultDto
+                        {
+                            OpId = op.OpId,
+                            Status = "applied",
+                            ServerEntityId = await ApplyOperationWithConflictStrategyAsync(op, currentUser),
+                        };
+                        groupResults.Add(r);
+                    }
+
+                    foreach (var (op, r) in g.Items.Zip(groupResults, (op, r) => (op, r)))
+                    {
+                        _context.Set<SyncOperationReceipt>().Add(new SyncOperationReceipt
+                        {
+                            DeviceId = request.DeviceId,
+                            OpId = op.OpId,
+                            CreatedByUser = currentUser,
+                            Status = r.Status,
+                            ServerEntityId = r.ServerEntityId,
+                            ResponseJson = JsonSerializer.Serialize(r),
+                            OperationJson = JsonSerializer.Serialize(op)
+                        });
+                    }
+                    await _context.SaveChangesAsync();
+                    await tx.CommitAsync();
+                    response.Results.AddRange(groupResults);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Failed to apply sync operation {OpId}", op.OpId);
-                    result.Status = "rejected";
-                    result.Error = ex.Message;
-                    _context.Set<SyncOperationReceipt>().Add(new SyncOperationReceipt
+                    await tx.RollbackAsync();
+                    _context.ChangeTracker.Clear();
+                    _logger.LogWarning(ex, "Failed transaction group {GroupKey}", g.Key);
+                    foreach (var op in g.Items)
                     {
-                        DeviceId = request.DeviceId,
-                        OpId = op.OpId,
-                        Status = result.Status,
-                        ResponseJson = JsonSerializer.Serialize(result),
-                        OperationJson = JsonSerializer.Serialize(op)
-                    });
+                        var r = new SyncPushResultDto
+                        {
+                            OpId = op.OpId,
+                            Status = "rejected",
+                            Error = $"Transaction group rolled back: {ex.Message}"
+                        };
+                        _context.Set<SyncOperationReceipt>().Add(new SyncOperationReceipt
+                        {
+                            DeviceId = request.DeviceId,
+                            OpId = op.OpId,
+                            CreatedByUser = currentUser,
+                            Status = r.Status,
+                            ResponseJson = JsonSerializer.Serialize(r),
+                            OperationJson = JsonSerializer.Serialize(op)
+                        });
+                        response.Results.Add(r);
+                    }
                     await _context.SaveChangesAsync();
                 }
-
-                response.Results.Add(result);
             }
 
             return response;
         }
 
+        private async Task<int?> ApplyOperationWithConflictStrategyAsync(SyncOperationDto op, string currentUser)
+        {
+            try
+            {
+                return await ApplyOperationAsync(op, currentUser);
+            }
+            catch (Exception ex)
+            {
+                var strategy = (op.ConflictStrategy ?? "reject").Trim().ToLowerInvariant();
+                if (strategy == "last_write_wins")
+                {
+                    var msg = ex.Message.ToLowerInvariant();
+                    if (msg.Contains("not found") || msg.Contains("duplicate") || msg.Contains("already") || msg.Contains("conflict"))
+                    {
+                        return op.EntityId;
+                    }
+                }
+                if (strategy == "merge" && !string.Equals(op.Operation, "delete", StringComparison.OrdinalIgnoreCase))
+                {
+                    var retry = new SyncOperationDto
+                    {
+                        OpId = op.OpId,
+                        DeviceId = op.DeviceId,
+                        EntityType = op.EntityType,
+                        Operation = "upsert",
+                        EntityId = op.EntityId,
+                        ClientTempId = op.ClientTempId,
+                        Payload = op.Payload,
+                        ClientTimestamp = op.ClientTimestamp,
+                        Method = op.Method,
+                        Endpoint = op.Endpoint,
+                        TransactionGroupId = op.TransactionGroupId,
+                        ConflictStrategy = op.ConflictStrategy
+                    };
+                    return await ApplyOperationAsync(retry, currentUser);
+                }
+                throw;
+            }
+        }
+
         public async Task<SyncPullResponseDto> PullAsync(string? cursor, int limit)
         {
             DateTime since = DateTime.MinValue;
+            long sinceId = 0;
             if (!string.IsNullOrWhiteSpace(cursor))
             {
-                DateTime.TryParse(cursor, null, DateTimeStyles.RoundtripKind, out since);
+                if (cursor.Contains("|"))
+                {
+                    var parts = cursor.Split('|', 2);
+                    DateTime.TryParse(parts[0], null, DateTimeStyles.RoundtripKind, out since);
+                    long.TryParse(parts[1], out sinceId);
+                }
+                else
+                {
+                    DateTime.TryParse(cursor, null, DateTimeStyles.RoundtripKind, out since);
+                }
             }
 
             var rows = await _context.Set<SyncChange>()
                 .AsNoTracking()
-                .Where(c => c.ChangedAt > since)
-                .OrderBy(c => c.ChangedAt)
+                .Where(c => c.ChangedAt > since || (c.ChangedAt == since && c.Id > sinceId))
+                .OrderBy(c => c.ChangedAt).ThenBy(c => c.Id)
                 .Take(Math.Max(1, Math.Min(limit, 500)))
                 .ToListAsync();
 
@@ -116,19 +288,25 @@ namespace MyApi.Modules.Sync.Services
                     DataJson = r.DataJson,
                     ChangedAt = r.ChangedAt
                 }).ToList(),
-                NextCursor = rows.LastOrDefault()?.ChangedAt.ToString("O"),
+                NextCursor = rows.LastOrDefault() is SyncChange last
+                    ? $"{last.ChangedAt:O}|{last.Id}"
+                    : null,
                 HasMore = rows.Count >= limit
             };
 
             return dto;
         }
 
-        public async Task<SyncHistoryResponseDto> GetHistoryAsync(SyncHistoryQueryDto query)
+        public async Task<SyncHistoryResponseDto> GetHistoryAsync(SyncHistoryQueryDto query, string currentUser, bool isAdmin)
         {
             var page = query.Page <= 0 ? 1 : query.Page;
             var pageSize = query.PageSize <= 0 ? 25 : Math.Min(query.PageSize, 200);
 
             var receipts = _context.Set<SyncOperationReceipt>().AsNoTracking().AsQueryable();
+            if (!isAdmin)
+            {
+                receipts = receipts.Where(r => r.CreatedByUser == currentUser);
+            }
             if (!string.IsNullOrWhiteSpace(query.Status))
             {
                 var status = query.Status.Trim().ToLowerInvariant();
@@ -167,11 +345,13 @@ namespace MyApi.Modules.Sync.Services
                     Operation = op?.Operation,
                     Endpoint = op?.Endpoint,
                     Method = op?.Method,
+                    TransactionGroupId = op?.TransactionGroupId,
+                    ConflictStrategy = op?.ConflictStrategy,
                     CreatedAt = r.CreatedAt,
                     Error = result?.Error,
                     CanRetry = r.Status == "rejected" && !string.IsNullOrWhiteSpace(r.OperationJson),
-                    OperationJson = r.OperationJson,
-                    ResponseJson = r.ResponseJson
+                    OperationJson = (isAdmin && query.IncludePayloads) ? r.OperationJson : null,
+                    ResponseJson = (isAdmin && query.IncludePayloads) ? r.ResponseJson : null
                 };
             }).ToList();
 
@@ -184,11 +364,13 @@ namespace MyApi.Modules.Sync.Services
             };
         }
 
-        public async Task<SyncPushResultDto> RetryAsync(SyncRetryRequestDto request, string currentUser)
+        public async Task<SyncPushResultDto> RetryAsync(SyncRetryRequestDto request, string currentUser, bool isAdmin)
         {
             var receipt = await _context.Set<SyncOperationReceipt>()
                 .FirstOrDefaultAsync(r => r.DeviceId == request.DeviceId && r.OpId == request.OpId);
             if (receipt == null) throw new KeyNotFoundException("Sync receipt not found");
+            if (!isAdmin && !string.Equals(receipt.CreatedByUser, currentUser, StringComparison.Ordinal))
+                throw new KeyNotFoundException("Sync receipt not found");
             if (string.IsNullOrWhiteSpace(receipt.OperationJson))
                 throw new InvalidOperationException("Operation payload is not available for retry");
 
@@ -882,8 +1064,6 @@ namespace MyApi.Modules.Sync.Services
                 currency.IsActive = ReadBool(op.Payload, "isActive") ?? ReadBool(op.Payload, "IsActive") ?? currency.IsActive;
                 currency.IsDefault = ReadBool(op.Payload, "isDefault") ?? ReadBool(op.Payload, "IsDefault") ?? currency.IsDefault;
                 currency.SortOrder = ReadInt(op.Payload, "sortOrder") ?? ReadInt(op.Payload, "SortOrder") ?? currency.SortOrder;
-                currency.ModifyUser = user;
-                currency.UpdatedAt = DateTime.UtcNow;
             }
             await _context.SaveChangesAsync();
             await RecordChangeAsync("currency", currency.Id, operation, currency, user);
@@ -1053,7 +1233,8 @@ namespace MyApi.Modules.Sync.Services
             {
                 if (op.Endpoint?.Contains("/toggle") == true)
                 {
-                    item.IsCompleted = !item.IsCompleted;
+                    var explicitState = ReadBool(op.Payload, "isCompleted") ?? ReadBool(op.Payload, "IsCompleted");
+                    item.IsCompleted = explicitState ?? !item.IsCompleted;
                     item.CompletedAt = item.IsCompleted ? DateTime.UtcNow : null;
                 }
                 else

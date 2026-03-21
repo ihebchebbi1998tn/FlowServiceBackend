@@ -34,6 +34,9 @@ namespace MyApi.Modules.Sync.Models
         [Column(TypeName = "text")]
         public string? OperationJson { get; set; }
 
+        [MaxLength(256)]
+        public string? CreatedByUser { get; set; }
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     }
 }

@@ -7,7 +7,7 @@ namespace MyApi.Modules.Sync.Services
     {
         Task<SyncPushResponseDto> PushAsync(SyncPushRequestDto request, string currentUser);
         Task<SyncPullResponseDto> PullAsync(string? cursor, int limit);
-        Task<SyncHistoryResponseDto> GetHistoryAsync(SyncHistoryQueryDto query);
-        Task<SyncPushResultDto> RetryAsync(SyncRetryRequestDto request, string currentUser);
+        Task<SyncHistoryResponseDto> GetHistoryAsync(SyncHistoryQueryDto query, string currentUser, bool isAdmin);
+        Task<SyncPushResultDto> RetryAsync(SyncRetryRequestDto request, string currentUser, bool isAdmin);
     }
 }

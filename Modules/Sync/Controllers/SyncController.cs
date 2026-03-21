@@ -1,3 +1,4 @@
+using System;
 using System.Security.Claims;
 using System.Collections.Generic;
 using Microsoft.AspNetCore.Authorization;
@@ -38,7 +39,7 @@ namespace MyApi.Modules.Sync.Controllers
         [HttpGet("history")]
         public async Task<ActionResult<SyncHistoryResponseDto>> History([FromQuery] SyncHistoryQueryDto query)
         {
-            var result = await _syncService.GetHistoryAsync(query);
+            var result = await _syncService.GetHistoryAsync(query, GetCurrentUser(), IsAdmin());
             return Ok(result);
         }
 
@@ -49,7 +50,7 @@ namespace MyApi.Modules.Sync.Controllers
                 return BadRequest("deviceId and opId are required");
             try
             {
-                var result = await _syncService.RetryAsync(request, GetCurrentUser());
+                var result = await _syncService.RetryAsync(request, GetCurrentUser(), IsAdmin());
                 return Ok(result);
             }
             catch (KeyNotFoundException ex)
@@ -68,6 +69,14 @@ namespace MyApi.Modules.Sync.Controllers
                    User.FindFirst(ClaimTypes.Name)?.Value ??
                    User.FindFirst("email")?.Value ??
                    "system";
+        }
+
+        private bool IsAdmin()
+        {
+            return User.IsInRole("admin")
+                || User.IsInRole("Admin")
+                || string.Equals(User.FindFirst(ClaimTypes.Role)?.Value, "admin", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(User.FindFirst("role")?.Value, "admin", StringComparison.OrdinalIgnoreCase);
         }
     }
 }

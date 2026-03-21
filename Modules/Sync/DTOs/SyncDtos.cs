@@ -23,6 +23,8 @@ namespace MyApi.Modules.Sync.DTOs
         public DateTime? ClientTimestamp { get; set; }
         public string? Method { get; set; }
         public string? Endpoint { get; set; }
+        public string? TransactionGroupId { get; set; }
+        public string? ConflictStrategy { get; set; }
     }
 
     public class SyncPushResponseDto
@@ -61,6 +63,7 @@ namespace MyApi.Modules.Sync.DTOs
         public string? Status { get; set; }
         public string? Search { get; set; }
         public string? DeviceId { get; set; }
+        public bool IncludePayloads { get; set; }
         public int Page { get; set; } = 1;
         public int PageSize { get; set; } = 25;
     }
@@ -78,6 +81,8 @@ namespace MyApi.Modules.Sync.DTOs
         public string? Error { get; set; }
         public bool CanRetry { get; set; }
         public string? Method { get; set; }
+        public string? TransactionGroupId { get; set; }
+        public string? ConflictStrategy { get; set; }
         public string? OperationJson { get; set; }
         public string? ResponseJson { get; set; }
     }
