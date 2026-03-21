@@ -47,6 +47,7 @@ using MyApi.Modules.RetenueSource.Data;
 using MyApi.Modules.SupportTickets.Models;
 using MyApi.Modules.Settings.Models;
 using MyApi.Modules.HR.Models;
+using MyApi.Modules.Sync.Models;
 
 namespace MyApi.Data
 {
@@ -251,6 +252,8 @@ namespace MyApi.Data
 
         // App Settings Module (Global key-value settings)
         public DbSet<AppSettings> AppSettings { get; set; }
+        public DbSet<SyncOperationReceipt> SyncOperationReceipts { get; set; }
+        public DbSet<SyncChange> SyncChanges { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -405,6 +408,19 @@ namespace MyApi.Data
             // Retenue à la Source configurations
             new RSRecordConfiguration().Configure(modelBuilder);
             new TEJExportLogConfiguration().Configure(modelBuilder);
+
+            modelBuilder.Entity<SyncOperationReceipt>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.HasIndex(e => new { e.TenantId, e.DeviceId, e.OpId }).IsUnique();
+            });
+
+            modelBuilder.Entity<SyncChange>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.HasIndex(e => new { e.TenantId, e.ChangedAt });
+                entity.HasIndex(e => new { e.TenantId, e.EntityType, e.EntityId });
+            });
         }
 
         private void ConfigureArticleEntities(ModelBuilder modelBuilder)

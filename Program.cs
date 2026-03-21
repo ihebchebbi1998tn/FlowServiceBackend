@@ -28,6 +28,7 @@ using MyApi.Modules.WebsiteBuilder;
 using MyApi.Modules.EmailAccounts.Services;
 using MyApi.Modules.UserAiSettings.Services;
 using MyApi.Modules.WebsiteBuilder.Services;
+using MyApi.Modules.Sync.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.ResponseCompression;
@@ -300,6 +301,7 @@ builder.Services.AddScoped<MyApi.Modules.Dispatches.Services.IDispatchService, M
 // Planning Module Services
 builder.Services.AddScoped<IPlanningService, PlanningService>();
 builder.Services.AddScoped<IHrService, HrService>();
+builder.Services.AddScoped<ISyncService, SyncService>();
 
 // Upload Services (UploadThing integration)
 builder.Services.AddHttpClient();
