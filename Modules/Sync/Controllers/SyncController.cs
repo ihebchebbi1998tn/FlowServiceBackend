@@ -25,21 +25,34 @@ namespace MyApi.Modules.Sync.Controllers
         {
             if (!ModelState.IsValid) return BadRequest(ModelState);
             if (request.Operations == null || request.Operations.Count == 0) return Ok(new SyncPushResponseDto());
-            var result = await _syncService.PushAsync(request, GetCurrentUser());
+            var currentUser = GetCurrentUser();
+            if (currentUser == null) return Unauthorized("User identity claim is required");
+            var result = await _syncService.PushAsync(request, currentUser);
             return Ok(result);
         }
 
         [HttpGet("pull")]
         public async Task<ActionResult<SyncPullResponseDto>> Pull([FromQuery] string? cursor = null, [FromQuery] int limit = 200)
         {
-            var result = await _syncService.PullAsync(cursor, limit);
-            return Ok(result);
+            try
+            {
+                var currentUser = GetCurrentUser();
+                if (currentUser == null) return Unauthorized("User identity claim is required");
+                var result = await _syncService.PullAsync(cursor, limit, currentUser, IsAdmin());
+                return Ok(result);
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(ex.Message);
+            }
         }
 
         [HttpGet("history")]
         public async Task<ActionResult<SyncHistoryResponseDto>> History([FromQuery] SyncHistoryQueryDto query)
         {
-            var result = await _syncService.GetHistoryAsync(query, GetCurrentUser(), IsAdmin());
+            var currentUser = GetCurrentUser();
+            if (currentUser == null) return Unauthorized("User identity claim is required");
+            var result = await _syncService.GetHistoryAsync(query, currentUser, IsAdmin());
             return Ok(result);
         }
 
@@ -50,7 +63,9 @@ namespace MyApi.Modules.Sync.Controllers
                 return BadRequest("deviceId and opId are required");
             try
             {
-                var result = await _syncService.RetryAsync(request, GetCurrentUser(), IsAdmin());
+                var currentUser = GetCurrentUser();
+                if (currentUser == null) return Unauthorized("User identity claim is required");
+                var result = await _syncService.RetryAsync(request, currentUser, IsAdmin());
                 return Ok(result);
             }
             catch (KeyNotFoundException ex)
@@ -63,12 +78,10 @@ namespace MyApi.Modules.Sync.Controllers
             }
         }
 
-        private string GetCurrentUser()
+        private string? GetCurrentUser()
         {
             return User.FindFirst(ClaimTypes.Email)?.Value ??
-                   User.FindFirst(ClaimTypes.Name)?.Value ??
-                   User.FindFirst("email")?.Value ??
-                   "system";
+                   User.FindFirst("email")?.Value;
         }
 
         private bool IsAdmin()

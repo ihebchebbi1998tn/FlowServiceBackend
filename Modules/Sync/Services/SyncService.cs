@@ -37,8 +37,52 @@ namespace MyApi.Modules.Sync.Services
             _logger = logger;
         }
 
+        private async Task<int?> ResolveCurrentUserIdAsync(string currentUser)
+        {
+            if (string.IsNullOrWhiteSpace(currentUser)) return null;
+            var normalized = currentUser.Trim().ToLowerInvariant();
+            var user = await _context.Users.AsNoTracking()
+                .FirstOrDefaultAsync(u => u.Email.ToLower() == normalized && !u.IsDeleted);
+            return user?.Id;
+        }
+
+        private static bool IsTicketOwnedByCurrentUser(SupportTicket ticket, string currentUser)
+        {
+            if (string.IsNullOrWhiteSpace(currentUser)) return false;
+            if (string.IsNullOrWhiteSpace(ticket.UserEmail)) return false;
+            return string.Equals(ticket.UserEmail.Trim(), currentUser.Trim(), StringComparison.OrdinalIgnoreCase);
+        }
+
+        private string? ResolveServerEntityKey(SyncOperationDto op, int? serverEntityId)
+        {
+            var entityType = NormalizeEntityType(op.EntityType, op.Endpoint);
+            if (entityType == "email_account")
+            {
+                var key = ReadString(op.Payload, "id") ?? ReadString(op.Payload, "Id");
+                if (!string.IsNullOrWhiteSpace(key)) return key;
+            }
+            if (entityType == "synced_email")
+            {
+                var ids = ParseSyncedEmailIdsFromPayloadOrEndpoint(op.Payload, op.Endpoint);
+                if (ids.emailId.HasValue) return ids.emailId.Value.ToString();
+            }
+            if (entityType == "calendar_event")
+            {
+                var key = ReadString(op.Payload, "id") ?? ReadString(op.Payload, "Id");
+                if (!string.IsNullOrWhiteSpace(key)) return key;
+                if (!string.IsNullOrWhiteSpace(op.Endpoint))
+                {
+                    var m = System.Text.RegularExpressions.Regex.Match(op.Endpoint, @"/events/([a-f0-9-]+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                    if (m.Success) return m.Groups[1].Value;
+                }
+            }
+            return serverEntityId?.ToString();
+        }
+
         public async Task<SyncPushResponseDto> PushAsync(SyncPushRequestDto request, string currentUser)
         {
+            var currentUserId = await ResolveCurrentUserIdAsync(currentUser);
+            if (!currentUserId.HasValue) throw new UnauthorizedAccessException("Unable to resolve current user.");
             var response = new SyncPushResponseDto();
             var pending = new List<(int idx, SyncOperationDto op)>();
             var groupsWithDuplicateMembers = new HashSet<string>(StringComparer.Ordinal);
@@ -64,6 +108,7 @@ namespace MyApi.Modules.Sync.Services
                     }
                     result.Status = "duplicate";
                     result.ServerEntityId = existing.ServerEntityId;
+                    result.ServerEntityKey = existing.ServerEntityKey;
                     response.Results.Add(result);
                     continue;
                 }
@@ -105,11 +150,13 @@ namespace MyApi.Modules.Sync.Services
                 {
                     var op = g.Items[0];
                     var result = new SyncPushResultDto { OpId = op.OpId };
+                    await using var tx = await _context.Database.BeginTransactionAsync();
                     var receipt = new SyncOperationReceipt
                     {
                         DeviceId = request.DeviceId,
                         OpId = op.OpId,
                         CreatedByUser = currentUser,
+                        CreatedByUserId = currentUserId,
                         Status = "processing",
                         OperationJson = JsonSerializer.Serialize(op)
                     };
@@ -120,6 +167,7 @@ namespace MyApi.Modules.Sync.Services
                     }
                     catch (DbUpdateException)
                     {
+                        await tx.RollbackAsync();
                         _context.Entry(receipt).State = EntityState.Detached;
                         var existingDup = await _context.Set<SyncOperationReceipt>()
                             .AsNoTracking()
@@ -132,6 +180,7 @@ namespace MyApi.Modules.Sync.Services
                     try
                     {
                         result.ServerEntityId = await ApplyOperationWithConflictStrategyAsync(op, currentUser);
+                        result.ServerEntityKey = ResolveServerEntityKey(op, result.ServerEntityId);
                         result.Status = "applied";
                     }
                     catch (Exception ex)
@@ -142,8 +191,29 @@ namespace MyApi.Modules.Sync.Services
                     }
                     receipt.Status = result.Status;
                     receipt.ServerEntityId = result.ServerEntityId;
+                    receipt.ServerEntityKey = result.ServerEntityKey;
                     receipt.ResponseJson = JsonSerializer.Serialize(result);
                     await _context.SaveChangesAsync();
+                    if (result.Status == "applied" || result.Status == "duplicate")
+                    {
+                        await tx.CommitAsync();
+                    }
+                    else
+                    {
+                        await tx.RollbackAsync();
+                        _context.ChangeTracker.Clear();
+                        _context.Set<SyncOperationReceipt>().Add(new SyncOperationReceipt
+                        {
+                            DeviceId = request.DeviceId,
+                            OpId = op.OpId,
+                            CreatedByUser = currentUser,
+                            CreatedByUserId = currentUserId,
+                            Status = result.Status,
+                            ResponseJson = JsonSerializer.Serialize(result),
+                            OperationJson = JsonSerializer.Serialize(op)
+                        });
+                        await _context.SaveChangesAsync();
+                    }
                     response.Results.Add(result);
                     continue;
                 }
@@ -151,8 +221,47 @@ namespace MyApi.Modules.Sync.Services
                 // Transaction group path: all-or-nothing apply.
                 await using var tx = await _context.Database.BeginTransactionAsync();
                 var groupResults = new List<SyncPushResultDto>();
+                var reservedReceipts = new List<SyncOperationReceipt>();
                 try
                 {
+                    foreach (var op in g.Items)
+                    {
+                        var receipt = new SyncOperationReceipt
+                        {
+                            DeviceId = request.DeviceId,
+                            OpId = op.OpId,
+                            CreatedByUser = currentUser,
+                            CreatedByUserId = currentUserId,
+                            Status = "processing",
+                            OperationJson = JsonSerializer.Serialize(op)
+                        };
+                        _context.Set<SyncOperationReceipt>().Add(receipt);
+                        reservedReceipts.Add(receipt);
+                    }
+                    try
+                    {
+                        await _context.SaveChangesAsync();
+                    }
+                    catch (DbUpdateException)
+                    {
+                        await tx.RollbackAsync();
+                        _context.ChangeTracker.Clear();
+                        foreach (var op in g.Items)
+                        {
+                            var existingDup = await _context.Set<SyncOperationReceipt>()
+                                .AsNoTracking()
+                                .FirstOrDefaultAsync(r => r.DeviceId == request.DeviceId && r.OpId == op.OpId);
+                            response.Results.Add(new SyncPushResultDto
+                            {
+                                OpId = op.OpId,
+                                Status = "duplicate",
+                                ServerEntityId = existingDup?.ServerEntityId,
+                                ServerEntityKey = existingDup?.ServerEntityKey
+                            });
+                        }
+                        continue;
+                    }
+
                     foreach (var op in g.Items)
                     {
                         var r = new SyncPushResultDto
@@ -161,21 +270,16 @@ namespace MyApi.Modules.Sync.Services
                             Status = "applied",
                             ServerEntityId = await ApplyOperationWithConflictStrategyAsync(op, currentUser),
                         };
+                        r.ServerEntityKey = ResolveServerEntityKey(op, r.ServerEntityId);
                         groupResults.Add(r);
                     }
 
-                    foreach (var (op, r) in g.Items.Zip(groupResults, (op, r) => (op, r)))
+                    foreach (var (receipt, r) in reservedReceipts.Zip(groupResults, (receipt, r) => (receipt, r)))
                     {
-                        _context.Set<SyncOperationReceipt>().Add(new SyncOperationReceipt
-                        {
-                            DeviceId = request.DeviceId,
-                            OpId = op.OpId,
-                            CreatedByUser = currentUser,
-                            Status = r.Status,
-                            ServerEntityId = r.ServerEntityId,
-                            ResponseJson = JsonSerializer.Serialize(r),
-                            OperationJson = JsonSerializer.Serialize(op)
-                        });
+                        receipt.Status = r.Status;
+                        receipt.ServerEntityId = r.ServerEntityId;
+                        receipt.ServerEntityKey = r.ServerEntityKey;
+                        receipt.ResponseJson = JsonSerializer.Serialize(r);
                     }
                     await _context.SaveChangesAsync();
                     await tx.CommitAsync();
@@ -199,13 +303,22 @@ namespace MyApi.Modules.Sync.Services
                             DeviceId = request.DeviceId,
                             OpId = op.OpId,
                             CreatedByUser = currentUser,
+                            CreatedByUserId = currentUserId,
                             Status = r.Status,
                             ResponseJson = JsonSerializer.Serialize(r),
                             OperationJson = JsonSerializer.Serialize(op)
                         });
                         response.Results.Add(r);
                     }
-                    await _context.SaveChangesAsync();
+                    try
+                    {
+                        await _context.SaveChangesAsync();
+                    }
+                    catch (DbUpdateException)
+                    {
+                        // Duplicate receipt rows may already exist from parallel request.
+                        _context.ChangeTracker.Clear();
+                    }
                 }
             }
 
@@ -223,8 +336,7 @@ namespace MyApi.Modules.Sync.Services
                 var strategy = (op.ConflictStrategy ?? "reject").Trim().ToLowerInvariant();
                 if (strategy == "last_write_wins")
                 {
-                    var msg = ex.Message.ToLowerInvariant();
-                    if (msg.Contains("not found") || msg.Contains("duplicate") || msg.Contains("already") || msg.Contains("conflict"))
+                    if (ex is KeyNotFoundException || ex is DbUpdateConcurrencyException)
                     {
                         return op.EntityId;
                     }
@@ -252,8 +364,10 @@ namespace MyApi.Modules.Sync.Services
             }
         }
 
-        public async Task<SyncPullResponseDto> PullAsync(string? cursor, int limit)
+        public async Task<SyncPullResponseDto> PullAsync(string? cursor, int limit, string currentUser, bool isAdmin)
         {
+            var currentUserId = await ResolveCurrentUserIdAsync(currentUser);
+            var effectiveLimit = Math.Max(1, Math.Min(limit, 500));
             DateTime since = DateTime.MinValue;
             long sinceId = 0;
             if (!string.IsNullOrWhiteSpace(cursor))
@@ -261,20 +375,30 @@ namespace MyApi.Modules.Sync.Services
                 if (cursor.Contains("|"))
                 {
                     var parts = cursor.Split('|', 2);
-                    DateTime.TryParse(parts[0], null, DateTimeStyles.RoundtripKind, out since);
-                    long.TryParse(parts[1], out sinceId);
+                    if (!DateTime.TryParse(parts[0], null, DateTimeStyles.RoundtripKind, out since) || !long.TryParse(parts[1], out sinceId))
+                        throw new ArgumentException("Invalid sync cursor format");
                 }
                 else
                 {
-                    DateTime.TryParse(cursor, null, DateTimeStyles.RoundtripKind, out since);
+                    if (!DateTime.TryParse(cursor, null, DateTimeStyles.RoundtripKind, out since))
+                        throw new ArgumentException("Invalid sync cursor format");
                 }
             }
 
-            var rows = await _context.Set<SyncChange>()
+            var changes = _context.Set<SyncChange>()
                 .AsNoTracking()
-                .Where(c => c.ChangedAt > since || (c.ChangedAt == since && c.Id > sinceId))
+                .Where(c => c.ChangedAt > since || (c.ChangedAt == since && c.Id > sinceId));
+
+            if (!isAdmin)
+            {
+                if (!currentUserId.HasValue) throw new UnauthorizedAccessException("Unable to resolve current user.");
+                var uid = currentUserId.Value;
+                changes = changes.Where(c => c.ChangedByUserId == uid || (c.ChangedByUserId == null && c.ChangedBy == currentUser));
+            }
+
+            var rows = await changes
                 .OrderBy(c => c.ChangedAt).ThenBy(c => c.Id)
-                .Take(Math.Max(1, Math.Min(limit, 500)))
+                .Take(effectiveLimit)
                 .ToListAsync();
 
             var dto = new SyncPullResponseDto
@@ -284,6 +408,7 @@ namespace MyApi.Modules.Sync.Services
                     Id = r.Id,
                     EntityType = r.EntityType,
                     EntityId = r.EntityId,
+                    EntityKey = r.EntityKey,
                     Operation = r.Operation,
                     DataJson = r.DataJson,
                     ChangedAt = r.ChangedAt
@@ -291,7 +416,7 @@ namespace MyApi.Modules.Sync.Services
                 NextCursor = rows.LastOrDefault() is SyncChange last
                     ? $"{last.ChangedAt:O}|{last.Id}"
                     : null,
-                HasMore = rows.Count >= limit
+                HasMore = rows.Count >= effectiveLimit
             };
 
             return dto;
@@ -299,13 +424,16 @@ namespace MyApi.Modules.Sync.Services
 
         public async Task<SyncHistoryResponseDto> GetHistoryAsync(SyncHistoryQueryDto query, string currentUser, bool isAdmin)
         {
+            var currentUserId = await ResolveCurrentUserIdAsync(currentUser);
             var page = query.Page <= 0 ? 1 : query.Page;
             var pageSize = query.PageSize <= 0 ? 25 : Math.Min(query.PageSize, 200);
 
             var receipts = _context.Set<SyncOperationReceipt>().AsNoTracking().AsQueryable();
             if (!isAdmin)
             {
-                receipts = receipts.Where(r => r.CreatedByUser == currentUser);
+                if (!currentUserId.HasValue) throw new UnauthorizedAccessException("Unable to resolve current user.");
+                var uid = currentUserId.Value;
+                receipts = receipts.Where(r => r.CreatedByUserId == uid || (r.CreatedByUserId == null && r.CreatedByUser == currentUser));
             }
             if (!string.IsNullOrWhiteSpace(query.Status))
             {
@@ -341,6 +469,7 @@ namespace MyApi.Modules.Sync.Services
                     DeviceId = r.DeviceId,
                     Status = r.Status,
                     ServerEntityId = r.ServerEntityId,
+                    ServerEntityKey = r.ServerEntityKey,
                     EntityType = op?.EntityType,
                     Operation = op?.Operation,
                     Endpoint = op?.Endpoint,
@@ -487,13 +616,21 @@ namespace MyApi.Modules.Sync.Services
 
         private async Task RecordChangeAsync(string entityType, int entityId, string operation, object payload, string currentUser)
         {
+            var currentUserId = await ResolveCurrentUserIdAsync(currentUser);
+            await RecordChangeAsync(entityType, entityId, null, operation, payload, currentUser, currentUserId);
+        }
+
+        private async Task RecordChangeAsync(string entityType, int entityId, string? entityKey, string operation, object payload, string currentUser, int? currentUserId)
+        {
             _context.Set<SyncChange>().Add(new SyncChange
             {
                 EntityType = entityType,
                 EntityId = entityId,
+                EntityKey = entityKey,
                 Operation = operation,
                 DataJson = JsonSerializer.Serialize(payload),
-                ChangedBy = currentUser
+                ChangedBy = currentUser,
+                ChangedByUserId = currentUserId
             });
             await _context.SaveChangesAsync();
         }
@@ -604,6 +741,14 @@ namespace MyApi.Modules.Sync.Services
             if (string.IsNullOrWhiteSpace(endpoint)) return null;
             var match = System.Text.RegularExpressions.Regex.Match(endpoint, $@"{segment}/(\d+)(?:/|$|\?)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
             return match.Success && int.TryParse(match.Groups[1].Value, out var id) ? id : null;
+        }
+
+        private static Guid? ParseGuidIdFromEndpoint(string? endpoint, string segment)
+        {
+            if (string.IsNullOrWhiteSpace(endpoint)) return null;
+            var match = System.Text.RegularExpressions.Regex.Match(endpoint, $@"{segment}/([a-f0-9-]+)(?:/|$|\?)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (!match.Success) return null;
+            return Guid.TryParse(match.Groups[1].Value, out var guid) ? guid : null;
         }
 
         private static string? ParseLookupTypeFromEndpoint(string? endpoint)
@@ -1075,6 +1220,8 @@ namespace MyApi.Modules.Sync.Services
             SupportTicket? ticket = null;
             var id = op.EntityId ?? ParseIdFromEndpoint(op.Endpoint, "SupportTickets");
             if (id.HasValue) ticket = await _context.SupportTickets.FirstOrDefaultAsync(x => x.Id == id.Value);
+            if (ticket != null && !IsTicketOwnedByCurrentUser(ticket, user))
+                throw new UnauthorizedAccessException("You are not allowed to modify this support ticket.");
             if (ticket == null && operation != "delete")
             {
                 ticket = new SupportTicket
@@ -1085,9 +1232,9 @@ namespace MyApi.Modules.Sync.Services
                     Category = ReadString(op.Payload, "category") ?? ReadString(op.Payload, "Category"),
                     CurrentPage = ReadString(op.Payload, "currentPage") ?? ReadString(op.Payload, "CurrentPage"),
                     RelatedUrl = ReadString(op.Payload, "relatedUrl") ?? ReadString(op.Payload, "RelatedUrl"),
-                    UserEmail = ReadString(op.Payload, "userEmail") ?? ReadString(op.Payload, "UserEmail"),
+                    UserEmail = user,
                     Status = ReadString(op.Payload, "status") ?? ReadString(op.Payload, "Status") ?? "open",
-                    Tenant = ReadString(op.Payload, "tenant") ?? ReadString(op.Payload, "Tenant") ?? "default",
+                    Tenant = "default",
                     CreatedAt = DateTime.UtcNow
                 };
                 _context.SupportTickets.Add(ticket);
@@ -1122,6 +1269,8 @@ namespace MyApi.Modules.Sync.Services
             if (!ticketId.HasValue) throw new InvalidOperationException("Ticket id is required for support ticket comments");
             var ticket = await _context.SupportTickets.FirstOrDefaultAsync(x => x.Id == ticketId.Value);
             if (ticket == null) throw new KeyNotFoundException($"Support ticket '{ticketId.Value}' not found");
+            if (!IsTicketOwnedByCurrentUser(ticket, user))
+                throw new UnauthorizedAccessException("You are not allowed to comment on this support ticket.");
             var comment = new SupportTicketComment
             {
                 SupportTicketId = ticketId.Value,
@@ -1144,6 +1293,10 @@ namespace MyApi.Modules.Sync.Services
                 ?? ParseIdFromEndpoint(op.Endpoint, "SupportTickets");
             var targetTicketId = ReadInt(op.Payload, "targetTicketId") ?? ReadInt(op.Payload, "TargetTicketId");
             if (!sourceTicketId.HasValue) throw new InvalidOperationException("Source ticket id is required");
+            var sourceTicket = await _context.SupportTickets.FirstOrDefaultAsync(x => x.Id == sourceTicketId.Value);
+            if (sourceTicket == null) throw new KeyNotFoundException("Source support ticket not found");
+            if (!IsTicketOwnedByCurrentUser(sourceTicket, user))
+                throw new UnauthorizedAccessException("You are not allowed to link this support ticket.");
             if (operation == "delete")
             {
                 var linkId = ParseIdFromEndpoint(op.Endpoint, "links");
@@ -1156,6 +1309,10 @@ namespace MyApi.Modules.Sync.Services
                 return existing.Id;
             }
             if (!targetTicketId.HasValue) throw new InvalidOperationException("Target ticket id is required");
+            var targetTicket = await _context.SupportTickets.FirstOrDefaultAsync(x => x.Id == targetTicketId.Value);
+            if (targetTicket == null) throw new KeyNotFoundException("Target support ticket not found");
+            if (!IsTicketOwnedByCurrentUser(targetTicket, user))
+                throw new UnauthorizedAccessException("You are not allowed to link to this support ticket.");
             var link = new SupportTicketLink
             {
                 SourceTicketId = sourceTicketId.Value,
@@ -1318,6 +1475,8 @@ namespace MyApi.Modules.Sync.Services
 
         private async Task<int?> ApplySyncedEmailAsync(SyncOperationDto op, string operation, string user)
         {
+            var currentUserId = await ResolveCurrentUserIdAsync(user);
+            if (!currentUserId.HasValue) throw new UnauthorizedAccessException("Unable to resolve current user.");
             var (accountId, emailId) = ParseSyncedEmailIdsFromPayloadOrEndpoint(op.Payload, op.Endpoint);
             if (!accountId.HasValue || !emailId.HasValue)
                 throw new InvalidOperationException("accountId and emailId are required for synced email operations");
@@ -1325,20 +1484,23 @@ namespace MyApi.Modules.Sync.Services
                 .FirstOrDefaultAsync(e => e.Id == emailId.Value && e.ConnectedEmailAccountId == accountId.Value);
             if (email == null)
                 throw new KeyNotFoundException($"Synced email {emailId} not found");
+            var account = await _context.ConnectedEmailAccounts.FirstOrDefaultAsync(a => a.Id == accountId.Value);
+            if (account == null || account.UserId != currentUserId.Value)
+                throw new UnauthorizedAccessException("You are not allowed to modify this synced email.");
             if (operation == "delete")
             {
                 _context.Set<SyncedEmail>().Remove(email);
                 await _context.SaveChangesAsync();
-                await RecordChangeAsync("synced_email", email.Id.GetHashCode(), "delete", new { id = email.Id }, user);
-                return email.Id.GetHashCode();
+                await RecordChangeAsync("synced_email", 0, email.Id.ToString(), "delete", new { id = email.Id }, user, currentUserId);
+                return null;
             }
             if (op.Endpoint?.Contains("/star") == true)
                 email.IsStarred = !email.IsStarred;
             else if (op.Endpoint?.Contains("/read") == true)
                 email.IsRead = !email.IsRead;
             await _context.SaveChangesAsync();
-            await RecordChangeAsync("synced_email", email.Id.GetHashCode(), "upsert", email, user);
-            return email.Id.GetHashCode();
+            await RecordChangeAsync("synced_email", 0, email.Id.ToString(), "upsert", email, user, currentUserId);
+            return null;
         }
 
         private async Task<int?> ApplyCalendarEventAsync(SyncOperationDto op, string operation, string user)
@@ -1352,8 +1514,11 @@ namespace MyApi.Modules.Sync.Services
             }
             if (eventId.HasValue)
                 evt = await _context.CalendarEvents.FirstOrDefaultAsync(x => x.Id == eventId.Value);
-            else if (op.EntityId.HasValue)
-                evt = await _context.CalendarEvents.FirstOrDefaultAsync(x => x.Id.GetHashCode() == op.EntityId.Value);
+            else
+            {
+                var endpointGuid = ParseGuidIdFromEndpoint(op.Endpoint, "events");
+                if (endpointGuid.HasValue) evt = await _context.CalendarEvents.FirstOrDefaultAsync(x => x.Id == endpointGuid.Value);
+            }
             if (evt == null && operation != "delete")
             {
                 evt = new CalendarEvent
@@ -1383,19 +1548,22 @@ namespace MyApi.Modules.Sync.Services
                 evt.UpdatedAt = DateTime.UtcNow;
             }
             await _context.SaveChangesAsync();
-            await RecordChangeAsync("calendar_event", evt.Id.GetHashCode(), operation, evt, user);
-            return evt.Id.GetHashCode();
+            await RecordChangeAsync("calendar_event", 0, evt.Id.ToString(), operation, evt, user, await ResolveCurrentUserIdAsync(user));
+            return null;
         }
 
         private async Task<int?> ApplyEmailAccountAsync(SyncOperationDto op, string operation, string user)
         {
+            var currentUserId = await ResolveCurrentUserIdAsync(user);
+            if (!currentUserId.HasValue) throw new UnauthorizedAccessException("Unable to resolve current user.");
             ConnectedEmailAccount? account = null;
-            if (op.EntityId.HasValue) account = await _context.ConnectedEmailAccounts.FirstOrDefaultAsync(x => x.Id.ToString().Contains(op.EntityId.Value.ToString()));
+            var accountGuid = ReadGuid(op.Payload, "id") ?? ReadGuid(op.Payload, "Id") ?? ParseGuidIdFromEndpoint(op.Endpoint, "email-accounts");
+            if (accountGuid.HasValue) account = await _context.ConnectedEmailAccounts.FirstOrDefaultAsync(x => x.Id == accountGuid.Value);
             if (account == null && operation != "delete")
             {
                 account = new ConnectedEmailAccount
                 {
-                    UserId = ReadInt(op.Payload, "userId") ?? 0,
+                    UserId = currentUserId.Value,
                     Handle = ReadString(op.Payload, "handle") ?? ReadString(op.Payload, "email") ?? "offline@flowentra.local",
                     Provider = ReadString(op.Payload, "provider") ?? "custom",
                     AccessToken = ReadString(op.Payload, "accessToken") ?? "offline",
@@ -1404,6 +1572,8 @@ namespace MyApi.Modules.Sync.Services
                 _context.ConnectedEmailAccounts.Add(account);
             }
             if (account == null) return null;
+            if (account.UserId != currentUserId.Value)
+                throw new UnauthorizedAccessException("You are not allowed to modify this email account.");
             if (operation == "delete")
             {
                 _context.ConnectedEmailAccounts.Remove(account);
@@ -1418,8 +1588,8 @@ namespace MyApi.Modules.Sync.Services
                 account.UpdatedAt = DateTime.UtcNow;
             }
             await _context.SaveChangesAsync();
-            await RecordChangeAsync("email_account", account.Id.GetHashCode(), operation, account, user);
-            return account.Id.GetHashCode();
+            await RecordChangeAsync("email_account", 0, account.Id.ToString(), operation, account, user, currentUserId);
+            return null;
         }
 
         private async Task<int?> ApplyProjectAsync(SyncOperationDto op, string operation, string user)

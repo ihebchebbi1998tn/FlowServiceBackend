@@ -37,6 +37,7 @@ namespace MyApi.Modules.Sync.DTOs
         public string OpId { get; set; } = string.Empty;
         public string Status { get; set; } = "applied";
         public int? ServerEntityId { get; set; }
+        public string? ServerEntityKey { get; set; }
         public int? ServerVersion { get; set; }
         public string? Error { get; set; }
     }
@@ -53,6 +54,7 @@ namespace MyApi.Modules.Sync.DTOs
         public long Id { get; set; }
         public string EntityType { get; set; } = string.Empty;
         public int EntityId { get; set; }
+        public string? EntityKey { get; set; }
         public string Operation { get; set; } = string.Empty;
         public string? DataJson { get; set; }
         public DateTime ChangedAt { get; set; }
@@ -74,6 +76,7 @@ namespace MyApi.Modules.Sync.DTOs
         public string DeviceId { get; set; } = string.Empty;
         public string Status { get; set; } = string.Empty;
         public int? ServerEntityId { get; set; }
+        public string? ServerEntityKey { get; set; }
         public string? EntityType { get; set; }
         public string? Operation { get; set; }
         public string? Endpoint { get; set; }

@@ -19,6 +19,9 @@ namespace MyApi.Modules.Sync.Models
         public string EntityType { get; set; } = string.Empty;
 
         public int EntityId { get; set; }
+        
+        [MaxLength(128)]
+        public string? EntityKey { get; set; }
 
         [Required]
         [MaxLength(20)]
@@ -31,5 +34,7 @@ namespace MyApi.Modules.Sync.Models
 
         [MaxLength(100)]
         public string? ChangedBy { get; set; }
+        
+        public int? ChangedByUserId { get; set; }
     }
 }

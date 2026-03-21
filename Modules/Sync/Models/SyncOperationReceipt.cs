@@ -27,6 +27,9 @@ namespace MyApi.Modules.Sync.Models
         public string Status { get; set; } = "applied";
 
         public int? ServerEntityId { get; set; }
+        
+        [MaxLength(128)]
+        public string? ServerEntityKey { get; set; }
 
         [Column(TypeName = "text")]
         public string? ResponseJson { get; set; }
@@ -36,6 +39,8 @@ namespace MyApi.Modules.Sync.Models
 
         [MaxLength(256)]
         public string? CreatedByUser { get; set; }
+        
+        public int? CreatedByUserId { get; set; }
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     }
