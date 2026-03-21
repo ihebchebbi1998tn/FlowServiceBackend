@@ -219,7 +219,7 @@ namespace MyApi.Modules.Sync.Services
                 }
 
                 // Transaction group path: all-or-nothing apply.
-                await using var tx = await _context.Database.BeginTransactionAsync();
+                await using var groupTx = await _context.Database.BeginTransactionAsync();
                 var groupResults = new List<SyncPushResultDto>();
                 var reservedReceipts = new List<SyncOperationReceipt>();
                 try
@@ -244,7 +244,7 @@ namespace MyApi.Modules.Sync.Services
                     }
                     catch (DbUpdateException)
                     {
-                        await tx.RollbackAsync();
+                        await groupTx.RollbackAsync();
                         _context.ChangeTracker.Clear();
                         foreach (var op in g.Items)
                         {
@@ -282,12 +282,12 @@ namespace MyApi.Modules.Sync.Services
                         receipt.ResponseJson = JsonSerializer.Serialize(r);
                     }
                     await _context.SaveChangesAsync();
-                    await tx.CommitAsync();
+                    await groupTx.CommitAsync();
                     response.Results.AddRange(groupResults);
                 }
                 catch (Exception ex)
                 {
-                    await tx.RollbackAsync();
+                    await groupTx.RollbackAsync();
                     _context.ChangeTracker.Clear();
                     _logger.LogWarning(ex, "Failed transaction group {GroupKey}", g.Key);
                     foreach (var op in g.Items)
