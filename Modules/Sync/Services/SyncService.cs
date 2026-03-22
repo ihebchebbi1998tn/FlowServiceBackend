@@ -47,6 +47,9 @@ namespace MyApi.Modules.Sync.Services
         private readonly IDispatchService _dispatchService;
         private readonly IPlanningService _planningService;
         private readonly IHrService _hrService;
+        
+        // ✅ Tenant context for current sync operation (set in PushAsync)
+        private string? _currentSyncTenant;
 
         public SyncService(
             ApplicationDbContext context,
@@ -117,19 +120,27 @@ namespace MyApi.Modules.Sync.Services
             return serverEntityId?.ToString();
         }
 
-        public async Task<SyncPushResponseDto> PushAsync(SyncPushRequestDto request, string currentUser)
+        public async Task<SyncPushResponseDto> PushAsync(SyncPushRequestDto request, string currentUser, string tenant)
         {
+            // ✅ Store tenant context for use in operation handlers
+            _currentSyncTenant = tenant;
+            
             var currentUserId = await ResolveCurrentUserIdAsync(currentUser);
             
             // ✅ SOLUTION 2: Better error logging
             if (!currentUserId.HasValue)
             {
-                _logger.LogError("Sync push failed: Unable to resolve user ID for identity '{UserIdentity}'", currentUser);
+                _logger.LogError("Sync push failed: Unable to resolve user ID for identity '{UserIdentity}'. Tenant={Tenant}", currentUser, tenant);
                 throw new UnauthorizedAccessException($"User account not found for identity '{currentUser}'. Please contact support or try logging in again.");
             }
             
             if (request.Operations == null || request.Operations.Count == 0)
                 return new SyncPushResponseDto();
+
+            // ✅ Log tenant context at start of processing with comprehensive details
+            _logger.LogInformation(
+                "Sync push processing started: UserId={UserId}, UserEmail={UserEmail}, Tenant={Tenant}, Operations={Count}, Device={DeviceId}",
+                currentUserId, currentUser, tenant, request.Operations.Count, request.DeviceId);
 
             var response = new SyncPushResponseDto();
             var pending = new List<(int idx, SyncOperationDto op)>();
@@ -575,11 +586,12 @@ namespace MyApi.Modules.Sync.Services
             original.ClientTimestamp = DateTime.UtcNow;
             original.DeviceId = request.DeviceId;
 
+            // ✅ Use default tenant for retry (operations originally came from this user)
             var push = await PushAsync(new SyncPushRequestDto
             {
                 DeviceId = request.DeviceId,
                 Operations = new System.Collections.Generic.List<SyncOperationDto> { original }
-            }, currentUser);
+            }, currentUser, "default");
 
             return push.Results.FirstOrDefault() ?? new SyncPushResultDto
             {
@@ -1397,13 +1409,27 @@ namespace MyApi.Modules.Sync.Services
             var id = op.EntityId ?? ParseIdFromEndpoint(op.Endpoint, "SupportTickets");
             if (id.HasValue) ticket = await _context.SupportTickets.FirstOrDefaultAsync(x => x.Id == id.Value);
             
+            // ✅ Tenant validation - verify operation matches expected tenant
+            if (!string.IsNullOrWhiteSpace(_currentSyncTenant) && ticket != null)
+            {
+                // For existing tickets, validate tenant matches
+                if (!string.Equals(ticket.Tenant, _currentSyncTenant, StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogError(
+                        "Sync authorization failed - Tenant mismatch: Operation from '{SyncTenant}' but ticket '{TicketId}' belongs to '{TicketTenant}'",
+                        _currentSyncTenant, ticket.Id, ticket.Tenant ?? "unknown");
+                    throw new UnauthorizedAccessException(
+                        $"Tenant mismatch: You cannot modify this ticket as it belongs to a different tenant");
+                }
+            }
+            
             // ✅ SOLUTION 3: Improved ownership validation with detailed logging
             if (ticket != null && !IsTicketOwnedByCurrentUser(ticket, user))
             {
                 _logger.LogWarning(
                     "Sync authorization failed: User '{CurrentUser}' attempted to {Operation} support ticket {TicketId} " +
-                    "owned by '{TicketOwner}' (Tenant: {Tenant})",
-                    user, operation, ticket.Id, ticket.UserEmail ?? "unknown", ticket.Tenant ?? "unknown");
+                    "owned by '{TicketOwner}' (Tenant: {Tenant}, SyncTenant: {SyncTenant})",
+                    user, operation, ticket.Id, ticket.UserEmail ?? "unknown", ticket.Tenant ?? "unknown", _currentSyncTenant ?? "unset");
                     
                 throw new UnauthorizedAccessException(
                     $"You are not allowed to {operation} this support ticket (owned by {ticket.UserEmail ?? "someone else"})");
@@ -1411,6 +1437,9 @@ namespace MyApi.Modules.Sync.Services
             
             if (ticket == null && operation != "delete")
             {
+                // ✅ Use tenant from sync context (or default if not set)
+                var ticketTenant = !string.IsNullOrWhiteSpace(_currentSyncTenant) ? _currentSyncTenant : "default";
+                
                 ticket = new SupportTicket
                 {
                     Title = ReadString(op.Payload, "title") ?? ReadString(op.Payload, "Title") ?? "Offline Ticket",
@@ -1421,12 +1450,12 @@ namespace MyApi.Modules.Sync.Services
                     RelatedUrl = ReadString(op.Payload, "relatedUrl") ?? ReadString(op.Payload, "RelatedUrl"),
                     UserEmail = user,  // ✅ Always set to the current user doing the sync
                     Status = ReadString(op.Payload, "status") ?? ReadString(op.Payload, "Status") ?? "open",
-                    Tenant = "default",
+                    Tenant = ticketTenant,
                     CreatedAt = DateTime.UtcNow
                 };
                 _context.SupportTickets.Add(ticket);
-                _logger.LogInformation("Sync created new support ticket for user '{UserEmail}' with title '{Title}'",
-                    user, ticket.Title);
+                _logger.LogInformation("Sync created new support ticket for user '{UserEmail}' in tenant '{Tenant}' with title '{Title}'",
+                    user, ticketTenant, ticket.Title);
             }
             
             if (ticket == null) return null;
@@ -1434,8 +1463,8 @@ namespace MyApi.Modules.Sync.Services
             if (operation == "delete")
             {
                 _context.SupportTickets.Remove(ticket);
-                _logger.LogInformation("Sync deleted support ticket {TicketId} (owned by {Owner})",
-                    ticket.Id, ticket.UserEmail);
+                _logger.LogInformation("Sync deleted support ticket {TicketId} (owned by {Owner}, Tenant: {Tenant})",
+                    ticket.Id, ticket.UserEmail, ticket.Tenant);
             }
             else
             {
@@ -1467,13 +1496,26 @@ namespace MyApi.Modules.Sync.Services
             var ticket = await _context.SupportTickets.FirstOrDefaultAsync(x => x.Id == ticketId.Value);
             if (ticket == null) throw new KeyNotFoundException($"Support ticket '{ticketId.Value}' not found");
             
+            // ✅ Tenant validation for comments
+            if (!string.IsNullOrWhiteSpace(_currentSyncTenant))
+            {
+                if (!string.Equals(ticket.Tenant, _currentSyncTenant, StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogError(
+                        "Sync authorization failed - Tenant mismatch on comment: Operation from '{SyncTenant}' but ticket '{TicketId}' belongs to '{TicketTenant}'",
+                        _currentSyncTenant, ticket.Id, ticket.Tenant ?? "unknown");
+                    throw new UnauthorizedAccessException(
+                        $"Tenant mismatch: You cannot comment on this ticket as it belongs to a different tenant");
+                }
+            }
+            
             // ✅ SOLUTION 3: Improved logging for ownership check
             if (!IsTicketOwnedByCurrentUser(ticket, user))
             {
                 _logger.LogWarning(
                     "Sync authorization failed: User '{CurrentUser}' attempted to comment on support ticket {TicketId} " +
-                    "owned by '{TicketOwner}'",
-                    user, ticket.Id, ticket.UserEmail ?? "unknown");
+                    "owned by '{TicketOwner}' (Tenant: {Tenant}, SyncTenant: {SyncTenant})",
+                    user, ticket.Id, ticket.UserEmail ?? "unknown", ticket.Tenant ?? "unknown", _currentSyncTenant ?? "unset");
                 throw new UnauthorizedAccessException("You are not allowed to comment on this support ticket.");
             }
             
@@ -1488,8 +1530,8 @@ namespace MyApi.Modules.Sync.Services
             };
             _context.SupportTicketComments.Add(comment);
             await _context.SaveChangesAsync();
-            _logger.LogInformation("Sync created support ticket comment {CommentId} on ticket {TicketId} by '{Author}'",
-                comment.Id, ticket.Id, user);
+            _logger.LogInformation("Sync created support ticket comment {CommentId} on ticket {TicketId} by '{Author}' (Tenant: {Tenant})",
+                comment.Id, ticket.Id, user, _currentSyncTenant ?? "unset");
             await RecordChangeAsync("support_ticket_comment", comment.Id, "create", comment, user);
             return comment.Id;
         }

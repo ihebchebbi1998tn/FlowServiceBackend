@@ -29,12 +29,23 @@ namespace MyApi.Modules.Sync.Controllers
             if (!ModelState.IsValid) return BadRequest(ModelState);
             if (request.Operations == null || request.Operations.Count == 0) return Ok(new SyncPushResponseDto());
             
+            // ✅ Read tenant from X-Tenant header (required for multi-tenant validation)
+            var tenant = HttpContext.Request.Headers["X-Tenant"].ToString();
+            if (string.IsNullOrWhiteSpace(tenant))
+            {
+                _logger.LogWarning("Sync push rejected: Missing X-Tenant header in request");
+                return BadRequest(new { 
+                    error = "Missing tenant",
+                    message = "X-Tenant header is required for sync operations"
+                });
+            }
+            
             var currentUser = GetCurrentUser();
             
             // ✅ SOLUTION 2: Better error handling for missing user identity
             if (string.IsNullOrWhiteSpace(currentUser))
             {
-                _logger.LogError("Sync push failed: Unable to extract user identity from JWT claims");
+                _logger.LogError("Sync push failed: Unable to extract user identity from JWT claims. Tenant={Tenant}", tenant);
                 _logger.LogDebug("Available JWT claims: {Claims}", 
                     string.Join("; ", User.Claims.Select(c => $"{c.Type}={c.Value}")));
                 return Unauthorized(new { 
@@ -44,7 +55,10 @@ namespace MyApi.Modules.Sync.Controllers
                 });
             }
             
-            var result = await _syncService.PushAsync(request, currentUser);
+            _logger.LogInformation("Sync push received: User={User}, Tenant={Tenant}, Operations={Count}",
+                currentUser, tenant, request.Operations.Count);
+            
+            var result = await _syncService.PushAsync(request, currentUser, tenant);
             return Ok(result);
         }
 
