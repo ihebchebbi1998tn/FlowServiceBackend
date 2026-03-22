@@ -522,39 +522,90 @@ namespace MyApi.Modules.Auth.Services
             }
         }
 
+        /// <summary>
+        /// Refreshes the access token for MainAdminUser or regular User.
+        /// Checks MainAdminUsers first, then Users (with IgnoreQueryFilters for tenant-agnostic lookup).
+        /// </summary>
         public async Task<AuthResponseDto> RefreshTokenAsync(string refreshToken)
         {
             try
             {
-                var user = await _context.MainAdminUsers
+                // 1. Try MainAdminUsers (admin/company owner)
+                var adminUser = await _context.MainAdminUsers
                     .FirstOrDefaultAsync(u => u.RefreshToken == refreshToken && u.IsActive);
 
-                if (user == null || user.TokenExpiresAt < DateTime.UtcNow)
+                if (adminUser != null)
                 {
+                    if (adminUser.TokenExpiresAt < DateTime.UtcNow)
+                    {
+                        return new AuthResponseDto
+                        {
+                            Success = false,
+                            Message = "Invalid or expired refresh token"
+                        };
+                    }
+
+                    var (newAccessToken, newRefreshToken, expiresAt) = GenerateTokensAsync(adminUser);
+
+                    adminUser.AccessToken = newAccessToken;
+                    adminUser.RefreshToken = newRefreshToken;
+                    adminUser.TokenExpiresAt = expiresAt;
+                    adminUser.UpdatedAt = DateTime.UtcNow;
+
+                    await _context.SaveChangesAsync();
+
                     return new AuthResponseDto
                     {
-                        Success = false,
-                        Message = "Invalid or expired refresh token"
+                        Success = true,
+                        Message = "Token refreshed successfully",
+                        AccessToken = newAccessToken,
+                        RefreshToken = newRefreshToken,
+                        ExpiresAt = expiresAt,
+                        User = MapToUserDto(adminUser)
                     };
                 }
 
-                var (newAccessToken, newRefreshToken, expiresAt) = GenerateTokensAsync(user);
+                // 2. Try Users table (regular tenant users) - IgnoreQueryFilters for tenant-agnostic lookup
+                var regularUser = await _context.Users
+                    .IgnoreQueryFilters()
+                    .FirstOrDefaultAsync(u => u.RefreshToken == refreshToken && u.IsActive && !u.IsDeleted);
 
-                user.AccessToken = newAccessToken;
-                user.RefreshToken = newRefreshToken;
-                user.TokenExpiresAt = expiresAt;
-                user.UpdatedAt = DateTime.UtcNow;
+                if (regularUser != null)
+                {
+                    if (regularUser.TokenExpiresAt.HasValue && regularUser.TokenExpiresAt.Value < DateTime.UtcNow)
+                    {
+                        return new AuthResponseDto
+                        {
+                            Success = false,
+                            Message = "Invalid or expired refresh token"
+                        };
+                    }
 
-                await _context.SaveChangesAsync();
+                    var (userAccessToken, userRefreshToken, userExpiresAt) = GenerateUserTokensAsync(regularUser);
+
+                    regularUser.AccessToken = userAccessToken;
+                    regularUser.RefreshToken = userRefreshToken;
+                    regularUser.TokenExpiresAt = userExpiresAt;
+                    regularUser.ModifiedDate = DateTime.UtcNow;
+                    regularUser.ModifyUser = regularUser.Email;
+
+                    await _context.SaveChangesAsync();
+
+                    return new AuthResponseDto
+                    {
+                        Success = true,
+                        Message = "Token refreshed successfully",
+                        AccessToken = userAccessToken,
+                        RefreshToken = userRefreshToken,
+                        ExpiresAt = userExpiresAt,
+                        User = MapUserToUserDto(regularUser)
+                    };
+                }
 
                 return new AuthResponseDto
                 {
-                    Success = true,
-                    Message = "Token refreshed successfully",
-                    AccessToken = newAccessToken,
-                    RefreshToken = newRefreshToken,
-                    ExpiresAt = expiresAt,
-                    User = MapToUserDto(user)
+                    Success = false,
+                    Message = "Invalid or expired refresh token"
                 };
             }
             catch (Exception ex)

@@ -29,6 +29,7 @@ using MyApi.Modules.Planning.DTOs;
 using MyApi.Modules.Planning.Models;
 using MyApi.Modules.Planning.Services;
 using MyApi.Modules.SupportTickets.Models;
+using MyApi.Modules.Auth.Models;
 using MyApi.Modules.Sync.DTOs;
 using MyApi.Modules.Sync.Models;
 
@@ -78,11 +79,42 @@ namespace MyApi.Modules.Sync.Services
             }
         }
 
+        /// <summary>
+        /// Resolves the numeric user ID from the current user identity (email or userId string).
+        /// Checks Users table first (tenant-scoped), then MainAdminUsers (global) to support
+        /// both regular tenant users and admin/company-owner accounts.
+        /// </summary>
         private async Task<int?> ResolveCurrentUserIdAsync(string currentUser)
         {
             if (string.IsNullOrWhiteSpace(currentUser)) return null;
             var normalized = currentUser.Trim().ToLowerInvariant();
+
+            // If identity looks like a numeric userId (e.g. from JWT NameIdentifier), try direct lookup
+            if (int.TryParse(currentUser.Trim(), out var parsedId))
+            {
+                var userById = await _context.Users.AsNoTracking().IgnoreQueryFilters()
+                    .FirstOrDefaultAsync(u => u.Id == parsedId && !u.IsDeleted);
+                if (userById != null) return userById.Id;
+
+                var adminById = await _context.MainAdminUsers.AsNoTracking()
+                    .FirstOrDefaultAsync(u => u.Id == parsedId && u.IsActive);
+                if (adminById != null) return adminById.Id;
+
+                return null;
+            }
+
+            // Lookup by email: Users table first (tenant-scoped)
             var user = await _context.Users.AsNoTracking()
+                .FirstOrDefaultAsync(u => u.Email.ToLower() == normalized && !u.IsDeleted);
+            if (user != null) return user.Id;
+
+            // Fallback 1: MainAdminUsers (admin/company owner - not in Users table)
+            var admin = await _context.MainAdminUsers.AsNoTracking()
+                .FirstOrDefaultAsync(u => u.Email.ToLower() == normalized && u.IsActive);
+            if (admin != null) return admin.Id;
+
+            // Fallback 2: Users without tenant filter (handles X-Tenant missing/wrong on sync)
+            user = await _context.Users.AsNoTracking().IgnoreQueryFilters()
                 .FirstOrDefaultAsync(u => u.Email.ToLower() == normalized && !u.IsDeleted);
             return user?.Id;
         }
