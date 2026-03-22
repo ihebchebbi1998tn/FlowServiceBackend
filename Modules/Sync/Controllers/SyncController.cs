@@ -29,15 +29,24 @@ namespace MyApi.Modules.Sync.Controllers
             if (!ModelState.IsValid) return BadRequest(ModelState);
             if (request.Operations == null || request.Operations.Count == 0) return Ok(new SyncPushResponseDto());
             
-            // ✅ Read tenant from X-Tenant header (required for multi-tenant validation)
-            var tenant = HttpContext.Request.Headers["X-Tenant"].ToString();
+            // ✅ Read tenant from X-Tenant header with fallback to JWT claims or "default"
+            var tenant = HttpContext.Request.Headers["X-Tenant"].ToString()?.Trim();
+            
+            // Fallback: Try to get tenant from JWT claims if not in header
             if (string.IsNullOrWhiteSpace(tenant))
             {
-                _logger.LogWarning("Sync push rejected: Missing X-Tenant header in request");
-                return BadRequest(new { 
-                    error = "Missing tenant",
-                    message = "X-Tenant header is required for sync operations"
-                });
+                tenant = User.Claims.FirstOrDefault(c => c.Type == "tenant")?.Value?.Trim();
+                if (!string.IsNullOrWhiteSpace(tenant))
+                {
+                    _logger.LogInformation("Sync push: Using tenant from JWT claims: {Tenant}", tenant);
+                }
+            }
+            
+            // Last resort: Use default tenant for backward compatibility
+            if (string.IsNullOrWhiteSpace(tenant))
+            {
+                tenant = "default";
+                _logger.LogInformation("Sync push: Using default tenant (no X-Tenant header or JWT claim)");
             }
             
             var currentUser = GetCurrentUser();

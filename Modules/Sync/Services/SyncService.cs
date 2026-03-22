@@ -1410,10 +1410,14 @@ namespace MyApi.Modules.Sync.Services
             if (id.HasValue) ticket = await _context.SupportTickets.FirstOrDefaultAsync(x => x.Id == id.Value);
             
             // ✅ Tenant validation - verify operation matches expected tenant
+            // More lenient: allow "default" tenant to operate on null tenant (backward compat)
             if (!string.IsNullOrWhiteSpace(_currentSyncTenant) && ticket != null)
             {
                 // For existing tickets, validate tenant matches
-                if (!string.Equals(ticket.Tenant, _currentSyncTenant, StringComparison.OrdinalIgnoreCase))
+                bool tenantMismatch = !string.Equals(ticket.Tenant, _currentSyncTenant, StringComparison.OrdinalIgnoreCase);
+                
+                // Allow "default" tenant to operate on resources with null/empty tenant (backward compatibility)
+                if (tenantMismatch && !(_currentSyncTenant == "default" && string.IsNullOrWhiteSpace(ticket.Tenant)))
                 {
                     _logger.LogError(
                         "Sync authorization failed - Tenant mismatch: Operation from '{SyncTenant}' but ticket '{TicketId}' belongs to '{TicketTenant}'",
