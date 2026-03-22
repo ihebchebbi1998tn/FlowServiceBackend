@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using MyApi.Data;
 using MyApi.Modules.Sync.Models;
 
