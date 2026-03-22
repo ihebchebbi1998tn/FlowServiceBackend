@@ -83,9 +83,29 @@ namespace MyApi.Modules.Sync.Services
         {
             var currentUserId = await ResolveCurrentUserIdAsync(currentUser);
             if (!currentUserId.HasValue) throw new UnauthorizedAccessException("Unable to resolve current user.");
+            if (request.Operations == null || request.Operations.Count == 0)
+                return new SyncPushResponseDto();
+
             var response = new SyncPushResponseDto();
             var pending = new List<(int idx, SyncOperationDto op)>();
             var groupsWithDuplicateMembers = new HashSet<string>(StringComparer.Ordinal);
+
+            // Failed operations persist a receipt with Status=rejected. On the next sync the client still
+            // has the op in its queue and retries. Without this cleanup, the duplicate short-circuit below
+            // would return duplicate for *any* existing receipt — including rejected — and the client
+            // would drop the op from the queue without ever re-applying it.
+            if (request.Operations.Count > 0)
+            {
+                var opIds = request.Operations.Select(o => o.OpId).Distinct().ToList();
+                var rejectedRetry = await _context.Set<SyncOperationReceipt>()
+                    .Where(r => r.DeviceId == request.DeviceId && opIds.Contains(r.OpId) && r.Status == "rejected")
+                    .ToListAsync();
+                if (rejectedRetry.Count > 0)
+                {
+                    _context.Set<SyncOperationReceipt>().RemoveRange(rejectedRetry);
+                    await _context.SaveChangesAsync();
+                }
+            }
 
             for (var i = 0; i < request.Operations.Count; i++)
             {
@@ -546,6 +566,7 @@ namespace MyApi.Modules.Sync.Services
                 "email_account" => await ApplyEmailAccountAsync(op, operation, currentUser),
                 "synced_email" => await ApplySyncedEmailAsync(op, operation, currentUser),
                 "project" => await ApplyProjectAsync(op, operation, currentUser),
+                "daily_task" => await ApplyDailyTaskAsync(op, operation, currentUser),
                 "task" => await ApplyTaskAsync(op, operation, currentUser),
                 "offer" => await ApplyOfferAsync(op, operation, currentUser),
                 "sale" => await ApplySaleAsync(op, operation, currentUser),
@@ -568,6 +589,7 @@ namespace MyApi.Modules.Sync.Services
             if (value == "support_ticket_comment") return "support_ticket_comment";
             if (value == "support_ticket_link") return "support_ticket_link";
             if (value == "support_ticket") return "support_ticket";
+            if (value == "daily_task") return "daily_task";
             if (value == "task_checklist_item") return "task_checklist_item";
             if (value == "task_checklist") return "task_checklist";
             if (value == "lookup_bulk") return "lookup_bulk";
@@ -591,6 +613,7 @@ namespace MyApi.Modules.Sync.Services
             if (value.Contains("dynamic")) return "dynamic_form";
             if (value.Contains("calendar")) return "calendar_event";
             if (value.Contains("email")) return "email_account";
+            if (ep.Contains("daily-task") || ep.Contains("tasks/daily")) return "daily_task";
             if (ep.Contains("project-task") || ep.Contains("/tasks")) return "task";
             if (ep.Contains("projects")) return "project";
             if (ep.Contains("contacts")) return "contact";
@@ -608,7 +631,7 @@ namespace MyApi.Modules.Sync.Services
             if (ep.Contains("supporttickets")) return "support_ticket";
             if (ep.Contains("taskchecklists") && ep.Contains("/items")) return "task_checklist_item";
             if (ep.Contains("taskchecklists")) return "task_checklist";
-            if (ep.Contains("dynamic-forms")) return "dynamic_form";
+            if (ep.Contains("dynamicforms") || ep.Contains("dynamic-forms")) return "dynamic_form";
             if (ep.Contains("calendar")) return "calendar_event";
             if (ep.Contains("email")) return "email_account";
             return value;
@@ -1660,6 +1683,44 @@ namespace MyApi.Modules.Sync.Services
             if (task.Id == 0) _context.ProjectTasks.Add(task);
             await _context.SaveChangesAsync();
             await RecordChangeAsync("task", task.Id, "upsert", task, user);
+            return task.Id;
+        }
+
+        private async Task<int?> ApplyDailyTaskAsync(SyncOperationDto op, string operation, string user)
+        {
+            var id = op.EntityId ?? ParseIdFromEndpoint(op.Endpoint, "daily-task");
+            if (operation == "delete" && id.HasValue)
+            {
+                var existing = await _context.DailyTasks.FirstOrDefaultAsync(x => x.Id == id.Value);
+                if (existing != null) _context.DailyTasks.Remove(existing);
+                await _context.SaveChangesAsync();
+                await RecordChangeAsync("daily_task", id.Value, "delete", new { id }, user);
+                return id;
+            }
+
+            DailyTask task;
+            if (id.HasValue)
+            {
+                task = await _context.DailyTasks.FirstOrDefaultAsync(x => x.Id == id.Value) ?? new DailyTask { CreatedBy = user };
+            }
+            else
+            {
+                task = new DailyTask { CreatedBy = user };
+            }
+
+            task.Title = ReadString(op.Payload, "title") ?? ReadString(op.Payload, "Title") ?? task.Title ?? "Offline Task";
+            task.Description = ReadString(op.Payload, "description") ?? ReadString(op.Payload, "Description") ?? task.Description;
+            task.Status = ReadString(op.Payload, "status") ?? ReadString(op.Payload, "Status") ?? task.Status ?? "open";
+            task.TaskType = ReadString(op.Payload, "taskType") ?? ReadString(op.Payload, "TaskType") ?? task.TaskType ?? "follow-up";
+            task.RelatedEntityType = ReadString(op.Payload, "relatedEntityType") ?? ReadString(op.Payload, "RelatedEntityType") ?? task.RelatedEntityType;
+            task.RelatedEntityId = ReadInt(op.Payload, "relatedEntityId") ?? ReadInt(op.Payload, "RelatedEntityId") ?? task.RelatedEntityId;
+            task.DueDate = ReadDate(op.Payload, "dueDate") ?? ReadDate(op.Payload, "DueDate") ?? task.DueDate;
+            task.AssignedUserId = ReadInt(op.Payload, "assignedUserId") ?? ReadInt(op.Payload, "AssignedUserId") ?? task.AssignedUserId;
+            task.Priority = ReadString(op.Payload, "priority") ?? ReadString(op.Payload, "Priority") ?? task.Priority;
+
+            if (task.Id == 0) _context.DailyTasks.Add(task);
+            await _context.SaveChangesAsync();
+            await RecordChangeAsync("daily_task", task.Id, "upsert", task, user);
             return task.Id;
         }
 

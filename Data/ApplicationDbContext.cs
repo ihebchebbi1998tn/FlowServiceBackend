@@ -502,37 +502,49 @@ namespace MyApi.Data
 
         private void ConfigureCalendarEntities(ModelBuilder modelBuilder)
         {
-            // Calendar Event configuration
+            // CalendarEvent: FK "Type" -> event_types.Id (DB), contact_id -> Contacts, attendees/reminders
             modelBuilder.Entity<CalendarEvent>(entity =>
             {
                 entity.HasKey(e => e.Id);
                 entity.Property(e => e.Title).IsRequired().HasMaxLength(200);
                 entity.Property(e => e.Description).HasMaxLength(1000);
+
+                entity.HasOne(e => e.EventTypeNavigation)
+                    .WithMany(et => et.CalendarEvents)
+                    .HasForeignKey(e => e.Type)
+                    .HasPrincipalKey(et => et.Id)
+                    .OnDelete(DeleteBehavior.Restrict);
+
+                entity.HasOne(e => e.Contact)
+                    .WithMany()
+                    .HasForeignKey(e => e.ContactId)
+                    .OnDelete(DeleteBehavior.SetNull);
+
+                entity.HasMany(e => e.EventAttendees)
+                    .WithOne(a => a.CalendarEvent)
+                    .HasForeignKey(a => a.EventId)
+                    .OnDelete(DeleteBehavior.Cascade);
+
+                entity.HasMany(e => e.EventReminders)
+                    .WithOne(r => r.CalendarEvent)
+                    .HasForeignKey(r => r.EventId)
+                    .OnDelete(DeleteBehavior.Cascade);
             });
 
-            // Event Type configuration
             modelBuilder.Entity<EventType>(entity =>
             {
                 entity.HasKey(e => e.Id);
                 entity.Property(e => e.Name).IsRequired().HasMaxLength(100);
             });
 
-            // Event Attendee configuration
             modelBuilder.Entity<EventAttendee>(entity =>
             {
                 entity.HasKey(e => e.Id);
-                entity.HasOne<CalendarEvent>()
-                    .WithMany()
-                    .HasForeignKey(e => e.EventId);
             });
 
-            // Event Reminder configuration
             modelBuilder.Entity<EventReminder>(entity =>
             {
                 entity.HasKey(e => e.Id);
-                entity.HasOne<CalendarEvent>()
-                    .WithMany()
-                    .HasForeignKey(e => e.EventId);
             });
         }
 

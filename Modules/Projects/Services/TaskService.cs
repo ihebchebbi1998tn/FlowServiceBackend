@@ -181,6 +181,7 @@ namespace MyApi.Modules.Projects.Services
             try
             {
                 var tasks = await _context.DailyTasks
+                    .AsNoTracking()
                     .Include(t => t.AssignedUser)
                     .Where(t => t.AssignedUserId == userId)
                     .OrderBy(t => t.DueDate)
