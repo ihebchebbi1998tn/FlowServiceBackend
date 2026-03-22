@@ -21,6 +21,9 @@ namespace MyApi.Modules.ServiceOrders.Services
             string sortOrder = "desc"
         );
         Task<ServiceOrderDto?> GetServiceOrderByIdAsync(int id, bool includeJobs = true);
+        Task<ServiceOrderJobDto?> GetServiceOrderJobAsync(int serviceOrderId, int jobId);
+        Task<ServiceOrderJobDto> PatchServiceOrderJobStatusAsync(int serviceOrderId, int jobId, UpdateServiceOrderJobStatusDto dto, string userId);
+        Task<ServiceOrderJobDto> UpdateServiceOrderJobAsync(int serviceOrderId, int jobId, UpdateServiceOrderJobDto dto, string userId);
         Task<ServiceOrderDto> UpdateServiceOrderAsync(int id, UpdateServiceOrderDto updateDto, string userId);
         Task<ServiceOrderDto> PatchServiceOrderAsync(int id, UpdateServiceOrderDto updateDto, string userId);
         Task<ServiceOrderDto> UpdateStatusAsync(int id, UpdateServiceOrderStatusDto statusDto, string userId);

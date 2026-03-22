@@ -183,6 +183,25 @@ namespace MyApi.Modules.ServiceOrders.DTOs
         public List<UserLightDto>? AssignedTechnicians { get; set; }
     }
 
+    /// <summary>Body for PATCH /api/service-orders/{soId}/jobs/{jobId}/status</summary>
+    public class UpdateServiceOrderJobStatusDto
+    {
+        public string Status { get; set; } = string.Empty;
+    }
+
+    /// <summary>Body for PUT /api/service-orders/{soId}/jobs/{jobId}</summary>
+    public class UpdateServiceOrderJobDto
+    {
+        public string? Status { get; set; }
+        public string? Title { get; set; }
+        public string? Description { get; set; }
+        public string? WorkType { get; set; }
+        public int? EstimatedDuration { get; set; }
+        public decimal? EstimatedCost { get; set; }
+        public int? CompletionPercentage { get; set; }
+        public string[]? AssignedTechnicianIds { get; set; }
+    }
+
     public class CreateServiceOrderDto
     {
         public int? ProjectId { get; set; }

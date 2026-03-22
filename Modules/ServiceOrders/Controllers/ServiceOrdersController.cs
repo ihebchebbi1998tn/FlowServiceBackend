@@ -128,6 +128,70 @@ namespace MyApi.Modules.ServiceOrders.Controllers
             }
         }
 
+        /// <summary>GET /api/service-orders/{serviceOrderId}/jobs/{jobId} — aligned with client serviceOrdersApi.getJobById</summary>
+        [HttpGet("{serviceOrderId:int}/jobs/{jobId:int}")]
+        public async Task<IActionResult> GetServiceOrderJob(int serviceOrderId, int jobId)
+        {
+            try
+            {
+                var job = await _serviceOrderService.GetServiceOrderJobAsync(serviceOrderId, jobId);
+                if (job == null)
+                    return NotFound(new { success = false, error = new { code = "NOT_FOUND", message = "Job not found" } });
+                return Ok(new { success = true, data = job });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error fetching job {JobId} for service order {ServiceOrderId}", jobId, serviceOrderId);
+                return StatusCode(500, new { success = false, error = new { code = "INTERNAL_ERROR", message = "An error occurred" } });
+            }
+        }
+
+        /// <summary>PATCH /api/service-orders/{serviceOrderId}/jobs/{jobId}/status — aligned with client updateJobStatus (primary)</summary>
+        [HttpPatch("{serviceOrderId:int}/jobs/{jobId:int}/status")]
+        public async Task<IActionResult> PatchServiceOrderJobStatus(int serviceOrderId, int jobId, [FromBody] UpdateServiceOrderJobStatusDto dto)
+        {
+            if (dto == null || string.IsNullOrWhiteSpace(dto.Status))
+                return BadRequest(new { success = false, error = new { code = "INVALID_REQUEST", message = "Status is required" } });
+            try
+            {
+                var userId = GetCurrentUserId();
+                var job = await _serviceOrderService.PatchServiceOrderJobStatusAsync(serviceOrderId, jobId, dto, userId);
+                return Ok(new { success = true, data = job });
+            }
+            catch (KeyNotFoundException)
+            {
+                return NotFound(new { success = false, error = new { code = "NOT_FOUND", message = "Job not found" } });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error patching job status {JobId} for service order {ServiceOrderId}", jobId, serviceOrderId);
+                return StatusCode(500, new { success = false, error = new { code = "INTERNAL_ERROR", message = "An error occurred" } });
+            }
+        }
+
+        /// <summary>PUT /api/service-orders/{serviceOrderId}/jobs/{jobId} — aligned with client updateJobStatus fallback</summary>
+        [HttpPut("{serviceOrderId:int}/jobs/{jobId:int}")]
+        public async Task<IActionResult> UpdateServiceOrderJob(int serviceOrderId, int jobId, [FromBody] UpdateServiceOrderJobDto dto)
+        {
+            if (dto == null)
+                return BadRequest(new { success = false, error = new { code = "INVALID_REQUEST", message = "Body is required" } });
+            try
+            {
+                var userId = GetCurrentUserId();
+                var job = await _serviceOrderService.UpdateServiceOrderJobAsync(serviceOrderId, jobId, dto, userId);
+                return Ok(new { success = true, data = job });
+            }
+            catch (KeyNotFoundException)
+            {
+                return NotFound(new { success = false, error = new { code = "NOT_FOUND", message = "Job not found" } });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error updating job {JobId} for service order {ServiceOrderId}", jobId, serviceOrderId);
+                return StatusCode(500, new { success = false, error = new { code = "INTERNAL_ERROR", message = "An error occurred" } });
+            }
+        }
+
         [HttpPut("{id:int}")]
         public async Task<IActionResult> UpdateServiceOrder(int id, [FromBody] UpdateServiceOrderDto updateDto)
         {

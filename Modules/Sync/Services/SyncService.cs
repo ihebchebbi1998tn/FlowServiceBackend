@@ -609,6 +609,7 @@ namespace MyApi.Modules.Sync.Services
                 "offer" => await ApplyOfferAsync(op, operation, currentUser),
                 "sale" => await ApplySaleAsync(op, operation, currentUser),
                 "service_order" => await ApplyServiceOrderAsync(op, operation, currentUser),
+                "service_order_job" => await ApplyServiceOrderJobAsync(op, operation, currentUser),
                 "dispatch" => await ApplyDispatchAsync(op, operation, currentUser),
                 "support_ticket" => await ApplySupportTicketAsync(op, operation, currentUser),
                 "support_ticket_comment" => await ApplySupportTicketCommentAsync(op, operation, currentUser),
@@ -671,6 +672,7 @@ namespace MyApi.Modules.Sync.Services
             if (value == "hr_leave_balance") return "hr_leave_balance";
             if (value == "hr_attendance_import") return "hr_attendance_import";
             if (value == "hr_payroll_run") return "hr_payroll_run";
+            if (value == "service_order_job") return "service_order_job";
             if (value.Contains("dynamic_form_response") || (ep.Contains("dynamicforms") && ep.Contains("/responses") && !ep.Contains("/responses/count"))) return "dynamic_form_response";
             if (value.Contains("synced_email") || ep.Contains("/emails/")) return "synced_email";
             if (value.Contains("service")) return "service_order";
@@ -717,6 +719,8 @@ namespace MyApi.Modules.Sync.Services
                 if (ep.Contains("/complete")) return "dispatch_complete";
             }
             if (ep.Contains("/dispatches") || ep.Contains("dispatches")) return "dispatch";
+            if (System.Text.RegularExpressions.Regex.IsMatch(ep, @"service-orders/\d+/jobs/\d+", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                return "service_order_job";
             if (ep.Contains("/hr/"))
             {
                 if (ep.Contains("/salary-config")) return "hr_salary_config";
@@ -1868,10 +1872,11 @@ namespace MyApi.Modules.Sync.Services
 
         private async Task<int?> ApplyOfferAsync(SyncOperationDto op, string operation, string user)
         {
+            var resolvedId = op.EntityId ?? ParseIdFromEndpoint(op.Endpoint, "offers") ?? ReadInt(op.Payload, "id") ?? ReadInt(op.Payload, "Id");
             Offer? offer = null;
-            if (op.EntityId.HasValue)
+            if (resolvedId.HasValue)
             {
-                offer = await _context.Offers.FirstOrDefaultAsync(x => x.Id == op.EntityId.Value);
+                offer = await _context.Offers.FirstOrDefaultAsync(x => x.Id == resolvedId.Value);
             }
             if (offer == null && operation != "delete")
             {
@@ -1902,10 +1907,11 @@ namespace MyApi.Modules.Sync.Services
 
         private async Task<int?> ApplySaleAsync(SyncOperationDto op, string operation, string user)
         {
+            var resolvedId = op.EntityId ?? ParseIdFromEndpoint(op.Endpoint, "sales") ?? ReadInt(op.Payload, "id") ?? ReadInt(op.Payload, "Id");
             Sale? sale = null;
-            if (op.EntityId.HasValue)
+            if (resolvedId.HasValue)
             {
-                sale = await _context.Sales.FirstOrDefaultAsync(x => x.Id == op.EntityId.Value);
+                sale = await _context.Sales.FirstOrDefaultAsync(x => x.Id == resolvedId.Value);
             }
             if (sale == null && operation != "delete")
             {
@@ -1936,10 +1942,11 @@ namespace MyApi.Modules.Sync.Services
 
         private async Task<int?> ApplyServiceOrderAsync(SyncOperationDto op, string operation, string user)
         {
+            var resolvedId = op.EntityId ?? ParseIdFromEndpoint(op.Endpoint, "service-orders") ?? ReadInt(op.Payload, "id") ?? ReadInt(op.Payload, "Id");
             ServiceOrder? order = null;
-            if (op.EntityId.HasValue)
+            if (resolvedId.HasValue)
             {
-                order = await _context.ServiceOrders.FirstOrDefaultAsync(x => x.Id == op.EntityId.Value);
+                order = await _context.ServiceOrders.FirstOrDefaultAsync(x => x.Id == resolvedId.Value);
             }
             if (order == null && operation != "delete")
             {
@@ -1966,6 +1973,32 @@ namespace MyApi.Modules.Sync.Services
             await _context.SaveChangesAsync();
             await RecordChangeAsync("service_order", order.Id, operation, order, user);
             return order.Id;
+        }
+
+        private async Task<int?> ApplyServiceOrderJobAsync(SyncOperationDto op, string operation, string user)
+        {
+            var ep = op.Endpoint ?? "";
+            // Matches GET/PUT /api/service-orders/{so}/jobs/{job}, PATCH .../jobs/{job}/status, etc.
+            var m = System.Text.RegularExpressions.Regex.Match(ep, @"service-orders/(\d+)/jobs/(\d+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (!m.Success) throw new InvalidOperationException("Expected path containing /service-orders/{soId}/jobs/{jobId}/...");
+            var soId = int.Parse(m.Groups[1].Value);
+            var jobId = op.EntityId ?? int.Parse(m.Groups[2].Value);
+            var job = await _context.ServiceOrderJobs.FirstOrDefaultAsync(j => j.Id == jobId);
+            if (job == null) throw new KeyNotFoundException($"Service order job {jobId} not found");
+            if (job.ServiceOrderId != soId)
+                throw new InvalidOperationException($"Job {jobId} does not belong to service order {soId}.");
+            if (operation == "delete")
+                throw new InvalidOperationException("Deleting service order jobs via sync is not supported");
+            var status = ReadString(op.Payload, "status") ?? ReadString(op.Payload, "Status");
+            if (!string.IsNullOrWhiteSpace(status)) job.Status = status;
+            var title = ReadString(op.Payload, "title") ?? ReadString(op.Payload, "Title");
+            if (!string.IsNullOrWhiteSpace(title)) job.Title = title;
+            var desc = ReadString(op.Payload, "description") ?? ReadString(op.Payload, "Description");
+            if (!string.IsNullOrWhiteSpace(desc)) job.Description = desc;
+            job.UpdatedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+            await RecordChangeAsync("service_order_job", job.Id, operation, job, user);
+            return job.Id;
         }
 
         private async Task<int?> ApplyDispatchAsync(SyncOperationDto op, string operation, string user)

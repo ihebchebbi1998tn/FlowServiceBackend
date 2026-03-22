@@ -1696,6 +1696,71 @@ namespace MyApi.Modules.ServiceOrders.Services
             return true;
         }
 
+        // ========== SERVICE ORDER JOBS (routes: GET/PATCH .../jobs/{jobId}/status, PUT .../jobs/{jobId}) ==========
+
+        public async Task<ServiceOrderJobDto?> GetServiceOrderJobAsync(int serviceOrderId, int jobId)
+        {
+            var job = await _context.ServiceOrderJobs
+                .AsNoTracking()
+                .FirstOrDefaultAsync(j => j.Id == jobId && j.ServiceOrderId == serviceOrderId);
+            return job == null ? null : MapServiceOrderJobToDto(job, null);
+        }
+
+        public async Task<ServiceOrderJobDto> PatchServiceOrderJobStatusAsync(int serviceOrderId, int jobId, UpdateServiceOrderJobStatusDto dto, string userId)
+        {
+            var job = await _context.ServiceOrderJobs.FirstOrDefaultAsync(j => j.Id == jobId && j.ServiceOrderId == serviceOrderId);
+            if (job == null)
+                throw new KeyNotFoundException($"Job {jobId} not found for service order {serviceOrderId}");
+            job.Status = dto.Status;
+            job.UpdatedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+            _logger.LogInformation("Job {JobId} status set to {Status} on service order {ServiceOrderId} by {UserId}", jobId, dto.Status, serviceOrderId, userId);
+            return MapServiceOrderJobToDto(job, null);
+        }
+
+        public async Task<ServiceOrderJobDto> UpdateServiceOrderJobAsync(int serviceOrderId, int jobId, UpdateServiceOrderJobDto dto, string userId)
+        {
+            var job = await _context.ServiceOrderJobs.FirstOrDefaultAsync(j => j.Id == jobId && j.ServiceOrderId == serviceOrderId);
+            if (job == null)
+                throw new KeyNotFoundException($"Job {jobId} not found for service order {serviceOrderId}");
+            if (dto.Status != null) job.Status = dto.Status;
+            if (dto.Title != null) job.Title = dto.Title;
+            if (dto.Description != null) job.Description = dto.Description;
+            if (dto.WorkType != null) job.WorkType = dto.WorkType;
+            if (dto.EstimatedDuration.HasValue) job.EstimatedDuration = dto.EstimatedDuration;
+            if (dto.EstimatedCost.HasValue) job.EstimatedCost = dto.EstimatedCost;
+            if (dto.CompletionPercentage.HasValue) job.CompletionPercentage = dto.CompletionPercentage;
+            if (dto.AssignedTechnicianIds != null) job.AssignedTechnicianIds = dto.AssignedTechnicianIds;
+            job.UpdatedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+            _logger.LogInformation("Job {JobId} updated on service order {ServiceOrderId} by {UserId}", jobId, serviceOrderId, userId);
+            return MapServiceOrderJobToDto(job, null);
+        }
+
+        private static ServiceOrderJobDto MapServiceOrderJobToDto(ServiceOrderJob j, Dictionary<string, string>? userNames)
+        {
+            return new ServiceOrderJobDto
+            {
+                Id = j.Id,
+                ServiceOrderId = j.ServiceOrderId,
+                Title = j.Title ?? string.Empty,
+                Description = j.Description,
+                Status = j.Status,
+                InstallationId = j.InstallationId,
+                WorkType = j.WorkType,
+                EstimatedDuration = j.EstimatedDuration,
+                EstimatedCost = j.EstimatedCost,
+                CompletionPercentage = j.CompletionPercentage,
+                AssignedTechnicianIds = j.AssignedTechnicianIds,
+                AssignedTechnicians = j.AssignedTechnicianIds?.Select(id => new UserLightDto
+                {
+                    Id = int.TryParse(id, out var parsedId) ? parsedId : 0,
+                    Name = userNames?.GetValueOrDefault(id) ?? id,
+                    Email = null
+                }).ToList()
+            };
+        }
+
         // ========== INVOICE PREPARATION ==========
 
         public async Task<ServiceOrderDto> PrepareForInvoiceAsync(int id, PrepareInvoiceDto dto, string userId)
