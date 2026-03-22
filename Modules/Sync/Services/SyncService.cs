@@ -3,10 +3,13 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using MyApi.Data;
+using MyApi.Modules.Dispatches.DTOs;
 using MyApi.Modules.Dispatches.Models;
+using MyApi.Modules.Dispatches.Services;
 using MyApi.Modules.Offers.Models;
 using MyApi.Modules.Projects.Models;
 using MyApi.Modules.Sales.Models;
@@ -18,8 +21,13 @@ using MyApi.Modules.Calendar.Models;
 using MyApi.Modules.EmailAccounts.Models;
 using MyApi.Modules.Installations.Models;
 using MyApi.Modules.Articles.Models;
+using MyApi.Modules.HR.DTOs;
 using MyApi.Modules.HR.Models;
+using MyApi.Modules.HR.Services;
 using MyApi.Modules.Lookups.Models;
+using MyApi.Modules.Planning.DTOs;
+using MyApi.Modules.Planning.Models;
+using MyApi.Modules.Planning.Services;
 using MyApi.Modules.SupportTickets.Models;
 using MyApi.Modules.Sync.DTOs;
 using MyApi.Modules.Sync.Models;
@@ -28,13 +36,43 @@ namespace MyApi.Modules.Sync.Services
 {
     public class SyncService : ISyncService
     {
+        private static readonly JsonSerializerOptions SyncJsonOptions = new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true,
+            NumberHandling = JsonNumberHandling.AllowReadingFromString
+        };
+
         private readonly ApplicationDbContext _context;
         private readonly ILogger<SyncService> _logger;
+        private readonly IDispatchService _dispatchService;
+        private readonly IPlanningService _planningService;
+        private readonly IHrService _hrService;
 
-        public SyncService(ApplicationDbContext context, ILogger<SyncService> logger)
+        public SyncService(
+            ApplicationDbContext context,
+            ILogger<SyncService> logger,
+            IDispatchService dispatchService,
+            IPlanningService planningService,
+            IHrService hrService)
         {
             _context = context;
             _logger = logger;
+            _dispatchService = dispatchService;
+            _planningService = planningService;
+            _hrService = hrService;
+        }
+
+        private static T? DeserializePayload<T>(JsonElement? payload) where T : class
+        {
+            if (payload is null || payload.Value.ValueKind != JsonValueKind.Object) return null;
+            try
+            {
+                return JsonSerializer.Deserialize<T>(payload.Value.GetRawText(), SyncJsonOptions);
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"Invalid payload for {typeof(T).Name}: {ex.Message}");
+            }
         }
 
         private async Task<int?> ResolveCurrentUserIdAsync(string currentUser)
@@ -577,6 +615,25 @@ namespace MyApi.Modules.Sync.Services
                 "support_ticket_link" => await ApplySupportTicketLinkAsync(op, operation, currentUser),
                 "task_checklist" => await ApplyTaskChecklistAsync(op, operation, currentUser),
                 "task_checklist_item" => await ApplyTaskChecklistItemAsync(op, operation, currentUser),
+                "planning_assign" => await ApplyPlanningAssignAsync(op, operation, currentUser),
+                "planning_schedule" => await ApplyPlanningScheduleAsync(op, operation, currentUser),
+                "planning_leave" => await ApplyPlanningLeaveAsync(op, operation, currentUser),
+                "dispatch_status" => await ApplyDispatchStatusAsync(op, currentUser),
+                "dispatch_start" => await ApplyDispatchStartAsync(op, currentUser),
+                "dispatch_complete" => await ApplyDispatchCompleteAsync(op, currentUser),
+                "dispatch_time_entry" => await ApplyDispatchTimeEntryAsync(op, operation, currentUser),
+                "dispatch_time_entry_approve" => await ApplyDispatchTimeEntryApproveAsync(op, currentUser),
+                "dispatch_expense" => await ApplyDispatchExpenseAsync(op, operation, currentUser),
+                "dispatch_expense_approve" => await ApplyDispatchExpenseApproveAsync(op, currentUser),
+                "dispatch_material" => await ApplyDispatchMaterialAsync(op, currentUser),
+                "dispatch_material_approve" => await ApplyDispatchMaterialApproveAsync(op, currentUser),
+                "dispatch_note" => await ApplyDispatchNoteAsync(op, currentUser),
+                "dispatch_history" => await ApplyDispatchHistoryAsync(op, operation, currentUser),
+                "hr_salary_config" => await ApplyHrSalaryConfigAsync(op, currentUser),
+                "hr_attendance_settings" => await ApplyHrAttendanceSettingsAsync(op, currentUser),
+                "hr_leave_balance" => await ApplyHrLeaveBalanceAsync(op, currentUser),
+                "hr_attendance_import" => await ApplyHrAttendanceImportAsync(op, currentUser),
+                "hr_payroll_run" => await ApplyHrPayrollRunAsync(op, operation, currentUser),
                 _ => throw new InvalidOperationException($"Unsupported entityType '{entityType}' for offline sync")
             };
         }
@@ -595,10 +652,31 @@ namespace MyApi.Modules.Sync.Services
             if (value == "lookup_bulk") return "lookup_bulk";
             if (value == "lookup_item") return "lookup_item";
             if (value == "currency") return "currency";
+            if (value == "planning_assign") return "planning_assign";
+            if (value == "planning_schedule") return "planning_schedule";
+            if (value == "planning_leave") return "planning_leave";
+            if (value == "dispatch_status") return "dispatch_status";
+            if (value == "dispatch_start") return "dispatch_start";
+            if (value == "dispatch_complete") return "dispatch_complete";
+            if (value == "dispatch_time_entry_approve") return "dispatch_time_entry_approve";
+            if (value == "dispatch_time_entry") return "dispatch_time_entry";
+            if (value == "dispatch_expense_approve") return "dispatch_expense_approve";
+            if (value == "dispatch_expense") return "dispatch_expense";
+            if (value == "dispatch_material_approve") return "dispatch_material_approve";
+            if (value == "dispatch_material") return "dispatch_material";
+            if (value == "dispatch_note") return "dispatch_note";
+            if (value == "dispatch_history") return "dispatch_history";
+            if (value == "hr_salary_config") return "hr_salary_config";
+            if (value == "hr_attendance_settings") return "hr_attendance_settings";
+            if (value == "hr_leave_balance") return "hr_leave_balance";
+            if (value == "hr_attendance_import") return "hr_attendance_import";
+            if (value == "hr_payroll_run") return "hr_payroll_run";
             if (value.Contains("dynamic_form_response") || (ep.Contains("dynamicforms") && ep.Contains("/responses") && !ep.Contains("/responses/count"))) return "dynamic_form_response";
             if (value.Contains("synced_email") || ep.Contains("/emails/")) return "synced_email";
             if (value.Contains("service")) return "service_order";
-            if (value.Contains("dispatch")) return "dispatch";
+            // Must be after dispatch_* entity types — those strings contain "dispatch".
+            if (value == "dispatch") return "dispatch";
+            if (value.Contains("dispatch_")) return value;
             if (value.Contains("offer")) return "offer";
             if (value.Contains("sale")) return "sale";
             if (value.Contains("task")) return "task";
@@ -613,6 +691,42 @@ namespace MyApi.Modules.Sync.Services
             if (value.Contains("dynamic")) return "dynamic_form";
             if (value.Contains("calendar")) return "calendar_event";
             if (value.Contains("email")) return "email_account";
+            if (value.Contains("planning_")) return value;
+            if (value.Contains("hr_")) return value;
+            if (ep.Contains("/planning/"))
+            {
+                if (ep.Contains("/planning/batch-assign")) return "planning_assign";
+                if (ep.Contains("/planning/assign")) return "planning_assign";
+                if (ep.Contains("/planning/schedule")) return "planning_schedule";
+                if (ep.Contains("/planning/leaves")) return "planning_leave";
+            }
+            if (ep.Contains("from-job/") || ep.Contains("dispatches/from-job")) return "dispatch";
+            if (ep.Contains("from-installation")) return "dispatch";
+            if (ep.Contains("/dispatches/"))
+            {
+                if (ep.Contains("/history")) return "dispatch_history";
+                if (ep.Contains("/time-entries/") && ep.Contains("/approve")) return "dispatch_time_entry_approve";
+                if (ep.Contains("/time-entries")) return "dispatch_time_entry";
+                if (ep.Contains("/expenses/") && ep.Contains("/approve")) return "dispatch_expense_approve";
+                if (ep.Contains("/expenses")) return "dispatch_expense";
+                if (ep.Contains("/materials/") && ep.Contains("/approve")) return "dispatch_material_approve";
+                if (ep.Contains("/materials")) return "dispatch_material";
+                if (ep.Contains("/notes")) return "dispatch_note";
+                if (ep.Contains("/status")) return "dispatch_status";
+                if (ep.Contains("/start")) return "dispatch_start";
+                if (ep.Contains("/complete")) return "dispatch_complete";
+            }
+            if (ep.Contains("/dispatches") || ep.Contains("dispatches")) return "dispatch";
+            if (ep.Contains("/hr/"))
+            {
+                if (ep.Contains("/salary-config")) return "hr_salary_config";
+                if (ep.Contains("/attendance/import")) return "hr_attendance_import";
+                if (ep.Contains("/attendance/settings")) return "hr_attendance_settings";
+                if (ep.Contains("/leaves/balances")) return "hr_leave_balance";
+                if (ep.Contains("/payroll/run") || (ep.Contains("/payroll/runs/") && ep.Contains("/confirm"))) return "hr_payroll_run";
+                if (ep.Contains("/departments")) return "hr_department";
+                if (ep.Contains("/attendance")) return "hr_attendance";
+            }
             if (ep.Contains("daily-task") || ep.Contains("tasks/daily")) return "daily_task";
             if (ep.Contains("project-task") || ep.Contains("/tasks")) return "task";
             if (ep.Contains("projects")) return "project";
@@ -620,8 +734,6 @@ namespace MyApi.Modules.Sync.Services
             if (ep.Contains("installations")) return "installation";
             if (ep.Contains("stock-transactions")) return "stock_transaction";
             if (ep.Contains("articles")) return "article";
-            if (ep.Contains("hr/departments")) return "hr_department";
-            if (ep.Contains("hr/attendance")) return "hr_attendance";
             if (ep.Contains("documents")) return "document";
             if (ep.Contains("lookups/currencies")) return "currency";
             if (ep.Contains("lookups") && ep.Contains("/bulk")) return "lookup_bulk";
@@ -971,6 +1083,36 @@ namespace MyApi.Modules.Sync.Services
 
         private async Task<int?> ApplyHrAttendanceAsync(SyncOperationDto op, string operation, string user)
         {
+            var ep0 = op.Endpoint ?? "";
+            if (ep0.Contains("hr/attendance", StringComparison.OrdinalIgnoreCase)
+                && !ep0.Contains("/settings", StringComparison.OrdinalIgnoreCase)
+                && !ep0.Contains("/import", StringComparison.OrdinalIgnoreCase))
+            {
+                var method0 = (op.Method ?? "").Trim().ToUpperInvariant();
+                var attMatch = System.Text.RegularExpressions.Regex.Match(ep0, @"attendance/(\d+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                if (attMatch.Success && (method0 == "PUT" || method0 == "PATCH"))
+                {
+                    var dto0 = DeserializePayload<UpsertAttendanceDto>(op.Payload);
+                    if (dto0 != null)
+                    {
+                        var aid = int.Parse(attMatch.Groups[1].Value);
+                        var r0 = await _hrService.UpdateAttendanceAsync(aid, dto0);
+                        await RecordChangeAsync("hr_attendance", r0.Id, operation, r0, user);
+                        return r0.Id;
+                    }
+                }
+                if (method0 == "POST")
+                {
+                    var dto0 = DeserializePayload<UpsertAttendanceDto>(op.Payload);
+                    if (dto0 != null && dto0.UserId.HasValue && dto0.Date.HasValue)
+                    {
+                        var r0 = await _hrService.CreateAttendanceAsync(dto0);
+                        await RecordChangeAsync("hr_attendance", r0.Id, "create", r0, user);
+                        return r0.Id;
+                    }
+                }
+            }
+
             if (operation == "delete") return null;
             var userIdVal = ReadInt(op.Payload, "userId") ?? ReadInt(op.Payload, "UserId") ?? 0;
             var dateVal = ReadDate(op.Payload, "date") ?? ReadDate(op.Payload, "Date");
@@ -1828,11 +1970,47 @@ namespace MyApi.Modules.Sync.Services
 
         private async Task<int?> ApplyDispatchAsync(SyncOperationDto op, string operation, string user)
         {
-            Dispatch? dispatch = null;
-            if (op.EntityId.HasValue)
+            var ep = op.Endpoint ?? "";
+            var method = (op.Method ?? "POST").Trim().ToUpperInvariant();
+
+            var fromJob = System.Text.RegularExpressions.Regex.Match(ep, @"dispatches/from-job/(\d+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (fromJob.Success && method == "POST")
             {
-                dispatch = await _context.Dispatches.FirstOrDefaultAsync(x => x.Id == op.EntityId.Value);
+                var dto = DeserializePayload<CreateDispatchFromJobDto>(op.Payload);
+                if (dto == null) throw new InvalidOperationException("CreateDispatchFromJobDto payload required");
+                var created = await _dispatchService.CreateFromJobAsync(int.Parse(fromJob.Groups[1].Value), dto, user);
+                await RecordChangeAsync("dispatch", created.Id, operation, created, user);
+                return created.Id;
             }
+
+            if (ep.Contains("from-installation", StringComparison.OrdinalIgnoreCase) && method == "POST")
+            {
+                var dto = DeserializePayload<CreateDispatchFromInstallationDto>(op.Payload);
+                if (dto == null) throw new InvalidOperationException("CreateDispatchFromInstallationDto payload required");
+                var created = await _dispatchService.CreateFromInstallationAsync(dto, user);
+                await RecordChangeAsync("dispatch", created.Id, operation, created, user);
+                return created.Id;
+            }
+
+            var dispatchId = op.EntityId ?? ParseIdFromEndpoint(ep, "dispatches");
+            if (!dispatchId.HasValue) throw new InvalidOperationException("Dispatch id could not be resolved from operation");
+
+            if (operation == "delete" || method == "DELETE")
+            {
+                await _dispatchService.DeleteAsync(dispatchId.Value, user);
+                await RecordChangeAsync("dispatch", dispatchId.Value, "delete", new { id = dispatchId.Value }, user);
+                return dispatchId.Value;
+            }
+
+            var updateDto = DeserializePayload<UpdateDispatchDto>(op.Payload);
+            if (updateDto != null && (method == "PUT" || method == "PATCH" || operation == "upsert"))
+            {
+                var updated = await _dispatchService.UpdateAsync(dispatchId.Value, updateDto, user);
+                await RecordChangeAsync("dispatch", updated.Id, operation, updated, user);
+                return updated.Id;
+            }
+
+            Dispatch? dispatch = await _context.Dispatches.FirstOrDefaultAsync(x => x.Id == dispatchId.Value);
             if (dispatch == null && operation != "delete")
             {
                 dispatch = new Dispatch
@@ -1861,6 +2039,317 @@ namespace MyApi.Modules.Sync.Services
             await _context.SaveChangesAsync();
             await RecordChangeAsync("dispatch", dispatch.Id, operation, dispatch, user);
             return dispatch.Id;
+        }
+
+        private async Task<int?> ApplyPlanningAssignAsync(SyncOperationDto op, string operation, string user)
+        {
+            var ep = op.Endpoint ?? "";
+            if (ep.Contains("batch-assign", StringComparison.OrdinalIgnoreCase))
+            {
+                var batch = DeserializePayload<BatchAssignDto>(op.Payload);
+                if (batch == null) throw new InvalidOperationException("BatchAssignDto payload required");
+                if (batch.Assignments == null || batch.Assignments.Count == 0)
+                    throw new InvalidOperationException("Batch assign requires at least one assignment");
+                _ = await _planningService.BatchAssignAsync(batch, user);
+                var firstJob = batch.Assignments.First().JobId;
+                await RecordChangeAsync("planning_assign", firstJob, operation, batch, user);
+                return firstJob;
+            }
+
+            var assign = DeserializePayload<AssignJobDto>(op.Payload);
+            if (assign == null) throw new InvalidOperationException("AssignJobDto payload required");
+            var res = await _planningService.AssignJobAsync(assign, user);
+            await RecordChangeAsync("planning_assign", res.Job.Id, operation, res, user);
+            return res.Job.Id;
+        }
+
+        private async Task<int?> ApplyPlanningScheduleAsync(SyncOperationDto op, string operation, string user)
+        {
+            var dto = DeserializePayload<UpdateUserScheduleDto>(op.Payload);
+            if (dto == null) throw new InvalidOperationException("UpdateUserScheduleDto payload required");
+            var r = await _planningService.UpdateUserScheduleAsync(dto);
+            await RecordChangeAsync("planning_schedule", r.UserId, operation, r, user);
+            return r.UserId;
+        }
+
+        private async Task<int?> ApplyPlanningLeaveAsync(SyncOperationDto op, string operation, string user)
+        {
+            var ep = op.Endpoint ?? "";
+            var method = (op.Method ?? "").Trim().ToUpperInvariant();
+            var m = System.Text.RegularExpressions.Regex.Match(ep, @"planning/leaves/(\d+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (m.Success && (method == "DELETE" || operation == "delete"))
+            {
+                var leaveId = int.Parse(m.Groups[1].Value);
+                await _planningService.DeleteLeaveAsync(leaveId);
+                await RecordChangeAsync("planning_leave", leaveId, "delete", new { id = leaveId }, user);
+                return leaveId;
+            }
+            if (m.Success && (method == "PUT" || method == "PATCH" || operation == "upsert"))
+            {
+                var leaveId = int.Parse(m.Groups[1].Value);
+                var u = DeserializePayload<UpdateLeaveDto>(op.Payload);
+                if (u == null) throw new InvalidOperationException("UpdateLeaveDto payload required");
+                var r = await _planningService.UpdateLeaveAsync(leaveId, u);
+                await RecordChangeAsync("planning_leave", leaveId, operation, r, user);
+                return leaveId;
+            }
+            if (method == "POST" || operation == "create")
+            {
+                var c = DeserializePayload<CreateLeaveDto>(op.Payload);
+                if (c == null) throw new InvalidOperationException("CreateLeaveDto payload required");
+                var r = await _planningService.CreateLeaveAsync(c);
+                await RecordChangeAsync("planning_leave", r.Id, "create", r, user);
+                return r.Id;
+            }
+            throw new InvalidOperationException("Unsupported planning leave sync operation");
+        }
+
+        private async Task<int?> ApplyDispatchStatusAsync(SyncOperationDto op, string user)
+        {
+            var id = op.EntityId ?? ParseIdFromEndpoint(op.Endpoint, "dispatches");
+            if (!id.HasValue) throw new InvalidOperationException("Dispatch id required");
+            var body = DeserializePayload<UpdateDispatchStatusDto>(op.Payload);
+            if (body == null || string.IsNullOrWhiteSpace(body.Status))
+            {
+                var st = ReadString(op.Payload, "status") ?? ReadString(op.Payload, "Status");
+                if (string.IsNullOrWhiteSpace(st)) throw new InvalidOperationException("status required");
+                body = new UpdateDispatchStatusDto { Status = st };
+            }
+            var r = await _dispatchService.UpdateStatusAsync(id.Value, body, user);
+            await RecordChangeAsync("dispatch", id.Value, "status", r, user);
+            return id.Value;
+        }
+
+        private async Task<int?> ApplyDispatchStartAsync(SyncOperationDto op, string user)
+        {
+            var id = op.EntityId ?? ParseIdFromEndpoint(op.Endpoint, "dispatches");
+            if (!id.HasValue) throw new InvalidOperationException("Dispatch id required");
+            var dto = DeserializePayload<StartDispatchDto>(op.Payload) ?? new StartDispatchDto { ActualStartTime = DateTime.UtcNow };
+            var r = await _dispatchService.StartDispatchAsync(id.Value, dto, user);
+            await RecordChangeAsync("dispatch", id.Value, "start", r, user);
+            return id.Value;
+        }
+
+        private async Task<int?> ApplyDispatchCompleteAsync(SyncOperationDto op, string user)
+        {
+            var id = op.EntityId ?? ParseIdFromEndpoint(op.Endpoint, "dispatches");
+            if (!id.HasValue) throw new InvalidOperationException("Dispatch id required");
+            var dto = DeserializePayload<CompleteDispatchDto>(op.Payload) ?? new CompleteDispatchDto { ActualEndTime = DateTime.UtcNow, CompletionPercentage = 100 };
+            var r = await _dispatchService.CompleteDispatchAsync(id.Value, dto, user);
+            await RecordChangeAsync("dispatch", id.Value, "complete", r, user);
+            return id.Value;
+        }
+
+        private async Task<int?> ApplyDispatchTimeEntryAsync(SyncOperationDto op, string operation, string user)
+        {
+            var ep = op.Endpoint ?? "";
+            var method = (op.Method ?? "POST").Trim().ToUpperInvariant();
+            var m = System.Text.RegularExpressions.Regex.Match(ep, @"dispatches/(\d+)/time-entries(?:/(\d+))?", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (!m.Success) throw new InvalidOperationException("Invalid dispatch time-entry endpoint");
+            var dispatchId = int.Parse(m.Groups[1].Value);
+            var entryId = m.Groups[2].Success ? int.Parse(m.Groups[2].Value) : (int?)null;
+
+            if (method == "DELETE" && entryId.HasValue)
+            {
+                await _dispatchService.DeleteTimeEntryAsync(dispatchId, entryId.Value, user);
+                await RecordChangeAsync("dispatch_time_entry", entryId.Value, "delete", new { dispatchId, entryId }, user);
+                return entryId.Value;
+            }
+            if ((method == "PUT" || method == "PATCH") && entryId.HasValue)
+            {
+                var dto = DeserializePayload<UpdateTimeEntryDto>(op.Payload);
+                if (dto == null) throw new InvalidOperationException("UpdateTimeEntryDto payload required");
+                var r = await _dispatchService.UpdateTimeEntryAsync(dispatchId, entryId.Value, dto, user);
+                await RecordChangeAsync("dispatch_time_entry", r.Id, operation, r, user);
+                return r.Id;
+            }
+            if (method == "POST")
+            {
+                var dto = DeserializePayload<CreateTimeEntryDto>(op.Payload);
+                if (dto == null) throw new InvalidOperationException("CreateTimeEntryDto payload required");
+                var r = await _dispatchService.AddTimeEntryAsync(dispatchId, dto, user);
+                await RecordChangeAsync("dispatch_time_entry", r.Id, "create", r, user);
+                return r.Id;
+            }
+            throw new InvalidOperationException("Unsupported dispatch time entry sync");
+        }
+
+        private async Task<int?> ApplyDispatchTimeEntryApproveAsync(SyncOperationDto op, string user)
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(op.Endpoint ?? "", @"dispatches/(\d+)/time-entries/(\d+)/approve", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (!m.Success) throw new InvalidOperationException("Invalid time-entry approve endpoint");
+            var dispatchId = int.Parse(m.Groups[1].Value);
+            var entryId = int.Parse(m.Groups[2].Value);
+            var dto = DeserializePayload<ApproveTimeEntryDto>(op.Payload) ?? new ApproveTimeEntryDto { ApprovedBy = user };
+            await _dispatchService.ApproveTimeEntryAsync(dispatchId, entryId, dto, user);
+            await RecordChangeAsync("dispatch_time_entry", entryId, "approve", new { dispatchId, entryId }, user);
+            return entryId;
+        }
+
+        private async Task<int?> ApplyDispatchExpenseAsync(SyncOperationDto op, string operation, string user)
+        {
+            var ep = op.Endpoint ?? "";
+            var method = (op.Method ?? "POST").Trim().ToUpperInvariant();
+            var m = System.Text.RegularExpressions.Regex.Match(ep, @"dispatches/(\d+)/expenses(?:/(\d+))?", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (!m.Success) throw new InvalidOperationException("Invalid dispatch expense endpoint");
+            var dispatchId = int.Parse(m.Groups[1].Value);
+            var expenseId = m.Groups[2].Success ? int.Parse(m.Groups[2].Value) : (int?)null;
+
+            if (method == "DELETE" && expenseId.HasValue)
+            {
+                await _dispatchService.DeleteExpenseAsync(dispatchId, expenseId.Value, user);
+                await RecordChangeAsync("dispatch_expense", expenseId.Value, "delete", new { dispatchId, expenseId }, user);
+                return expenseId.Value;
+            }
+            if ((method == "PUT" || method == "PATCH") && expenseId.HasValue)
+            {
+                var dto = DeserializePayload<UpdateExpenseDto>(op.Payload);
+                if (dto == null) throw new InvalidOperationException("UpdateExpenseDto payload required");
+                var r = await _dispatchService.UpdateExpenseAsync(dispatchId, expenseId.Value, dto, user);
+                await RecordChangeAsync("dispatch_expense", r.Id, operation, r, user);
+                return r.Id;
+            }
+            if (method == "POST")
+            {
+                var dto = DeserializePayload<CreateExpenseDto>(op.Payload);
+                if (dto == null) throw new InvalidOperationException("CreateExpenseDto payload required");
+                var r = await _dispatchService.AddExpenseAsync(dispatchId, dto, user);
+                await RecordChangeAsync("dispatch_expense", r.Id, "create", r, user);
+                return r.Id;
+            }
+            throw new InvalidOperationException("Unsupported dispatch expense sync");
+        }
+
+        private async Task<int?> ApplyDispatchExpenseApproveAsync(SyncOperationDto op, string user)
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(op.Endpoint ?? "", @"dispatches/(\d+)/expenses/(\d+)/approve", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (!m.Success) throw new InvalidOperationException("Invalid expense approve endpoint");
+            var dispatchId = int.Parse(m.Groups[1].Value);
+            var expenseId = int.Parse(m.Groups[2].Value);
+            var dto = DeserializePayload<ApproveExpenseDto>(op.Payload) ?? new ApproveExpenseDto { ApprovedBy = user };
+            await _dispatchService.ApproveExpenseAsync(dispatchId, expenseId, dto, user);
+            await RecordChangeAsync("dispatch_expense", expenseId, "approve", new { dispatchId, expenseId }, user);
+            return expenseId;
+        }
+
+        private async Task<int?> ApplyDispatchMaterialAsync(SyncOperationDto op, string user)
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(op.Endpoint ?? "", @"dispatches/(\d+)/materials", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (!m.Success) throw new InvalidOperationException("Invalid dispatch materials endpoint");
+            var dispatchId = int.Parse(m.Groups[1].Value);
+            var dto = DeserializePayload<CreateMaterialUsageDto>(op.Payload);
+            if (dto == null) throw new InvalidOperationException("CreateMaterialUsageDto payload required");
+            var r = await _dispatchService.AddMaterialUsageAsync(dispatchId, dto, user);
+            await RecordChangeAsync("dispatch_material", r.Id, "create", r, user);
+            return r.Id;
+        }
+
+        private async Task<int?> ApplyDispatchMaterialApproveAsync(SyncOperationDto op, string user)
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(op.Endpoint ?? "", @"dispatches/(\d+)/materials/(\d+)/approve", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (!m.Success) throw new InvalidOperationException("Invalid material approve endpoint");
+            var dispatchId = int.Parse(m.Groups[1].Value);
+            var materialId = int.Parse(m.Groups[2].Value);
+            var dto = DeserializePayload<ApproveMaterialDto>(op.Payload) ?? new ApproveMaterialDto { ApprovedBy = user };
+            await _dispatchService.ApproveMaterialAsync(dispatchId, materialId, dto, user);
+            await RecordChangeAsync("dispatch_material", materialId, "approve", new { dispatchId, materialId }, user);
+            return materialId;
+        }
+
+        private async Task<int?> ApplyDispatchNoteAsync(SyncOperationDto op, string user)
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(op.Endpoint ?? "", @"dispatches/(\d+)/notes", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (!m.Success) throw new InvalidOperationException("Invalid dispatch notes endpoint");
+            var dispatchId = int.Parse(m.Groups[1].Value);
+            var dto = DeserializePayload<CreateNoteDto>(op.Payload);
+            if (dto == null) throw new InvalidOperationException("CreateNoteDto payload required");
+            var r = await _dispatchService.AddNoteAsync(dispatchId, dto, user);
+            await RecordChangeAsync("dispatch_note", r.Id, "create", r, user);
+            return r.Id;
+        }
+
+        private async Task<int?> ApplyDispatchHistoryAsync(SyncOperationDto op, string operation, string user)
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(op.Endpoint ?? "", @"dispatches/(\d+)/history", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (!m.Success) throw new InvalidOperationException("Invalid dispatch history endpoint");
+            var dispatchId = int.Parse(m.Groups[1].Value);
+            var d = await _context.Dispatches.AsNoTracking().FirstOrDefaultAsync(x => x.Id == dispatchId && !x.IsDeleted);
+            if (d == null) throw new KeyNotFoundException($"Dispatch {dispatchId} not found");
+            var row = new DispatchHistory
+            {
+                TenantId = d.TenantId,
+                DispatchId = dispatchId.ToString(),
+                Action = ReadString(op.Payload, "action") ?? "activity",
+                OldValue = ReadString(op.Payload, "oldValue") ?? ReadString(op.Payload, "old_value"),
+                NewValue = ReadString(op.Payload, "newValue") ?? ReadString(op.Payload, "new_value"),
+                ChangedBy = ReadString(op.Payload, "changedBy") ?? ReadString(op.Payload, "changed_by") ?? user,
+                ChangedAt = ReadDate(op.Payload, "changedAt") ?? ReadDate(op.Payload, "changed_at") ?? DateTime.UtcNow
+            };
+            _context.DispatchHistory.Add(row);
+            await _context.SaveChangesAsync();
+            await RecordChangeAsync("dispatch_history", row.Id, operation, row, user);
+            return row.Id;
+        }
+
+        private async Task<int?> ApplyHrSalaryConfigAsync(SyncOperationDto op, string user)
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(op.Endpoint ?? "", @"employees/(\d+)/salary-config", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (!m.Success) throw new InvalidOperationException("salary-config path required");
+            var uid = int.Parse(m.Groups[1].Value);
+            var dto = DeserializePayload<UpsertSalaryConfigDto>(op.Payload);
+            if (dto == null) throw new InvalidOperationException("UpsertSalaryConfigDto payload required");
+            var r = await _hrService.UpsertSalaryConfigAsync(uid, dto);
+            await RecordChangeAsync("hr_salary_config", r.Id, op.Operation ?? "upsert", r, user);
+            return r.Id;
+        }
+
+        private async Task<int?> ApplyHrAttendanceSettingsAsync(SyncOperationDto op, string user)
+        {
+            var dto = DeserializePayload<UpsertAttendanceSettingsDto>(op.Payload);
+            if (dto == null) throw new InvalidOperationException("UpsertAttendanceSettingsDto payload required");
+            var r = await _hrService.UpdateAttendanceSettingsAsync(dto);
+            await RecordChangeAsync("hr_attendance_settings", r.Id, op.Operation ?? "upsert", r, user);
+            return r.Id;
+        }
+
+        private async Task<int?> ApplyHrLeaveBalanceAsync(SyncOperationDto op, string user)
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(op.Endpoint ?? "", @"leaves/balances/(\d+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (!m.Success) throw new InvalidOperationException("leave balances path required");
+            var uid = int.Parse(m.Groups[1].Value);
+            var dto = DeserializePayload<SetLeaveAllowanceDto>(op.Payload);
+            if (dto == null) throw new InvalidOperationException("SetLeaveAllowanceDto payload required");
+            _ = await _hrService.SetLeaveAllowanceAsync(uid, dto);
+            await RecordChangeAsync("hr_leave_balance", uid, op.Operation ?? "upsert", dto, user);
+            return uid;
+        }
+
+        private async Task<int?> ApplyHrAttendanceImportAsync(SyncOperationDto op, string user)
+        {
+            var dto = DeserializePayload<ImportAttendanceDto>(op.Payload);
+            if (dto == null) throw new InvalidOperationException("ImportAttendanceDto payload required");
+            _ = await _hrService.ImportAttendanceAsync(dto);
+            return null;
+        }
+
+        private async Task<int?> ApplyHrPayrollRunAsync(SyncOperationDto op, string operation, string currentUser)
+        {
+            var uid = await ResolveCurrentUserIdAsync(currentUser);
+            if (!uid.HasValue) throw new UnauthorizedAccessException("Unable to resolve user for payroll sync");
+            var ep = op.Endpoint ?? "";
+            if (ep.Contains("/confirm", StringComparison.OrdinalIgnoreCase))
+            {
+                var runId = ParseIdFromEndpoint(ep, "runs");
+                if (!runId.HasValue) throw new InvalidOperationException("Payroll run id required");
+                var r = await _hrService.ConfirmPayrollRunAsync(runId.Value);
+                await RecordChangeAsync("hr_payroll_run", r.Id, "confirm", r, currentUser);
+                return r.Id;
+            }
+            var dto = DeserializePayload<CreatePayrollRunDto>(op.Payload);
+            if (dto == null) throw new InvalidOperationException("CreatePayrollRunDto payload required");
+            var created = await _hrService.GeneratePayrollRunAsync(dto, uid.Value);
+            await RecordChangeAsync("hr_payroll_run", created.Id, "create", created, currentUser);
+            return created.Id;
         }
     }
 }
