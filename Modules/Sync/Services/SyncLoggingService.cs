@@ -1,8 +1,8 @@
 using Microsoft.EntityFrameworkCore;
-using FlowServiceBackend.Data;
-using FlowServiceBackend.Modules.Sync.Models;
+using MyApi.Data;
+using MyApi.Modules.Sync.Models;
 
-namespace FlowServiceBackend.Modules.Sync.Services
+namespace MyApi.Modules.Sync.Services
 {
     /// <summary>
     /// Service for logging offline sync failures, performance, and token refresh events

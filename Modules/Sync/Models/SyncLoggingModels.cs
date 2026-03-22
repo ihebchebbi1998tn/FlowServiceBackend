@@ -1,7 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
-namespace FlowServiceBackend.Modules.Sync.Models
+namespace MyApi.Modules.Sync.Models
 {
     /// <summary>
     /// Tracks offline sync failures for debugging and monitoring
