@@ -3,6 +3,7 @@ using System.Security.Claims;
 using System.Collections.Generic;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using MyApi.Modules.Sync.DTOs;
 using MyApi.Modules.Sync.Services;
 
@@ -14,10 +15,12 @@ namespace MyApi.Modules.Sync.Controllers
     public class SyncController : ControllerBase
     {
         private readonly ISyncService _syncService;
+        private readonly ILogger<SyncController> _logger;
 
-        public SyncController(ISyncService syncService)
+        public SyncController(ISyncService syncService, ILogger<SyncController> logger)
         {
             _syncService = syncService;
+            _logger = logger;
         }
 
         [HttpPost("push")]
