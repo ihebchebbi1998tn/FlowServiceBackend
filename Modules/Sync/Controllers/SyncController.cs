@@ -25,8 +25,22 @@ namespace MyApi.Modules.Sync.Controllers
         {
             if (!ModelState.IsValid) return BadRequest(ModelState);
             if (request.Operations == null || request.Operations.Count == 0) return Ok(new SyncPushResponseDto());
+            
             var currentUser = GetCurrentUser();
-            if (currentUser == null) return Unauthorized("User identity claim is required");
+            
+            // ✅ SOLUTION 2: Better error handling for missing user identity
+            if (string.IsNullOrWhiteSpace(currentUser))
+            {
+                _logger.LogError("Sync push failed: Unable to extract user identity from JWT claims");
+                _logger.LogDebug("Available JWT claims: {Claims}", 
+                    string.Join("; ", User.Claims.Select(c => $"{c.Type}={c.Value}")));
+                return Unauthorized(new { 
+                    status = 401,
+                    error = "Unauthorized",
+                    message = "Unable to resolve user identity. Your authentication token may be invalid or expired."
+                });
+            }
+            
             var result = await _syncService.PushAsync(request, currentUser);
             return Ok(result);
         }
@@ -80,8 +94,48 @@ namespace MyApi.Modules.Sync.Controllers
 
         private string? GetCurrentUser()
         {
-            return User.FindFirst(ClaimTypes.Email)?.Value ??
-                   User.FindFirst("email")?.Value;
+            // ✅ SOLUTION 2: Try multiple claim types for robustness
+            // Standard email claim (most common)
+            var email = User.FindFirst(ClaimTypes.Email)?.Value;
+            if (!string.IsNullOrWhiteSpace(email))
+                return email;
+            
+            // Custom email claim (camelCase)
+            email = User.FindFirst("email")?.Value;
+            if (!string.IsNullOrWhiteSpace(email))
+                return email;
+            
+            // Custom email claim (PascalCase)
+            email = User.FindFirst("Email")?.Value;
+            if (!string.IsNullOrWhiteSpace(email))
+                return email;
+            
+            // Fallback: If no email claim, try subject identifier
+            // (less ideal but better than null)
+            var subject = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (!string.IsNullOrWhiteSpace(subject))
+            {
+                _logger.LogWarning("Using NameIdentifier claim as user ID instead of email: {Subject}", subject);
+                return subject;
+            }
+            
+            // Azure AD Object ID fallback
+            subject = User.FindFirst("oid")?.Value;
+            if (!string.IsNullOrWhiteSpace(subject))
+            {
+                _logger.LogWarning("Using Azure OID claim as user ID instead of email: {Subject}", subject);
+                return subject;
+            }
+            
+            // Last resort: JWT sub claim
+            subject = User.FindFirst("sub")?.Value;
+            if (!string.IsNullOrWhiteSpace(subject))
+            {
+                _logger.LogWarning("Using sub claim as user ID instead of email: {Subject}", subject);
+                return subject;
+            }
+            
+            return null;
         }
 
         private bool IsAdmin()

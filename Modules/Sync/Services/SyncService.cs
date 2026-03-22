@@ -120,7 +120,14 @@ namespace MyApi.Modules.Sync.Services
         public async Task<SyncPushResponseDto> PushAsync(SyncPushRequestDto request, string currentUser)
         {
             var currentUserId = await ResolveCurrentUserIdAsync(currentUser);
-            if (!currentUserId.HasValue) throw new UnauthorizedAccessException("Unable to resolve current user.");
+            
+            // ✅ SOLUTION 2: Better error logging
+            if (!currentUserId.HasValue)
+            {
+                _logger.LogError("Sync push failed: Unable to resolve user ID for identity '{UserIdentity}'", currentUser);
+                throw new UnauthorizedAccessException($"User account not found for identity '{currentUser}'. Please contact support or try logging in again.");
+            }
+            
             if (request.Operations == null || request.Operations.Count == 0)
                 return new SyncPushResponseDto();
 
@@ -1389,8 +1396,19 @@ namespace MyApi.Modules.Sync.Services
             SupportTicket? ticket = null;
             var id = op.EntityId ?? ParseIdFromEndpoint(op.Endpoint, "SupportTickets");
             if (id.HasValue) ticket = await _context.SupportTickets.FirstOrDefaultAsync(x => x.Id == id.Value);
+            
+            // ✅ SOLUTION 3: Improved ownership validation with detailed logging
             if (ticket != null && !IsTicketOwnedByCurrentUser(ticket, user))
-                throw new UnauthorizedAccessException("You are not allowed to modify this support ticket.");
+            {
+                _logger.LogWarning(
+                    "Sync authorization failed: User '{CurrentUser}' attempted to {Operation} support ticket {TicketId} " +
+                    "owned by '{TicketOwner}' (Tenant: {Tenant})",
+                    user, operation, ticket.Id, ticket.UserEmail ?? "unknown", ticket.Tenant ?? "unknown");
+                    
+                throw new UnauthorizedAccessException(
+                    $"You are not allowed to {operation} this support ticket (owned by {ticket.UserEmail ?? "someone else"})");
+            }
+            
             if (ticket == null && operation != "delete")
             {
                 ticket = new SupportTicket
@@ -1401,17 +1419,23 @@ namespace MyApi.Modules.Sync.Services
                     Category = ReadString(op.Payload, "category") ?? ReadString(op.Payload, "Category"),
                     CurrentPage = ReadString(op.Payload, "currentPage") ?? ReadString(op.Payload, "CurrentPage"),
                     RelatedUrl = ReadString(op.Payload, "relatedUrl") ?? ReadString(op.Payload, "RelatedUrl"),
-                    UserEmail = user,
+                    UserEmail = user,  // ✅ Always set to the current user doing the sync
                     Status = ReadString(op.Payload, "status") ?? ReadString(op.Payload, "Status") ?? "open",
                     Tenant = "default",
                     CreatedAt = DateTime.UtcNow
                 };
                 _context.SupportTickets.Add(ticket);
+                _logger.LogInformation("Sync created new support ticket for user '{UserEmail}' with title '{Title}'",
+                    user, ticket.Title);
             }
+            
             if (ticket == null) return null;
+            
             if (operation == "delete")
             {
                 _context.SupportTickets.Remove(ticket);
+                _logger.LogInformation("Sync deleted support ticket {TicketId} (owned by {Owner})",
+                    ticket.Id, ticket.UserEmail);
             }
             else
             {
@@ -1422,7 +1446,11 @@ namespace MyApi.Modules.Sync.Services
                 ticket.Category = ReadString(op.Payload, "category") ?? ReadString(op.Payload, "Category") ?? ticket.Category;
                 ticket.CurrentPage = ReadString(op.Payload, "currentPage") ?? ReadString(op.Payload, "CurrentPage") ?? ticket.CurrentPage;
                 ticket.RelatedUrl = ReadString(op.Payload, "relatedUrl") ?? ReadString(op.Payload, "RelatedUrl") ?? ticket.RelatedUrl;
+                
+                _logger.LogInformation("Sync updated support ticket {TicketId} (owned by {Owner})",
+                    ticket.Id, ticket.UserEmail);
             }
+            
             await _context.SaveChangesAsync();
             await RecordChangeAsync("support_ticket", ticket.Id, operation, ticket, user);
             return ticket.Id;
@@ -1438,8 +1466,17 @@ namespace MyApi.Modules.Sync.Services
             if (!ticketId.HasValue) throw new InvalidOperationException("Ticket id is required for support ticket comments");
             var ticket = await _context.SupportTickets.FirstOrDefaultAsync(x => x.Id == ticketId.Value);
             if (ticket == null) throw new KeyNotFoundException($"Support ticket '{ticketId.Value}' not found");
+            
+            // ✅ SOLUTION 3: Improved logging for ownership check
             if (!IsTicketOwnedByCurrentUser(ticket, user))
+            {
+                _logger.LogWarning(
+                    "Sync authorization failed: User '{CurrentUser}' attempted to comment on support ticket {TicketId} " +
+                    "owned by '{TicketOwner}'",
+                    user, ticket.Id, ticket.UserEmail ?? "unknown");
                 throw new UnauthorizedAccessException("You are not allowed to comment on this support ticket.");
+            }
+            
             var comment = new SupportTicketComment
             {
                 SupportTicketId = ticketId.Value,
@@ -1451,6 +1488,8 @@ namespace MyApi.Modules.Sync.Services
             };
             _context.SupportTicketComments.Add(comment);
             await _context.SaveChangesAsync();
+            _logger.LogInformation("Sync created support ticket comment {CommentId} on ticket {TicketId} by '{Author}'",
+                comment.Id, ticket.Id, user);
             await RecordChangeAsync("support_ticket_comment", comment.Id, "create", comment, user);
             return comment.Id;
         }
