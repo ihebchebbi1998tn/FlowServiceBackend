@@ -258,82 +258,10 @@ namespace MyApi.Modules.Sync.Services
                 {
                     var op = g.Items[0];
                     var result = new SyncPushResultDto { OpId = op.OpId };
-                    await using var tx = await _context.Database.BeginTransactionAsync();
-                    var receipt = new SyncOperationReceipt
+                    var strategy = _context.Database.CreateExecutionStrategy();
+                    await strategy.ExecuteAsync(async () =>
                     {
-                        DeviceId = request.DeviceId,
-                        OpId = op.OpId,
-                        CreatedByUser = currentUser,
-                        CreatedByUserId = currentUserId,
-                        Status = "processing",
-                        OperationJson = JsonSerializer.Serialize(op)
-                    };
-                    _context.Set<SyncOperationReceipt>().Add(receipt);
-                    try
-                    {
-                        await _context.SaveChangesAsync();
-                    }
-                    catch (DbUpdateException)
-                    {
-                        await tx.RollbackAsync();
-                        _context.Entry(receipt).State = EntityState.Detached;
-                        var existingDup = await _context.Set<SyncOperationReceipt>()
-                            .AsNoTracking()
-                            .FirstOrDefaultAsync(r => r.DeviceId == request.DeviceId && r.OpId == op.OpId);
-                        result.Status = "duplicate";
-                        result.ServerEntityId = existingDup?.ServerEntityId;
-                        response.Results.Add(result);
-                        continue;
-                    }
-                    try
-                    {
-                        result.ServerEntityId = await ApplyOperationWithConflictStrategyAsync(op, currentUser);
-                        result.ServerEntityKey = ResolveServerEntityKey(op, result.ServerEntityId);
-                        result.Status = "applied";
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to apply sync operation {OpId}", op.OpId);
-                        result.Status = "rejected";
-                        result.Error = ex.Message;
-                    }
-                    receipt.Status = result.Status;
-                    receipt.ServerEntityId = result.ServerEntityId;
-                    receipt.ServerEntityKey = result.ServerEntityKey;
-                    receipt.ResponseJson = JsonSerializer.Serialize(result);
-                    await _context.SaveChangesAsync();
-                    if (result.Status == "applied" || result.Status == "duplicate")
-                    {
-                        await tx.CommitAsync();
-                    }
-                    else
-                    {
-                        await tx.RollbackAsync();
-                        _context.ChangeTracker.Clear();
-                        _context.Set<SyncOperationReceipt>().Add(new SyncOperationReceipt
-                        {
-                            DeviceId = request.DeviceId,
-                            OpId = op.OpId,
-                            CreatedByUser = currentUser,
-                            CreatedByUserId = currentUserId,
-                            Status = result.Status,
-                            ResponseJson = JsonSerializer.Serialize(result),
-                            OperationJson = JsonSerializer.Serialize(op)
-                        });
-                        await _context.SaveChangesAsync();
-                    }
-                    response.Results.Add(result);
-                    continue;
-                }
-
-                // Transaction group path: all-or-nothing apply.
-                await using var groupTx = await _context.Database.BeginTransactionAsync();
-                var groupResults = new List<SyncPushResultDto>();
-                var reservedReceipts = new List<SyncOperationReceipt>();
-                try
-                {
-                    foreach (var op in g.Items)
-                    {
+                        await using var tx = await _context.Database.BeginTransactionAsync();
                         var receipt = new SyncOperationReceipt
                         {
                             DeviceId = request.DeviceId,
@@ -344,90 +272,172 @@ namespace MyApi.Modules.Sync.Services
                             OperationJson = JsonSerializer.Serialize(op)
                         };
                         _context.Set<SyncOperationReceipt>().Add(receipt);
-                        reservedReceipts.Add(receipt);
-                    }
-                    try
-                    {
-                        await _context.SaveChangesAsync();
-                    }
-                    catch (DbUpdateException)
-                    {
-                        await groupTx.RollbackAsync();
-                        _context.ChangeTracker.Clear();
-                        foreach (var op in g.Items)
+                        try
                         {
+                            await _context.SaveChangesAsync();
+                        }
+                        catch (DbUpdateException)
+                        {
+                            await tx.RollbackAsync();
+                            _context.Entry(receipt).State = EntityState.Detached;
                             var existingDup = await _context.Set<SyncOperationReceipt>()
                                 .AsNoTracking()
                                 .FirstOrDefaultAsync(r => r.DeviceId == request.DeviceId && r.OpId == op.OpId);
-                            response.Results.Add(new SyncPushResultDto
-                            {
-                                OpId = op.OpId,
-                                Status = "duplicate",
-                                ServerEntityId = existingDup?.ServerEntityId,
-                                ServerEntityKey = existingDup?.ServerEntityKey
-                            });
+                            result.Status = "duplicate";
+                            result.ServerEntityId = existingDup?.ServerEntityId;
+                            return;
                         }
-                        continue;
-                    }
-
-                    foreach (var op in g.Items)
-                    {
-                        var r = new SyncPushResultDto
+                        try
                         {
-                            OpId = op.OpId,
-                            Status = "applied",
-                            ServerEntityId = await ApplyOperationWithConflictStrategyAsync(op, currentUser),
-                        };
-                        r.ServerEntityKey = ResolveServerEntityKey(op, r.ServerEntityId);
-                        groupResults.Add(r);
-                    }
-
-                    foreach (var (receipt, r) in reservedReceipts.Zip(groupResults, (receipt, r) => (receipt, r)))
-                    {
-                        receipt.Status = r.Status;
-                        receipt.ServerEntityId = r.ServerEntityId;
-                        receipt.ServerEntityKey = r.ServerEntityKey;
-                        receipt.ResponseJson = JsonSerializer.Serialize(r);
-                    }
-                    await _context.SaveChangesAsync();
-                    await groupTx.CommitAsync();
-                    response.Results.AddRange(groupResults);
+                            result.ServerEntityId = await ApplyOperationWithConflictStrategyAsync(op, currentUser);
+                            result.ServerEntityKey = ResolveServerEntityKey(op, result.ServerEntityId);
+                            result.Status = "applied";
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to apply sync operation {OpId}", op.OpId);
+                            result.Status = "rejected";
+                            result.Error = ex.Message;
+                        }
+                        receipt.Status = result.Status;
+                        receipt.ServerEntityId = result.ServerEntityId;
+                        receipt.ServerEntityKey = result.ServerEntityKey;
+                        receipt.ResponseJson = JsonSerializer.Serialize(result);
+                        await _context.SaveChangesAsync();
+                        if (result.Status == "applied" || result.Status == "duplicate")
+                        {
+                            await tx.CommitAsync();
+                        }
+                        else
+                        {
+                            await tx.RollbackAsync();
+                            _context.ChangeTracker.Clear();
+                            _context.Set<SyncOperationReceipt>().Add(new SyncOperationReceipt
+                            {
+                                DeviceId = request.DeviceId,
+                                OpId = op.OpId,
+                                CreatedByUser = currentUser,
+                                CreatedByUserId = currentUserId,
+                                Status = result.Status,
+                                ResponseJson = JsonSerializer.Serialize(result),
+                                OperationJson = JsonSerializer.Serialize(op)
+                            });
+                            await _context.SaveChangesAsync();
+                        }
+                    });
+                    response.Results.Add(result);
+                    continue;
                 }
-                catch (Exception ex)
+
+                // Transaction group path: all-or-nothing apply.
+                var groupResultsToAdd = new List<SyncPushResultDto>();
+                var groupStrategy = _context.Database.CreateExecutionStrategy();
+                await groupStrategy.ExecuteAsync(async () =>
                 {
-                    await groupTx.RollbackAsync();
-                    _context.ChangeTracker.Clear();
-                    _logger.LogWarning(ex, "Failed transaction group {GroupKey}", g.Key);
-                    foreach (var op in g.Items)
-                    {
-                        var r = new SyncPushResultDto
-                        {
-                            OpId = op.OpId,
-                            Status = "rejected",
-                            Error = $"Transaction group rolled back: {ex.Message}"
-                        };
-                        _context.Set<SyncOperationReceipt>().Add(new SyncOperationReceipt
-                        {
-                            DeviceId = request.DeviceId,
-                            OpId = op.OpId,
-                            CreatedByUser = currentUser,
-                            CreatedByUserId = currentUserId,
-                            Status = r.Status,
-                            ResponseJson = JsonSerializer.Serialize(r),
-                            OperationJson = JsonSerializer.Serialize(op)
-                        });
-                        response.Results.Add(r);
-                    }
+                    groupResultsToAdd.Clear(); // Clear in case of retry
+                    await using var groupTx = await _context.Database.BeginTransactionAsync();
+                    var groupResults = new List<SyncPushResultDto>();
+                    var reservedReceipts = new List<SyncOperationReceipt>();
                     try
                     {
+                        foreach (var op in g.Items)
+                        {
+                            var receipt = new SyncOperationReceipt
+                            {
+                                DeviceId = request.DeviceId,
+                                OpId = op.OpId,
+                                CreatedByUser = currentUser,
+                                CreatedByUserId = currentUserId,
+                                Status = "processing",
+                                OperationJson = JsonSerializer.Serialize(op)
+                            };
+                            _context.Set<SyncOperationReceipt>().Add(receipt);
+                            reservedReceipts.Add(receipt);
+                        }
+                        try
+                        {
+                            await _context.SaveChangesAsync();
+                        }
+                        catch (DbUpdateException)
+                        {
+                            await groupTx.RollbackAsync();
+                            _context.ChangeTracker.Clear();
+                            foreach (var op in g.Items)
+                            {
+                                var existingDup = await _context.Set<SyncOperationReceipt>()
+                                    .AsNoTracking()
+                                    .FirstOrDefaultAsync(r => r.DeviceId == request.DeviceId && r.OpId == op.OpId);
+                                groupResultsToAdd.Add(new SyncPushResultDto
+                                {
+                                    OpId = op.OpId,
+                                    Status = "duplicate",
+                                    ServerEntityId = existingDup?.ServerEntityId,
+                                    ServerEntityKey = existingDup?.ServerEntityKey
+                                });
+                            }
+                            return;
+                        }
+
+                        foreach (var op in g.Items)
+                        {
+                            var r = new SyncPushResultDto
+                            {
+                                OpId = op.OpId,
+                                Status = "applied",
+                                ServerEntityId = await ApplyOperationWithConflictStrategyAsync(op, currentUser),
+                            };
+                            r.ServerEntityKey = ResolveServerEntityKey(op, r.ServerEntityId);
+                            groupResults.Add(r);
+                        }
+
+                        foreach (var (receipt, r) in reservedReceipts.Zip(groupResults, (receipt, r) => (receipt, r)))
+                        {
+                            receipt.Status = r.Status;
+                            receipt.ServerEntityId = r.ServerEntityId;
+                            receipt.ServerEntityKey = r.ServerEntityKey;
+                            receipt.ResponseJson = JsonSerializer.Serialize(r);
+                        }
                         await _context.SaveChangesAsync();
+                        await groupTx.CommitAsync();
+                        groupResultsToAdd.AddRange(groupResults);
                     }
-                    catch (DbUpdateException)
+                    catch (Exception ex)
                     {
-                        // Duplicate receipt rows may already exist from parallel request.
+                        await groupTx.RollbackAsync();
                         _context.ChangeTracker.Clear();
+                        _logger.LogWarning(ex, "Failed transaction group {GroupKey}", g.Key);
+                        foreach (var op in g.Items)
+                        {
+                            var r = new SyncPushResultDto
+                            {
+                                OpId = op.OpId,
+                                Status = "rejected",
+                                Error = $"Transaction group rolled back: {ex.Message}"
+                            };
+                            groupResultsToAdd.Add(r);
+                            _context.Set<SyncOperationReceipt>().Add(new SyncOperationReceipt
+                            {
+                                DeviceId = request.DeviceId,
+                                OpId = op.OpId,
+                                CreatedByUser = currentUser,
+                                CreatedByUserId = currentUserId,
+                                Status = r.Status,
+                                ResponseJson = JsonSerializer.Serialize(r),
+                                OperationJson = JsonSerializer.Serialize(op)
+                            });
+                        }
+                        try
+                        {
+                            await _context.SaveChangesAsync();
+                        }
+                        catch (DbUpdateException)
+                        {
+                            // Duplicate receipt rows may already exist from parallel request.
+                            _context.ChangeTracker.Clear();
+                        }
                     }
-                }
+                });
+                response.Results.AddRange(groupResultsToAdd);
             }
 
             return response;
