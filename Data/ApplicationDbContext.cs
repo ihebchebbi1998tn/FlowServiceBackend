@@ -258,6 +258,10 @@ namespace MyApi.Data
 
         public DbSet<OfflineHydrationPreference> OfflineHydrationPreferences { get; set; }
 
+        // External Endpoints Module
+        public DbSet<MyApi.Modules.ExternalEndpoints.Models.ExternalEndpoint> ExternalEndpoints { get; set; }
+        public DbSet<MyApi.Modules.ExternalEndpoints.Models.ExternalEndpointLog> ExternalEndpointLogs { get; set; }
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
@@ -291,7 +295,7 @@ namespace MyApi.Data
         private static void ApplyTenantQueryFilter<T>(ModelBuilder modelBuilder, ApplicationDbContext ctx)
             where T : class, ITenantEntity
         {
-            modelBuilder.Entity<T>().HasQueryFilter(e => e.TenantId == ctx._currentTenantId);
+            modelBuilder.Entity<T>().HasQueryFilter(e => ctx._currentTenantId == -1 || e.TenantId == ctx._currentTenantId);
         }
 
         // ═══ MULTI-TENANCY: Auto-set TenantId on insert ═══
@@ -321,9 +325,23 @@ namespace MyApi.Data
 
         private void StampTenantIdOnNewEntities()
         {
+            // Block writes in view-all mode (TenantId = -1 sentinel) ONLY if no target tenant override
+            // When X-Target-Tenant is provided, the middleware sets _currentTenantId to the target tenant
+            // so writes are properly scoped. -1 means "all tenants" with no target specified.
+            if (_currentTenantId == -1)
+            {
+                var hasChanges = ChangeTracker.Entries<ITenantEntity>()
+                    .Any(e => e.State is EntityState.Added or EntityState.Modified or EntityState.Deleted);
+                if (hasChanges)
+                {
+                    throw new InvalidOperationException(
+                        "Cannot create, update or delete tenant-scoped entities in view-all mode without specifying a target tenant. Include the X-Target-Tenant header with the target company ID.");
+                }
+            }
+
             foreach (var entry in ChangeTracker.Entries<ITenantEntity>())
             {
-                if (entry.State == Microsoft.EntityFrameworkCore.EntityState.Added)
+                if (entry.State == EntityState.Added)
                 {
                     entry.Entity.TenantId = _currentTenantId;
                 }
@@ -432,6 +450,10 @@ namespace MyApi.Data
                 entity.Property(e => e.ModulesJson).HasColumnType("jsonb").IsRequired();
                 entity.HasIndex(e => new { e.TenantId, e.UserId }).IsUnique();
             });
+
+            // External Endpoints Module configurations
+            modelBuilder.ApplyConfiguration(new MyApi.Modules.ExternalEndpoints.Database.ExternalEndpointConfiguration());
+            modelBuilder.ApplyConfiguration(new MyApi.Modules.ExternalEndpoints.Database.ExternalEndpointLogConfiguration());
         }
 
         private void ConfigureArticleEntities(ModelBuilder modelBuilder)

@@ -11,14 +11,15 @@ namespace MyApi.Infrastructure;
 /// If no header is provided (or the tenant is unknown), the 
 /// default connection string from DATABASE_URL / appsettings is used.
 /// 
-/// PERFORMANCE NOTES:
-/// - Connection strings are cached in TenantDbContextFactory (parsed once).
-/// - Default tenant (no header) skips all resolution → zero overhead.
-/// - Npgsql pools connections per unique connection string automatically.
+/// Special value "__all__" enables cross-company mode for MainAdminUsers.
+/// Mutations require an additional X-Target-Tenant header specifying the
+/// target tenant ID, so that writes are properly scoped.
 /// </summary>
 public class TenantMiddleware
 {
     public const string TenantHeaderName = "X-Tenant";
+    public const string TargetTenantHeaderName = "X-Target-Tenant";
+    public const string ViewAllSentinel = "__all__";
 
     private readonly RequestDelegate _next;
     private readonly ILogger<TenantMiddleware> _logger;
@@ -33,10 +34,76 @@ public class TenantMiddleware
     {
         var tenant = context.Request.Headers[TenantHeaderName].FirstOrDefault()?.Trim().ToLowerInvariant();
 
-        if (!string.IsNullOrEmpty(tenant))
+        if (string.Equals(tenant, ViewAllSentinel, StringComparison.OrdinalIgnoreCase))
+        {
+            // ── Cross-company "View All" mode ──
+            // Only MainAdminUser may use this. Check JWT claim.
+            var isMainAdmin = context.User?.Claims
+                .Any(c => c.Type == "user_type" && c.Value == "MainAdminUser") == true;
+
+            if (!isMainAdmin)
+            {
+                _logger.LogWarning("🚫 TENANT-MIDDLEWARE: Non-MainAdmin attempted __all__ mode");
+                context.Response.StatusCode = 403;
+                await context.Response.WriteAsJsonAsync(new { error = "Only MainAdminUser can use view-all mode" });
+                return;
+            }
+
+            var method = context.Request.Method.ToUpperInvariant();
+            var isMutation = method is "POST" or "PUT" or "PATCH" or "DELETE";
+
+            if (isMutation)
+            {
+                // Allow certain safe endpoints without X-Target-Tenant
+                var path = context.Request.Path.Value?.ToLowerInvariant() ?? "";
+                var isSafeEndpoint = path.Contains("/api/tenants") || path.Contains("/api/auth");
+
+                if (!isSafeEndpoint)
+                {
+                    // Mutations require X-Target-Tenant header
+                    var targetTenantHeader = context.Request.Headers[TargetTenantHeaderName].FirstOrDefault();
+                    
+                    if (string.IsNullOrEmpty(targetTenantHeader) || !int.TryParse(targetTenantHeader, out var targetTenantId))
+                    {
+                        _logger.LogWarning("🚫 TENANT-MIDDLEWARE: Mutation in view-all mode without valid X-Target-Tenant header");
+                        context.Response.StatusCode = 400;
+                        await context.Response.WriteAsJsonAsync(new { error = "X-Target-Tenant header with a valid tenant ID is required for mutations in view-all mode." });
+                        return;
+                    }
+
+                    // Validate tenant exists and is active
+                    var validTenantId = TenantSlugCache.IsValidTenantId(targetTenantId);
+                    if (!validTenantId)
+                    {
+                        _logger.LogWarning("🚫 TENANT-MIDDLEWARE: X-Target-Tenant {TenantId} is invalid or inactive", targetTenantId);
+                        context.Response.StatusCode = 404;
+                        await context.Response.WriteAsJsonAsync(new { error = $"Target tenant {targetTenantId} does not exist or is inactive." });
+                        return;
+                    }
+
+                    // Scope this mutation to the target tenant
+                    context.Items["Tenant"] = ViewAllSentinel;
+                    context.Items["TenantId"] = targetTenantId;
+                    context.Items["TenantViewAll"] = true;
+                    context.Items["TenantTargetOverride"] = true;
+                    _logger.LogDebug("🏢 TENANT-MIDDLEWARE: {Method} {Path} → VIEW-ALL mutation scoped to TenantId={TenantId}",
+                        method, context.Request.Path, targetTenantId);
+
+                    await _next(context);
+                    return;
+                }
+            }
+
+            // Read-only requests or safe endpoints: use -1 sentinel (no tenant filter)
+            context.Items["Tenant"] = ViewAllSentinel;
+            context.Items["TenantId"] = -1; // Sentinel for "all tenants"
+            context.Items["TenantViewAll"] = true;
+            _logger.LogDebug("🏢 TENANT-MIDDLEWARE: Request {Method} {Path} → VIEW-ALL mode (MainAdmin)",
+                context.Request.Method, context.Request.Path);
+        }
+        else if (!string.IsNullOrEmpty(tenant))
         {
             context.Items["Tenant"] = tenant;
-            // Resolve slug → numeric TenantId from cache
             var tenantId = TenantSlugCache.GetTenantId(tenant);
             context.Items["TenantId"] = tenantId;
             _logger.LogDebug("🏢 TENANT-MIDDLEWARE: Request {Method} {Path} → tenant='{Tenant}' (TenantId={TenantId})",
@@ -60,55 +127,35 @@ public class TenantMiddleware
 /// </summary>
 public static class TenantConnectionResolver
 {
-    // ─── Tenant → Connection String map ───
-    // Key   = subdomain (lowercase), e.g. "demo", "client1"
-    // Value = full PostgreSQL connection string or URI
-    //
-    // IMPORTANT: In production, move these to environment variables
-    // or a config table. This dictionary is a simple starting point.
     private static readonly Dictionary<string, string> _tenantConnections = new(StringComparer.OrdinalIgnoreCase)
     {
-        // Add tenant mappings here. Examples:
-        // ["demo"]    = "Host=...;Port=5432;Database=demo_db;Username=...;Password=...;SSL Mode=Require",
-        // ["client1"] = "postgresql://user:pass@host:5432/client1_db?sslmode=require",
+        // Add tenant mappings here.
     };
 
-    /// <summary>
-    /// Returns the connection string for a given tenant, or null for default.
-    /// </summary>
     public static string? GetConnectionString(string? tenant)
     {
         if (string.IsNullOrEmpty(tenant))
             return null;
 
-        // 1. Check hardcoded dictionary
         if (_tenantConnections.TryGetValue(tenant, out var connStr))
             return connStr;
 
-        // 2. Check environment variable: TENANT_DEMO_DATABASE_URL
         var envKey = $"TENANT_{tenant.ToUpperInvariant()}_DATABASE_URL";
         var envValue = Environment.GetEnvironmentVariable(envKey);
         if (!string.IsNullOrEmpty(envValue))
             return envValue;
 
-        // 3. Unknown tenant → use default
         return null;
     }
 }
 
 /// <summary>
 /// Resolves a tenant-specific public files base URL.
-/// Checks (in order):
-///  1. Hardcoded in-memory map (for quick dev/testing)
-///  2. Environment variable TENANT_{NAME}_PUBLIC_BASE_URL
-///  3. Returns null → caller should fall back to global Files:PublicBaseUrl or request host
 /// </summary>
 public static class TenantPublicUrlResolver
 {
     private static readonly Dictionary<string, string> _tenantPublicBases = new(StringComparer.OrdinalIgnoreCase)
     {
-        // Example:
-        // ["demo"] = "https://demo-files.example.com",
     };
 
     public static string? GetPublicBaseUrl(string? tenant)

@@ -304,6 +304,9 @@ builder.Services.AddScoped<IPlanningService, PlanningService>();
 builder.Services.AddScoped<IHrService, HrService>();
 builder.Services.AddScoped<ISyncService, SyncService>();
 
+// External Endpoints Module Services
+builder.Services.AddScoped<MyApi.Modules.ExternalEndpoints.Services.IExternalEndpointService, MyApi.Modules.ExternalEndpoints.Services.ExternalEndpointService>();
+
 // Upload Services (UploadThing integration)
 builder.Services.AddHttpClient();
 builder.Services.AddScoped<IUploadThingService, UploadThingService>();

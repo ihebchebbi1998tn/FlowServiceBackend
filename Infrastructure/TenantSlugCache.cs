@@ -73,4 +73,10 @@ public static class TenantSlugCache
     /// Check if a slug exists in the cache.
     /// </summary>
     public static bool HasTenant(string slug) => _slugToId.ContainsKey(slug);
+
+    /// <summary>
+    /// Check if a numeric tenant ID exists and is active in the cache.
+    /// Used by TenantMiddleware to validate X-Target-Tenant header.
+    /// </summary>
+    public static bool IsValidTenantId(int tenantId) => _slugToId.Values.Contains(tenantId) || tenantId == 0;
 }
