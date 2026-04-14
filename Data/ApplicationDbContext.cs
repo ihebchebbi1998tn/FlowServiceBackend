@@ -262,6 +262,17 @@ namespace MyApi.Data
         public DbSet<MyApi.Modules.ExternalEndpoints.Models.ExternalEndpoint> ExternalEndpoints { get; set; }
         public DbSet<MyApi.Modules.ExternalEndpoints.Models.ExternalEndpointLog> ExternalEndpointLogs { get; set; }
 
+        // Purchases Module
+        public DbSet<MyApi.Modules.Purchases.Models.PurchaseOrder> PurchaseOrders { get; set; }
+        public DbSet<MyApi.Modules.Purchases.Models.PurchaseOrderItem> PurchaseOrderItems { get; set; }
+        public DbSet<MyApi.Modules.Purchases.Models.GoodsReceipt> GoodsReceipts { get; set; }
+        public DbSet<MyApi.Modules.Purchases.Models.GoodsReceiptItem> GoodsReceiptItems { get; set; }
+        public DbSet<MyApi.Modules.Purchases.Models.SupplierInvoice> SupplierInvoices { get; set; }
+        public DbSet<MyApi.Modules.Purchases.Models.SupplierInvoiceItem> SupplierInvoiceItems { get; set; }
+        public DbSet<MyApi.Modules.Purchases.Models.ArticleSupplier> ArticleSuppliers { get; set; }
+        public DbSet<MyApi.Modules.Purchases.Models.ArticleSupplierPriceHistory> ArticleSupplierPriceHistory { get; set; }
+        public DbSet<MyApi.Modules.Purchases.Models.PurchaseActivity> PurchaseActivities { get; set; }
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);

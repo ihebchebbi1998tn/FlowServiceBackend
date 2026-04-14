@@ -290,6 +290,12 @@ builder.Services.AddScoped<IOfferService, OfferService>();
 // Sales Module Services
 builder.Services.AddScoped<ISaleService, SaleService>();
 
+// Purchases Module Services
+builder.Services.AddScoped<MyApi.Modules.Purchases.Services.IPurchaseOrderService, MyApi.Modules.Purchases.Services.PurchaseOrderService>();
+builder.Services.AddScoped<MyApi.Modules.Purchases.Services.IGoodsReceiptService, MyApi.Modules.Purchases.Services.GoodsReceiptService>();
+builder.Services.AddScoped<MyApi.Modules.Purchases.Services.ISupplierInvoiceService, MyApi.Modules.Purchases.Services.SupplierInvoiceService>();
+builder.Services.AddScoped<MyApi.Modules.Purchases.Services.IArticleSupplierService, MyApi.Modules.Purchases.Services.ArticleSupplierService>();
+
 // Installations Module Services
 builder.Services.AddScoped<IInstallationService, InstallationService>();
 builder.Services.AddScoped<IInstallationNoteService, InstallationNoteService>();
