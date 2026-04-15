@@ -196,7 +196,7 @@ namespace MyApi.Modules.Purchases.Services
                 CancelledOrders = orders.Count(o => o.Status == "cancelled"),
                 TotalSpend = orders.Where(o => o.Status != "cancelled" && o.Status != "draft").Sum(o => o.GrandTotal),
                 MonthlySpend = orders.Where(o => o.OrderDate >= monthStart && o.Status != "cancelled").Sum(o => o.GrandTotal),
-                AvgLeadTime = orders.Where(o => o.ActualDelivery.HasValue).Select(o => (o.ActualDelivery!.Value - o.OrderDate).TotalDays).DefaultIfEmpty(0).Average(),
+                AvgLeadTime = (decimal)orders.Where(o => o.ActualDelivery.HasValue).Select(o => (o.ActualDelivery!.Value - o.OrderDate).TotalDays).DefaultIfEmpty(0).Average(),
                 PendingReceipts = orders.Count(o => o.Status == "ordered" || o.Status == "partially_received"),
                 OverdueInvoices = await _context.SupplierInvoices.CountAsync(i => !i.IsDeleted && i.DueDate < now && i.Status != "paid" && i.Status != "cancelled")
             };
