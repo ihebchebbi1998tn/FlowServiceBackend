@@ -147,8 +147,51 @@ namespace MyApi.Modules.Purchases.Services
         {
             var receipt = await _context.GoodsReceipts.Include(r => r.Items).FirstOrDefaultAsync(r => r.Id == id);
             if (receipt == null) return false;
+
+            // Reverse ReceivedQty on PO items before deleting the receipt
+            var po = await _context.PurchaseOrders.Include(p => p.Items)
+                .FirstOrDefaultAsync(p => p.Id == receipt.PurchaseOrderId && !p.IsDeleted);
+
+            if (po != null && receipt.Items != null)
+            {
+                foreach (var grItem in receipt.Items)
+                {
+                    var poItem = po.Items?.FirstOrDefault(i => i.Id == grItem.PurchaseOrderItemId);
+                    if (poItem != null)
+                    {
+                        poItem.ReceivedQty = Math.Max(0, poItem.ReceivedQty - grItem.QuantityReceived);
+                    }
+                }
+
+                // Recalculate PO status based on remaining received quantities
+                var allFullyReceived = po.Items?.All(i => i.ReceivedQty >= i.Quantity) ?? false;
+                var anyReceived = po.Items?.Any(i => i.ReceivedQty > 0) ?? false;
+                if (allFullyReceived)
+                {
+                    po.Status = "received";
+                }
+                else if (anyReceived)
+                {
+                    po.Status = "partially_received";
+                }
+                else
+                {
+                    po.Status = "ordered";
+                    po.ActualDelivery = null;
+                }
+            }
+
             _context.GoodsReceiptItems.RemoveRange(receipt.Items ?? Enumerable.Empty<GoodsReceiptItem>());
             _context.GoodsReceipts.Remove(receipt);
+
+            // Log activity
+            _context.PurchaseActivities.Add(new PurchaseActivity
+            {
+                EntityType = "goods_receipt", EntityId = id, ActivityType = "deleted",
+                Description = $"Goods receipt {receipt.ReceiptNumber} deleted, received quantities reversed",
+                PerformedBy = userId, PerformedAt = DateTime.UtcNow
+            });
+
             await _context.SaveChangesAsync();
             return true;
         }
