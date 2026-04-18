@@ -281,21 +281,46 @@ namespace MyApi.Modules.Offers.Services
 
             var oldStatus = offer.Status;
 
+            // Status guard: once an offer is finalized (accepted/won/cancelled),
+            // financial & scope fields are locked. Tags, addresses, description,
+            // status transitions, and validity can still be edited.
+            var finalizedStatuses = new[] { "accepted", "won", "cancelled" };
+            var isFinalized = !string.IsNullOrEmpty(offer.Status) &&
+                              finalizedStatuses.Contains(offer.Status);
+
+            bool TriedToEditFinancials() =>
+                updateDto.Amount.HasValue ||
+                updateDto.TotalAmount.HasValue ||
+                updateDto.Taxes.HasValue ||
+                updateDto.TaxType != null ||
+                updateDto.Discount.HasValue ||
+                updateDto.DiscountType != null ||
+                updateDto.FiscalStamp.HasValue ||
+                updateDto.Currency != null ||
+                updateDto.ContactId.HasValue;
+
+            if (isFinalized && TriedToEditFinancials())
+            {
+                throw new InvalidOperationException(
+                    $"Cannot modify financial fields on a {offer.Status} offer. " +
+                    "Revert status first or duplicate the offer.");
+            }
+
             if (updateDto.Title != null) offer.Title = updateDto.Title;
             if (updateDto.Description != null) offer.Description = updateDto.Description;
-            if (updateDto.ContactId.HasValue) offer.ContactId = updateDto.ContactId.Value;
+            if (!isFinalized && updateDto.ContactId.HasValue) offer.ContactId = updateDto.ContactId.Value;
             if (updateDto.ProjectId.HasValue) offer.ProjectId = updateDto.ProjectId.Value;
             if (updateDto.Status != null) offer.Status = updateDto.Status;
             if (updateDto.Category != null) offer.Category = updateDto.Category;
             if (updateDto.Source != null) offer.Source = updateDto.Source;
-            if (updateDto.Currency != null) offer.Currency = updateDto.Currency;
-            if (updateDto.Amount.HasValue) offer.TotalAmount = updateDto.Amount.Value;
-            if (updateDto.TotalAmount.HasValue) offer.TotalAmount = updateDto.TotalAmount.Value;
-            if (updateDto.Taxes.HasValue) offer.Taxes = updateDto.Taxes.Value;
-            if (updateDto.TaxType != null) offer.TaxType = updateDto.TaxType;
-            if (updateDto.Discount.HasValue) offer.Discount = updateDto.Discount.Value;
-            if (updateDto.DiscountType != null) offer.DiscountType = updateDto.DiscountType;
-            if (updateDto.FiscalStamp.HasValue) offer.FiscalStamp = updateDto.FiscalStamp.Value;
+            if (!isFinalized && updateDto.Currency != null) offer.Currency = updateDto.Currency;
+            if (!isFinalized && updateDto.Amount.HasValue) offer.TotalAmount = updateDto.Amount.Value;
+            if (!isFinalized && updateDto.TotalAmount.HasValue) offer.TotalAmount = updateDto.TotalAmount.Value;
+            if (!isFinalized && updateDto.Taxes.HasValue) offer.Taxes = updateDto.Taxes.Value;
+            if (!isFinalized && updateDto.TaxType != null) offer.TaxType = updateDto.TaxType;
+            if (!isFinalized && updateDto.Discount.HasValue) offer.Discount = updateDto.Discount.Value;
+            if (!isFinalized && updateDto.DiscountType != null) offer.DiscountType = updateDto.DiscountType;
+            if (!isFinalized && updateDto.FiscalStamp.HasValue) offer.FiscalStamp = updateDto.FiscalStamp.Value;
             if (updateDto.ValidUntil.HasValue) offer.ValidUntil = updateDto.ValidUntil;
             if (updateDto.BillingAddress != null) offer.BillingAddress = updateDto.BillingAddress;
             if (updateDto.BillingPostalCode != null) offer.BillingPostalCode = updateDto.BillingPostalCode;

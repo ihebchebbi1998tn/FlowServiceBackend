@@ -12,6 +12,7 @@ using MyApi.Modules.Dispatches.Models;
 using MyApi.Modules.Dispatches.Services;
 using MyApi.Modules.Dispatches.DTOs;
 using MyApi.Modules.Contacts.Models;
+using MyApi.Modules.Settings.Services;
 
 namespace MyApi.Modules.Planning.Services
 {
@@ -20,15 +21,18 @@ namespace MyApi.Modules.Planning.Services
         private readonly ApplicationDbContext _db;
         private readonly IDispatchService _dispatchService;
         private readonly ILogger<PlanningService> _logger;
+        private readonly IAppSettingsService? _appSettingsService;
 
         public PlanningService(
             ApplicationDbContext db,
             IDispatchService dispatchService,
-            ILogger<PlanningService> logger)
+            ILogger<PlanningService> logger,
+            IAppSettingsService? appSettingsService = null)
         {
             _db = db;
             _dispatchService = dispatchService;
             _logger = logger;
+            _appSettingsService = appSettingsService;
         }
 
         public async Task<AssignJobResponseDto> AssignJobAsync(AssignJobDto dto, string currentUserId)
@@ -69,16 +73,56 @@ namespace MyApi.Modules.Planning.Services
             {
                 try
                 {
-                    var createDispatchDto = new CreateDispatchFromJobDto
+                    // Read JobConversionMode setting (defaults to "installation" when not set)
+                    string conversionMode = "installation";
+                    if (_appSettingsService != null)
                     {
-                        AssignedTechnicianIds = dto.TechnicianIds,
-                        ScheduledDate = dto.ScheduledDate,
-                        ScheduledStartTime = dto.ScheduledStartTime,
-                        ScheduledEndTime = dto.ScheduledEndTime,
-                        Priority = dto.Priority
-                    };
+                        try
+                        {
+                            var v = await _appSettingsService.GetSettingAsync("JobConversionMode");
+                            if (!string.IsNullOrWhiteSpace(v)) conversionMode = v;
+                        }
+                        catch (Exception cex)
+                        {
+                            _logger.LogWarning(cex, "Failed to read JobConversionMode; defaulting to 'installation'");
+                        }
+                    }
 
-                    dispatch = await _dispatchService.CreateFromJobAsync(dto.JobId, createDispatchDto, currentUserId);
+                    // When installation mode AND the job belongs to an installation, find-or-create
+                    // a single installation dispatch and append this job to it instead of creating
+                    // a new per-job dispatch.
+                    if (conversionMode == "installation"
+                        && !string.IsNullOrEmpty(job.InstallationId)
+                        && int.TryParse(job.InstallationId, out var installationIdInt))
+                    {
+                        dispatch = await _dispatchService.AddJobsToInstallationDispatchAsync(
+                            installationIdInt,
+                            job.InstallationName ?? $"Installation #{installationIdInt}",
+                            new List<int> { dto.JobId },
+                            dto.TechnicianIds,
+                            dto.ScheduledDate,
+                            dto.ScheduledStartTime,
+                            dto.ScheduledEndTime,
+                            dto.Priority,
+                            null,
+                            null,
+                            null,
+                            job.ServiceOrderId,
+                            currentUserId);
+                    }
+                    else
+                    {
+                        var createDispatchDto = new CreateDispatchFromJobDto
+                        {
+                            AssignedTechnicianIds = dto.TechnicianIds,
+                            ScheduledDate = dto.ScheduledDate,
+                            ScheduledStartTime = dto.ScheduledStartTime,
+                            ScheduledEndTime = dto.ScheduledEndTime,
+                            Priority = dto.Priority
+                        };
+
+                        dispatch = await _dispatchService.CreateFromJobAsync(dto.JobId, createDispatchDto, currentUserId);
+                    }
                 }
                 catch (Exception ex)
                 {

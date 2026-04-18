@@ -240,7 +240,9 @@ namespace MyApi.Modules.Dispatches.Services
             var dispatch = new Dispatch
             {
                 DispatchNumber = dispatchNumber,
-                JobId = dto.JobIds.First().ToString(), // backward compat
+                // Installation dispatches are multi-job; the canonical job list lives in DispatchJobs.
+                // Leave legacy JobId NULL so single-job lookups don't accidentally match this dispatch.
+                JobId = null,
                 ContactId = contactId,
                 ServiceOrderId = serviceOrderId,
                 ProjectId = jobs.FirstOrDefault()?.ServiceOrder?.ProjectId,
@@ -311,6 +313,135 @@ namespace MyApi.Modules.Dispatches.Services
 
             var nameMap = await GetTechnicianNameMapForDispatchAsync(createdDispatch.Id);
             return DispatchMapping.ToDto(createdDispatch, nameMap);
+        }
+
+        public async Task<DispatchDto> AddJobsToInstallationDispatchAsync(
+            int installationId,
+            string installationName,
+            List<int> jobIds,
+            List<string> technicianIds,
+            DateTime scheduledDate,
+            TimeSpan? scheduledStartTime,
+            TimeSpan? scheduledEndTime,
+            string priority,
+            string? notes,
+            string? siteAddress,
+            int? contactId,
+            int? serviceOrderId,
+            string userId)
+        {
+            if (jobIds == null || jobIds.Count == 0)
+                throw new ArgumentException("At least one job id is required", nameof(jobIds));
+
+            // Parse technician ids once
+            var techIdInts = (technicianIds ?? new List<string>())
+                .Select(s => int.TryParse(s, out var n) ? n : (int?)null)
+                .Where(n => n.HasValue)
+                .Select(n => n!.Value)
+                .ToList();
+
+            // Look for an existing non-deleted dispatch on the same date for this installation
+            // whose technician set matches the requested set (when technicians are provided).
+            var openStatuses = new[] { "planned", "assigned", "scheduled" };
+
+            var candidates = await _db.Dispatches
+                .Include(d => d.AssignedTechnicians)
+                .Include(d => d.DispatchJobs)
+                .Where(d => !d.IsDeleted
+                    && d.InstallationId == installationId
+                    && d.ScheduledDate.Date == scheduledDate.Date
+                    && openStatuses.Contains(d.Status))
+                .ToListAsync();
+
+            Dispatch? existing = null;
+            if (techIdInts.Count == 0)
+            {
+                existing = candidates.FirstOrDefault();
+            }
+            else
+            {
+                existing = candidates.FirstOrDefault(d =>
+                {
+                    var ids = d.AssignedTechnicians.Select(at => at.TechnicianId).ToHashSet();
+                    return techIdInts.All(id => ids.Contains(id));
+                });
+            }
+
+            if (existing != null)
+            {
+                // Skip jobs already attached to this dispatch
+                var alreadyAttached = existing.DispatchJobs.Select(dj => dj.JobId).ToHashSet();
+                var newJobIds = jobIds.Where(id => !alreadyAttached.Contains(id)).ToList();
+
+                if (newJobIds.Count > 0)
+                {
+                    // Make sure these jobs are not attached to ANOTHER non-deleted dispatch
+                    var conflicts = await _db.Set<DispatchJob>()
+                        .Where(dj => newJobIds.Contains(dj.JobId) && dj.DispatchId != existing.Id)
+                        .Join(_db.Dispatches.Where(d => !d.IsDeleted), dj => dj.DispatchId, d => d.Id, (dj, d) => dj.JobId)
+                        .ToListAsync();
+
+                    if (conflicts.Any())
+                        throw new InvalidOperationException($"Jobs already dispatched: {string.Join(", ", conflicts)}");
+
+                    var legacyConflicts = await _db.Dispatches
+                        .Where(d => !d.IsDeleted
+                            && d.Id != existing.Id
+                            && d.JobId != null
+                            && newJobIds.Select(i => i.ToString()).Contains(d.JobId))
+                        .Select(d => d.JobId)
+                        .ToListAsync();
+                    if (legacyConflicts.Any())
+                        throw new InvalidOperationException($"Jobs already dispatched (legacy): {string.Join(", ", legacyConflicts)}");
+
+                    foreach (var jid in newJobIds)
+                    {
+                        _db.Set<DispatchJob>().Add(new DispatchJob
+                        {
+                            DispatchId = existing.Id,
+                            JobId = jid,
+                            CreatedDate = DateTime.UtcNow
+                        });
+                    }
+
+                    // Mark jobs dispatched
+                    var jobsToUpdate = await _db.ServiceOrderJobs.Where(j => newJobIds.Contains(j.Id)).ToListAsync();
+                    foreach (var job in jobsToUpdate) job.Status = "dispatched";
+
+                    existing.ModifiedBy = userId;
+                    existing.ModifiedDate = DateTime.UtcNow;
+                    await _db.SaveChangesAsync();
+
+                    _logger.LogInformation(
+                        "Appended {Count} job(s) to existing installation dispatch {DispatchId} (installation {InstallationId})",
+                        newJobIds.Count, existing.Id, installationId);
+                }
+
+                var reloaded = await _db.Dispatches
+                    .Include(d => d.AssignedTechnicians)
+                    .Include(d => d.DispatchJobs)
+                    .FirstAsync(d => d.Id == existing.Id);
+                var nameMap = await GetTechnicianNameMapForDispatchAsync(reloaded.Id);
+                return DispatchMapping.ToDto(reloaded, nameMap);
+            }
+
+            // No existing dispatch — create a new one via the canonical path.
+            var createDto = new CreateDispatchFromInstallationDto
+            {
+                InstallationId = installationId,
+                InstallationName = installationName,
+                JobIds = jobIds,
+                AssignedTechnicianIds = technicianIds ?? new List<string>(),
+                ScheduledDate = scheduledDate,
+                ScheduledStartTime = scheduledStartTime,
+                ScheduledEndTime = scheduledEndTime,
+                Priority = priority ?? "medium",
+                Notes = notes,
+                SiteAddress = siteAddress,
+                ContactId = contactId,
+                ServiceOrderId = serviceOrderId,
+            };
+            return await CreateFromInstallationAsync(createDto, userId);
         }
 
         public async Task<PagedResult<DispatchListItemDto>> GetAllAsync(DispatchQueryParams query)

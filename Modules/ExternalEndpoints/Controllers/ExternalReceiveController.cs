@@ -47,8 +47,16 @@ namespace MyApi.Modules.ExternalEndpoints.Controllers
 
                 var (statusCode, responseBody) = await _service.ReceiveAsync(slug, method, headers, queryString, body, sourceIp, apiKey);
 
-                Response.ContentType = "application/json";
-                return StatusCode(statusCode, JsonSerializer.Deserialize<object>(responseBody));
+                // Detect JSON vs plain text so user-defined ResponseTemplate values never crash the endpoint.
+                var raw = responseBody ?? string.Empty;
+                var trimmed = raw.TrimStart();
+                var looksLikeJson = trimmed.StartsWith("{") || trimmed.StartsWith("[") || trimmed.StartsWith("\"");
+                return new ContentResult
+                {
+                    Content = raw,
+                    ContentType = looksLikeJson ? "application/json" : "text/plain",
+                    StatusCode = statusCode
+                };
             }
             catch (Exception ex)
             {

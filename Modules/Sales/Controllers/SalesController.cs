@@ -180,6 +180,10 @@ namespace MyApi.Modules.Sales.Controllers
             {
                 return NotFound(new { success = false, error = new { code = "SALE_NOT_FOUND", message = "Sale not found" } });
             }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new { success = false, error = new { code = "SALE_LOCKED", message = ex.Message } });
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error updating sale {SaleId}", id);

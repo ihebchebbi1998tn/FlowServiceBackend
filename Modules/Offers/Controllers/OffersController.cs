@@ -151,6 +151,10 @@ namespace MyApi.Modules.Offers.Controllers
             {
                 return NotFound(new { success = false, error = new { code = "OFFER_NOT_FOUND", message = "Offer not found" } });
             }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new { success = false, error = new { code = "OFFER_LOCKED", message = ex.Message } });
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error updating offer {OfferId}", id);

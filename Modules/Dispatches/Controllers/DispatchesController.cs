@@ -57,6 +57,38 @@ namespace MyApi.Modules.Dispatches.Controllers
             return CreatedAtAction(nameof(GetById), new { dispatchId = result.Id }, result);
         }
 
+        // Find-or-create installation dispatch and append jobs to it.
+        // Body uses CreateDispatchFromInstallationDto (jobIds, technicianIds, scheduledDate, ...).
+        [HttpPost("installations/{installationId:int}/jobs")]
+        public async Task<IActionResult> AddJobsToInstallationDispatch(int installationId, [FromBody] CreateDispatchFromInstallationDto dto)
+        {
+            if (!ModelState.IsValid) return UnprocessableEntity(ModelState);
+            if (dto.InstallationId == 0) dto.InstallationId = installationId;
+            if (dto.InstallationId != installationId) return BadRequest(new { error = "installationId mismatch between route and body" });
+
+            var userId = GetUserId();
+            var result = await _service.AddJobsToInstallationDispatchAsync(
+                installationId,
+                dto.InstallationName,
+                dto.JobIds,
+                dto.AssignedTechnicianIds,
+                dto.ScheduledDate,
+                dto.ScheduledStartTime,
+                dto.ScheduledEndTime,
+                dto.Priority,
+                dto.Notes,
+                dto.SiteAddress,
+                dto.ContactId,
+                dto.ServiceOrderId,
+                userId);
+
+            await _systemLogService.LogSuccessAsync(
+                $"Added {dto.JobIds.Count} job(s) to installation {installationId} dispatch (id {result.Id})",
+                "Dispatches", "update", userId, GetUserName(), "Dispatch", result.Id.ToString());
+
+            return Ok(result);
+        }
+
         [HttpGet]
         public async Task<IActionResult> GetAll([FromQuery] DispatchQueryParams query)
         {

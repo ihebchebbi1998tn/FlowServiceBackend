@@ -354,17 +354,38 @@ namespace MyApi.Modules.Sales.Services
                              updateDto.Status != "closed" && updateDto.Status != "won" && updateDto.Status != "completed" &&
                              (previousStatus == "closed" || previousStatus == "won" || previousStatus == "completed");
 
+            // Status guard: once a sale is finalized (closed/won/completed/cancelled/lost),
+            // financial & scope fields are locked. Tags, addresses, description, fulfillment
+            // tracking, status transitions, and close dates can still be edited.
+            var finalizedSaleStatuses = new[] { "closed", "won", "completed", "cancelled", "lost" };
+            var isSaleFinalized = !string.IsNullOrEmpty(previousStatus) &&
+                                  finalizedSaleStatuses.Contains(previousStatus);
+
+            bool TriedToEditSaleFinancials() =>
+                updateDto.Amount.HasValue ||
+                updateDto.Taxes.HasValue ||
+                updateDto.TaxType != null ||
+                updateDto.Discount.HasValue ||
+                updateDto.FiscalStamp.HasValue;
+
+            if (isSaleFinalized && TriedToEditSaleFinancials())
+            {
+                throw new InvalidOperationException(
+                    $"Cannot modify financial fields on a {previousStatus} sale. " +
+                    "Reopen the sale first (change status) or create a new sale.");
+            }
+
             if (updateDto.Title != null) sale.Title = updateDto.Title;
             if (updateDto.ProjectId.HasValue) sale.ProjectId = updateDto.ProjectId.Value;
             if (updateDto.Description != null) sale.Description = updateDto.Description;
             if (updateDto.Status != null) sale.Status = updateDto.Status;
             if (updateDto.Stage != null) sale.Stage = updateDto.Stage;
             if (updateDto.Priority != null) sale.Priority = updateDto.Priority;
-            if (updateDto.Amount.HasValue) sale.TotalAmount = updateDto.Amount.Value;
-            if (updateDto.Taxes.HasValue) sale.Taxes = updateDto.Taxes.Value;
-            if (updateDto.TaxType != null) sale.TaxType = updateDto.TaxType;
-            if (updateDto.Discount.HasValue) sale.Discount = updateDto.Discount.Value;
-            if (updateDto.FiscalStamp.HasValue) sale.FiscalStamp = updateDto.FiscalStamp.Value;
+            if (!isSaleFinalized && updateDto.Amount.HasValue) sale.TotalAmount = updateDto.Amount.Value;
+            if (!isSaleFinalized && updateDto.Taxes.HasValue) sale.Taxes = updateDto.Taxes.Value;
+            if (!isSaleFinalized && updateDto.TaxType != null) sale.TaxType = updateDto.TaxType;
+            if (!isSaleFinalized && updateDto.Discount.HasValue) sale.Discount = updateDto.Discount.Value;
+            if (!isSaleFinalized && updateDto.FiscalStamp.HasValue) sale.FiscalStamp = updateDto.FiscalStamp.Value;
             if (updateDto.EstimatedCloseDate.HasValue) sale.EstimatedCloseDate = updateDto.EstimatedCloseDate;
             if (updateDto.ActualCloseDate.HasValue) sale.ActualCloseDate = updateDto.ActualCloseDate;
             if (updateDto.BillingAddress != null) sale.BillingAddress = updateDto.BillingAddress;
