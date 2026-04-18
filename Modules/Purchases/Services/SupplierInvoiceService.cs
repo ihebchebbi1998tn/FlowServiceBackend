@@ -206,6 +206,102 @@ namespace MyApi.Modules.Purchases.Services
             return true;
         }
 
+        // ── Items ──
+        public async Task<SupplierInvoiceItemDto> AddItemAsync(int invoiceId, CreateSupplierInvoiceItemDto dto)
+        {
+            var invoice = await _context.SupplierInvoices.Include(i => i.Items).FirstOrDefaultAsync(i => i.Id == invoiceId && !i.IsDeleted)
+                ?? throw new KeyNotFoundException($"SupplierInvoice {invoiceId} not found");
+            if (invoice.Status != "draft")
+                throw new InvalidOperationException("Items can only be modified on draft invoices");
+
+            var item = new SupplierInvoiceItem
+            {
+                SupplierInvoiceId = invoiceId,
+                PurchaseOrderItemId = dto.PurchaseOrderItemId,
+                ArticleId = dto.ArticleId,
+                ArticleName = dto.ArticleName,
+                Description = dto.Description,
+                Quantity = dto.Quantity,
+                UnitPrice = dto.UnitPrice,
+                TaxRate = dto.TaxRate,
+                LineTotal = dto.Quantity * dto.UnitPrice,
+                DisplayOrder = invoice.Items?.Count ?? 0
+            };
+            _context.SupplierInvoiceItems.Add(item);
+            await _context.SaveChangesAsync();
+
+            await RecalculateInvoiceTotalsAsync(invoiceId);
+            return MapItemToDto(item);
+        }
+
+        public async Task<SupplierInvoiceItemDto> UpdateItemAsync(int invoiceId, int itemId, CreateSupplierInvoiceItemDto dto)
+        {
+            var invoice = await _context.SupplierInvoices.Include(i => i.Items).FirstOrDefaultAsync(i => i.Id == invoiceId && !i.IsDeleted)
+                ?? throw new KeyNotFoundException($"SupplierInvoice {invoiceId} not found");
+            if (invoice.Status != "draft")
+                throw new InvalidOperationException("Items can only be modified on draft invoices");
+
+            var item = invoice.Items?.FirstOrDefault(i => i.Id == itemId)
+                ?? throw new KeyNotFoundException($"Item {itemId} not found");
+
+            item.ArticleId = dto.ArticleId;
+            item.ArticleName = dto.ArticleName;
+            item.Description = dto.Description;
+            item.Quantity = dto.Quantity;
+            item.UnitPrice = dto.UnitPrice;
+            item.TaxRate = dto.TaxRate;
+            item.LineTotal = dto.Quantity * dto.UnitPrice;
+            await _context.SaveChangesAsync();
+
+            await RecalculateInvoiceTotalsAsync(invoiceId);
+            return MapItemToDto(item);
+        }
+
+        public async Task<bool> DeleteItemAsync(int invoiceId, int itemId)
+        {
+            var invoice = await _context.SupplierInvoices.Include(i => i.Items).FirstOrDefaultAsync(i => i.Id == invoiceId && !i.IsDeleted)
+                ?? throw new KeyNotFoundException($"SupplierInvoice {invoiceId} not found");
+            if (invoice.Status != "draft")
+                throw new InvalidOperationException("Items can only be modified on draft invoices");
+
+            var item = invoice.Items?.FirstOrDefault(i => i.Id == itemId);
+            if (item == null) return false;
+            _context.SupplierInvoiceItems.Remove(item);
+            await _context.SaveChangesAsync();
+
+            await RecalculateInvoiceTotalsAsync(invoiceId);
+            return true;
+        }
+
+        private async Task RecalculateInvoiceTotalsAsync(int invoiceId)
+        {
+            var invoice = await _context.SupplierInvoices.Include(i => i.Items).FirstOrDefaultAsync(i => i.Id == invoiceId);
+            if (invoice == null) return;
+            var items = invoice.Items?.ToList() ?? new List<SupplierInvoiceItem>();
+            invoice.SubTotal = items.Sum(i => i.Quantity * i.UnitPrice);
+            var discAmt = invoice.DiscountType == "percentage" ? invoice.SubTotal * invoice.Discount / 100 : invoice.Discount;
+            var afterDiscount = invoice.SubTotal - discAmt;
+            invoice.TaxAmount = items.Sum(i => i.Quantity * i.UnitPrice * i.TaxRate / 100);
+            if (invoice.RsApplicable && !string.IsNullOrEmpty(invoice.RsTypeCode))
+            {
+                var rsRate = invoice.RsTypeCode switch
+                {
+                    "P1" => 1.5m, "P2" => 5m, "P3" => 10m, "P4" => 15m, "P5" => 25m, _ => 0m
+                };
+                invoice.RsAmount = afterDiscount * rsRate / 100;
+            }
+            invoice.GrandTotal = afterDiscount + invoice.TaxAmount + invoice.FiscalStamp - invoice.RsAmount;
+            await _context.SaveChangesAsync();
+        }
+
+        private static SupplierInvoiceItemDto MapItemToDto(SupplierInvoiceItem i) => new()
+        {
+            Id = i.Id, SupplierInvoiceId = i.SupplierInvoiceId, PurchaseOrderItemId = i.PurchaseOrderItemId,
+            ArticleId = i.ArticleId, ArticleName = i.ArticleName, Description = i.Description,
+            Quantity = i.Quantity, UnitPrice = i.UnitPrice, TaxRate = i.TaxRate,
+            LineTotal = i.LineTotal, DisplayOrder = i.DisplayOrder
+        };
+
         private static SupplierInvoiceDto MapToDto(SupplierInvoice inv, string? poNumber) => new()
         {
             Id = inv.Id, InvoiceNumber = inv.InvoiceNumber, SupplierInvoiceRef = inv.SupplierInvoiceRef,

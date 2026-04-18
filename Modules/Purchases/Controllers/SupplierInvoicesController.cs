@@ -169,5 +169,58 @@ namespace MyApi.Modules.Purchases.Controllers
                 return StatusCode(500, new { success = false, error = new { code = "INTERNAL_ERROR", message = "An error occurred" } });
             }
         }
+
+        // ── Items (only allowed when invoice.status == 'draft') ──
+        [HttpPost("{id:int}/items")]
+        public async Task<IActionResult> AddItem(int id, [FromBody] CreateSupplierInvoiceItemDto dto)
+        {
+            try
+            {
+                var item = await _service.AddItemAsync(id, dto);
+                return Ok(new { success = true, data = item });
+            }
+            catch (KeyNotFoundException ex) { return NotFound(new { success = false, error = new { code = "NOT_FOUND", message = ex.Message } }); }
+            catch (InvalidOperationException ex) { return BadRequest(new { success = false, error = new { code = "BAD_REQUEST", message = ex.Message } }); }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error adding item to invoice {Id}", id);
+                return StatusCode(500, new { success = false, error = new { code = "INTERNAL_ERROR", message = "An error occurred" } });
+            }
+        }
+
+        [HttpPatch("{id:int}/items/{itemId:int}")]
+        public async Task<IActionResult> UpdateItem(int id, int itemId, [FromBody] CreateSupplierInvoiceItemDto dto)
+        {
+            try
+            {
+                var item = await _service.UpdateItemAsync(id, itemId, dto);
+                return Ok(new { success = true, data = item });
+            }
+            catch (KeyNotFoundException ex) { return NotFound(new { success = false, error = new { code = "NOT_FOUND", message = ex.Message } }); }
+            catch (InvalidOperationException ex) { return BadRequest(new { success = false, error = new { code = "BAD_REQUEST", message = ex.Message } }); }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error updating item {ItemId} on invoice {Id}", itemId, id);
+                return StatusCode(500, new { success = false, error = new { code = "INTERNAL_ERROR", message = "An error occurred" } });
+            }
+        }
+
+        [HttpDelete("{id:int}/items/{itemId:int}")]
+        public async Task<IActionResult> DeleteItem(int id, int itemId)
+        {
+            try
+            {
+                if (!await _service.DeleteItemAsync(id, itemId))
+                    return NotFound(new { success = false, error = new { code = "NOT_FOUND", message = "Item not found" } });
+                return Ok(new { success = true, message = "Deleted" });
+            }
+            catch (KeyNotFoundException ex) { return NotFound(new { success = false, error = new { code = "NOT_FOUND", message = ex.Message } }); }
+            catch (InvalidOperationException ex) { return BadRequest(new { success = false, error = new { code = "BAD_REQUEST", message = ex.Message } }); }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error deleting item {ItemId} on invoice {Id}", itemId, id);
+                return StatusCode(500, new { success = false, error = new { code = "INTERNAL_ERROR", message = "An error occurred" } });
+            }
+        }
     }
 }

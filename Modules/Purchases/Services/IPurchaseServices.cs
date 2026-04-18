@@ -42,6 +42,10 @@ namespace MyApi.Modules.Purchases.Services
         Task<SupplierInvoiceDto> CreateInvoiceAsync(CreateSupplierInvoiceDto dto, string userId);
         Task<SupplierInvoiceDto> UpdateInvoiceAsync(int id, UpdateSupplierInvoiceDto dto, string userId);
         Task<bool> DeleteInvoiceAsync(int id, string userId);
+        // Items
+        Task<SupplierInvoiceItemDto> AddItemAsync(int invoiceId, CreateSupplierInvoiceItemDto dto);
+        Task<SupplierInvoiceItemDto> UpdateItemAsync(int invoiceId, int itemId, CreateSupplierInvoiceItemDto dto);
+        Task<bool> DeleteItemAsync(int invoiceId, int itemId);
     }
 
     public interface IArticleSupplierService
