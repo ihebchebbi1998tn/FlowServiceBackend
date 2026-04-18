@@ -119,5 +119,55 @@ namespace MyApi.Modules.Purchases.Controllers
                 return StatusCode(500, new { success = false, error = new { code = "INTERNAL_ERROR", message = "An error occurred" } });
             }
         }
+
+        // Mark invoice as synced to TEJ (Tunisian e-tax journal).
+        // Persists tej_synced=true, tej_sync_date=now, tej_sync_status='synced'.
+        [HttpPost("{id:int}/tej-sync")]
+        public async Task<IActionResult> SyncTej(int id)
+        {
+            try
+            {
+                var userId = GetUserId();
+                var dto = new UpdateSupplierInvoiceDto
+                {
+                    TejSynced = true,
+                    TejSyncDate = DateTime.UtcNow,
+                    TejSyncStatus = "synced",
+                };
+                var invoice = await _service.UpdateInvoiceAsync(id, dto, userId);
+                await _systemLogService.LogSuccessAsync($"Supplier invoice TEJ-synced: {invoice.InvoiceNumber}", "Purchases", "update", userId, GetUserName(), "SupplierInvoice", id.ToString());
+                return Ok(new { success = true, data = invoice });
+            }
+            catch (KeyNotFoundException) { return NotFound(new { success = false, error = new { code = "NOT_FOUND", message = "Invoice not found" } }); }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error TEJ-syncing invoice {Id}", id);
+                return StatusCode(500, new { success = false, error = new { code = "INTERNAL_ERROR", message = "An error occurred" } });
+            }
+        }
+
+        // Mark invoice as sent to Facture en Ligne.
+        [HttpPost("{id:int}/facture-en-ligne")]
+        public async Task<IActionResult> SendFactureEnLigne(int id)
+        {
+            try
+            {
+                var userId = GetUserId();
+                var dto = new UpdateSupplierInvoiceDto
+                {
+                    FactureEnLigneStatus = "sent",
+                    FactureEnLigneSentAt = DateTime.UtcNow,
+                };
+                var invoice = await _service.UpdateInvoiceAsync(id, dto, userId);
+                await _systemLogService.LogSuccessAsync($"Facture en ligne sent: {invoice.InvoiceNumber}", "Purchases", "update", userId, GetUserName(), "SupplierInvoice", id.ToString());
+                return Ok(new { success = true, data = invoice });
+            }
+            catch (KeyNotFoundException) { return NotFound(new { success = false, error = new { code = "NOT_FOUND", message = "Invoice not found" } }); }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error sending facture en ligne for invoice {Id}", id);
+                return StatusCode(500, new { success = false, error = new { code = "INTERNAL_ERROR", message = "An error occurred" } });
+            }
+        }
     }
 }

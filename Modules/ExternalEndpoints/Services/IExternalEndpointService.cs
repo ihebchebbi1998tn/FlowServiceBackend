@@ -10,6 +10,7 @@ namespace MyApi.Modules.ExternalEndpoints.Services
         Task<ExternalEndpointDto> UpdateEndpointAsync(int id, UpdateExternalEndpointDto dto, string userId);
         Task<bool> DeleteEndpointAsync(int id, string userId);
         Task<ExternalEndpointDto> RegenerateKeyAsync(int id, string userId);
+        Task<string> RevealKeyAsync(int id);
         Task<ExternalEndpointStatsDto> GetStatsAsync();
         
         // Logs

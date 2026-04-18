@@ -82,6 +82,10 @@ namespace MyApi.Modules.ExternalEndpoints.Controllers
                 await _systemLogService.LogSuccessAsync($"External endpoint created: {endpoint.Name}", "ExternalEndpoints", "create", userId, GetUserName(), "ExternalEndpoint", endpoint.Id.ToString());
                 return CreatedAtAction(nameof(GetById), new { id = endpoint.Id }, new { success = true, data = endpoint });
             }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { success = false, error = new { code = "VALIDATION_ERROR", message = ex.Message } });
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error creating endpoint");
@@ -98,6 +102,10 @@ namespace MyApi.Modules.ExternalEndpoints.Controllers
                 var endpoint = await _service.UpdateEndpointAsync(id, dto, userId);
                 await _systemLogService.LogSuccessAsync($"External endpoint updated: {endpoint.Name}", "ExternalEndpoints", "update", userId, GetUserName(), "ExternalEndpoint", id.ToString());
                 return Ok(new { success = true, data = endpoint });
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { success = false, error = new { code = "VALIDATION_ERROR", message = ex.Message } });
             }
             catch (KeyNotFoundException)
             {
@@ -143,6 +151,29 @@ namespace MyApi.Modules.ExternalEndpoints.Controllers
             {
                 _logger.LogError(ex, "Error regenerating key for endpoint {Id}", id);
                 return StatusCode(500, new { success = false, error = new { code = "INTERNAL_ERROR", message = "Failed to regenerate key" } });
+            }
+        }
+
+        // Reveal the plain API key for an authenticated tenant user.
+        // API keys are returned masked on list/get for security; this endpoint
+        // is the only authenticated way to read the plain key after creation.
+        [HttpGet("{id:int}/reveal-key")]
+        public async Task<IActionResult> RevealKey(int id)
+        {
+            try
+            {
+                var apiKey = await _service.RevealKeyAsync(id);
+                await _systemLogService.LogSuccessAsync($"External endpoint API key revealed: {id}", "ExternalEndpoints", "read", GetUserId(), GetUserName(), "ExternalEndpoint", id.ToString());
+                return Ok(new { success = true, data = new { apiKey } });
+            }
+            catch (KeyNotFoundException)
+            {
+                return NotFound(new { success = false, error = new { code = "NOT_FOUND", message = "Endpoint not found" } });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error revealing key for endpoint {Id}", id);
+                return StatusCode(500, new { success = false, error = new { code = "INTERNAL_ERROR", message = "Failed to reveal key" } });
             }
         }
 
@@ -229,13 +260,18 @@ namespace MyApi.Modules.ExternalEndpoints.Controllers
         {
             try
             {
+                // GetEndpointByIdAsync returns the API key MASKED for security.
+                // For the in-app Test button we need the plain key so ReceiveAsync's
+                // auth check passes — fetch it via the dedicated reveal path.
                 var endpoint = await _service.GetEndpointByIdAsync(id);
                 if (endpoint == null) return NotFound(new { success = false, error = new { code = "NOT_FOUND", message = "Endpoint not found" } });
+
+                var plainApiKey = await _service.RevealKeyAsync(id);
 
                 var (statusCode, responseBody) = await _service.ReceiveAsync(
                     endpoint.Slug, "POST", null, null,
                     System.Text.Json.JsonSerializer.Serialize(testBody),
-                    "127.0.0.1", endpoint.ApiKey
+                    "127.0.0.1", plainApiKey
                 );
 
                 return Ok(new { success = true, data = new { statusCode, responseBody } });

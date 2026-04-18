@@ -105,6 +105,15 @@ namespace MyApi.Modules.Purchases.DTOs
         public string? Notes { get; set; }
         public bool? RsApplicable { get; set; }
         public string? RsTypeCode { get; set; }
+        // TEJ sync (Tunisian e-tax journal)
+        public bool? TejSynced { get; set; }
+        public DateTime? TejSyncDate { get; set; }
+        public string? TejSyncStatus { get; set; }
+        public string? TejErrorMessage { get; set; }
+        // Facture en ligne
+        public string? FactureEnLigneId { get; set; }
+        public string? FactureEnLigneStatus { get; set; }
+        public DateTime? FactureEnLigneSentAt { get; set; }
     }
 
     public class PaginatedSupplierInvoiceResponse

@@ -172,6 +172,15 @@ namespace MyApi.Modules.Purchases.Services
             if (dto.Notes != null) invoice.Notes = dto.Notes;
             if (dto.RsApplicable.HasValue) invoice.RsApplicable = dto.RsApplicable.Value;
             if (dto.RsTypeCode != null) invoice.RsTypeCode = dto.RsTypeCode;
+            // TEJ sync fields
+            if (dto.TejSynced.HasValue) invoice.TejSynced = dto.TejSynced.Value;
+            if (dto.TejSyncDate.HasValue) invoice.TejSyncDate = dto.TejSyncDate;
+            if (dto.TejSyncStatus != null) invoice.TejSyncStatus = dto.TejSyncStatus;
+            if (dto.TejErrorMessage != null) invoice.TejErrorMessage = dto.TejErrorMessage;
+            // Facture en ligne fields
+            if (dto.FactureEnLigneId != null) invoice.FactureEnLigneId = dto.FactureEnLigneId;
+            if (dto.FactureEnLigneStatus != null) invoice.FactureEnLigneStatus = dto.FactureEnLigneStatus;
+            if (dto.FactureEnLigneSentAt.HasValue) invoice.FactureEnLigneSentAt = dto.FactureEnLigneSentAt;
             invoice.ModifiedDate = DateTime.UtcNow;
             invoice.ModifiedBy = userId;
 

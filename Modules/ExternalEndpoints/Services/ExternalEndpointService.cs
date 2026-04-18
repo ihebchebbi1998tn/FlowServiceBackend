@@ -30,7 +30,19 @@ namespace MyApi.Modules.ExternalEndpoints.Services
             return slug + "-" + Guid.NewGuid().ToString("N")[..6];
         }
 
-        private ExternalEndpointDto MapToDto(ExternalEndpoint e, int totalReceived = 0, int receivedToday = 0, DateTime? lastReceived = null)
+        // Mask the API key for list/get responses. The plain key is returned only
+        // from CreateEndpointAsync, RegenerateKeyAsync, and the dedicated
+        // RevealKeyAsync endpoint (which requires re-auth via [Authorize]).
+        private static string MaskApiKey(string key)
+        {
+            if (string.IsNullOrEmpty(key)) return string.Empty;
+            if (key.Length <= 8) return new string('•', key.Length);
+            var prefix = key.StartsWith("ext_") ? "ext_" : key[..Math.Min(4, key.Length)];
+            var suffix = key[^4..];
+            return $"{prefix}••••••••••••{suffix}";
+        }
+
+        private ExternalEndpointDto MapToDto(ExternalEndpoint e, int totalReceived = 0, int receivedToday = 0, DateTime? lastReceived = null, bool revealKey = false)
         {
             return new ExternalEndpointDto
             {
@@ -38,7 +50,7 @@ namespace MyApi.Modules.ExternalEndpoints.Services
                 Name = e.Name,
                 Slug = e.Slug,
                 Description = e.Description,
-                ApiKey = e.ApiKey,
+                ApiKey = revealKey ? e.ApiKey : MaskApiKey(e.ApiKey),
                 IsActive = e.IsActive,
                 AllowedMethods = e.AllowedMethods,
                 AllowedOrigins = e.AllowedOrigins,
@@ -52,6 +64,40 @@ namespace MyApi.Modules.ExternalEndpoints.Services
                 ReceivedToday = receivedToday,
                 LastReceived = lastReceived
             };
+        }
+
+        // SSRF protection: reject webhook forwards to private/loopback/metadata IPs.
+        private static (bool ok, string? error) ValidateWebhookUrl(string? url)
+        {
+            if (string.IsNullOrWhiteSpace(url)) return (true, null);
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return (false, "Invalid URL");
+            if (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp) return (false, "URL must be http or https");
+            var host = uri.Host.ToLowerInvariant();
+            if (host == "localhost" || host == "0.0.0.0" || host.EndsWith(".local") || host.EndsWith(".internal"))
+                return (false, "Loopback / internal hosts are not allowed");
+            try
+            {
+                var addresses = System.Net.Dns.GetHostAddresses(host);
+                foreach (var addr in addresses)
+                {
+                    var bytes = addr.GetAddressBytes();
+                    if (System.Net.IPAddress.IsLoopback(addr)) return (false, "Loopback IPs are not allowed");
+                    if (addr.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                    {
+                        // 10/8, 172.16/12, 192.168/16, 169.254/16 (link-local incl. AWS metadata)
+                        if (bytes[0] == 10) return (false, "Private IPs are not allowed");
+                        if (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31) return (false, "Private IPs are not allowed");
+                        if (bytes[0] == 192 && bytes[1] == 168) return (false, "Private IPs are not allowed");
+                        if (bytes[0] == 169 && bytes[1] == 254) return (false, "Link-local / metadata IPs are not allowed");
+                        if (bytes[0] == 127) return (false, "Loopback IPs are not allowed");
+                    }
+                }
+            }
+            catch
+            {
+                return (false, "Could not resolve hostname");
+            }
+            return (true, null);
         }
 
         public async Task<PaginatedEndpointResponse> GetEndpointsAsync(string? search = null, string? status = null, int page = 1, int limit = 20)
@@ -112,10 +158,20 @@ namespace MyApi.Modules.ExternalEndpoints.Services
 
         public async Task<ExternalEndpointDto> CreateEndpointAsync(CreateExternalEndpointDto dto, string userId)
         {
+            // SSRF guard
+            var (ok, err) = ValidateWebhookUrl(dto.WebhookForwardUrl);
+            if (!ok) throw new ArgumentException($"Invalid webhook URL: {err}");
+
             var slug = string.IsNullOrEmpty(dto.Slug) ? GenerateSlug(dto.Name) : dto.Slug;
-            
-            // Ensure slug is unique within tenant
-            var exists = await _context.ExternalEndpoints.AnyAsync(e => e.Slug == slug && !e.IsDeleted);
+
+            // Slug must be unique GLOBALLY (the receive endpoint is public and
+            // resolves a slug across all tenants, then disambiguates by API key).
+            // IgnoreQueryFilters() so the tenant filter doesn't hide collisions
+            // from other tenants — that would let two tenants reserve the same
+            // slug and then trip a DB unique-index violation on insert.
+            var exists = await _context.ExternalEndpoints
+                .IgnoreQueryFilters()
+                .AnyAsync(e => e.Slug == slug && !e.IsDeleted);
             if (exists) slug = slug + "-" + Guid.NewGuid().ToString("N")[..4];
 
             var entity = new ExternalEndpoint
@@ -136,13 +192,20 @@ namespace MyApi.Modules.ExternalEndpoints.Services
 
             _context.ExternalEndpoints.Add(entity);
             await _context.SaveChangesAsync();
-            return MapToDto(entity);
+            // Reveal the API key once on creation so the user can copy it.
+            return MapToDto(entity, revealKey: true);
         }
 
         public async Task<ExternalEndpointDto> UpdateEndpointAsync(int id, UpdateExternalEndpointDto dto, string userId)
         {
             var entity = await _context.ExternalEndpoints.FirstOrDefaultAsync(e => e.Id == id && !e.IsDeleted)
                 ?? throw new KeyNotFoundException("Endpoint not found");
+
+            if (dto.WebhookForwardUrl != null)
+            {
+                var (ok, err) = ValidateWebhookUrl(dto.WebhookForwardUrl);
+                if (!ok) throw new ArgumentException($"Invalid webhook URL: {err}");
+            }
 
             if (dto.Name != null) entity.Name = dto.Name;
             if (dto.Description != null) entity.Description = dto.Description;
@@ -176,7 +239,21 @@ namespace MyApi.Modules.ExternalEndpoints.Services
             entity.ApiKey = GenerateApiKey();
             entity.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
-            return (await GetEndpointByIdAsync(id))!;
+            // Return the plain key once so the user can copy it.
+            var stats = await GetEndpointByIdAsync(id);
+            if (stats == null) return MapToDto(entity, revealKey: true);
+            stats.ApiKey = entity.ApiKey;
+            return stats;
+        }
+
+        // Reveal the plain API key for an authenticated user. Use sparingly —
+        // ideally rate-limited and behind a re-auth check at the controller level.
+        public async Task<string> RevealKeyAsync(int id)
+        {
+            var entity = await _context.ExternalEndpoints.AsNoTracking()
+                .FirstOrDefaultAsync(e => e.Id == id && !e.IsDeleted)
+                ?? throw new KeyNotFoundException("Endpoint not found");
+            return entity.ApiKey;
         }
 
         public async Task<ExternalEndpointStatsDto> GetStatsAsync()
@@ -250,20 +327,26 @@ namespace MyApi.Modules.ExternalEndpoints.Services
             return true;
         }
 
-        // Public receive — bypasses tenant filter by using raw slug lookup
+        // Public receive — bypasses tenant filter by using raw slug lookup.
+        // Slug uniqueness is per-tenant, so multiple tenants can share a slug.
+        // We disambiguate by API key: only the endpoint whose ApiKey matches wins.
         public async Task<(int statusCode, string responseBody)> ReceiveAsync(string slug, string method, string? headers, string? queryString, string? body, string? sourceIp, string? apiKey)
         {
-            // Must query without tenant filter — use a direct query
-            var endpoint = await _context.ExternalEndpoints
+            if (string.IsNullOrEmpty(apiKey))
+                return (401, "{\"error\":\"API key required\"}");
+
+            var candidates = await _context.ExternalEndpoints
                 .IgnoreQueryFilters()
-                .FirstOrDefaultAsync(e => e.Slug == slug && !e.IsDeleted);
+                .Where(e => e.Slug == slug && !e.IsDeleted)
+                .ToListAsync();
 
-            if (endpoint == null) return (404, "{\"error\":\"Endpoint not found\"}");
+            if (candidates.Count == 0) return (404, "{\"error\":\"Endpoint not found\"}");
+
+            // Pick the endpoint whose API key matches. This both authenticates
+            // and disambiguates across tenants in the case of a slug collision.
+            var endpoint = candidates.FirstOrDefault(e => e.ApiKey == apiKey);
+            if (endpoint == null) return (401, "{\"error\":\"Invalid API key\"}");
             if (!endpoint.IsActive) return (403, "{\"error\":\"Endpoint is inactive\"}");
-
-            // Validate API key
-            if (string.IsNullOrEmpty(apiKey) || apiKey != endpoint.ApiKey)
-                return (401, "{\"error\":\"Invalid API key\"}");
 
             // Validate method
             var allowedMethods = endpoint.AllowedMethods.Split(',').Select(m => m.Trim().ToUpper()).ToList();
@@ -291,22 +374,33 @@ namespace MyApi.Modules.ExternalEndpoints.Services
             _context.ExternalEndpointLogs.Add(log);
             await _context.SaveChangesAsync();
 
-            // Optional webhook forwarding
+            // Optional webhook forwarding (re-validate URL at send time;
+            // disable redirects to prevent redirect-based SSRF).
             if (!string.IsNullOrEmpty(endpoint.WebhookForwardUrl))
             {
-                _ = Task.Run(async () =>
+                var (ok, _) = ValidateWebhookUrl(endpoint.WebhookForwardUrl);
+                if (ok)
                 {
-                    try
+                    var forwardUrl = endpoint.WebhookForwardUrl;
+                    _ = Task.Run(async () =>
                     {
-                        using var client = new HttpClient();
-                        var content = new StringContent(body ?? "", System.Text.Encoding.UTF8, "application/json");
-                        await client.PostAsync(endpoint.WebhookForwardUrl, content);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to forward webhook for endpoint {Slug}", slug);
-                    }
-                });
+                        try
+                        {
+                            using var handler = new HttpClientHandler { AllowAutoRedirect = false };
+                            using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(10) };
+                            var content = new StringContent(body ?? "", System.Text.Encoding.UTF8, "application/json");
+                            await client.PostAsync(forwardUrl, content);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to forward webhook for endpoint {Slug}", slug);
+                        }
+                    });
+                }
+                else
+                {
+                    _logger.LogWarning("Skipped webhook forward for endpoint {Slug}: URL failed SSRF validation", slug);
+                }
             }
 
             return (200, responseBody);
