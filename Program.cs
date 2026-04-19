@@ -193,18 +193,32 @@ builder.Services.AddSingleton(sp =>
 });
 
 // Single scoped registration — tenant-aware DbContext for every request.
-// If X-Tenant header is present AND maps to a specific DB, a tenant-specific context is created.
-// Otherwise, the default connection is used.
+// Primary source is TenantMiddleware via HttpContext.Items, with a header fallback
+// to avoid early-resolution bugs when DbContext is resolved before middleware writes Items.
 builder.Services.AddScoped<ApplicationDbContext>(sp =>
 {
     var httpContextAccessor = sp.GetRequiredService<IHttpContextAccessor>();
-    var tenant = httpContextAccessor.HttpContext?.Items["Tenant"] as string;
-    var tenantId = httpContextAccessor.HttpContext?.Items["TenantId"] as int? ?? 0;
+    var httpContext = httpContextAccessor.HttpContext;
+
+    var tenant = httpContext?.Items["Tenant"] as string;
+    if (string.IsNullOrWhiteSpace(tenant))
+    {
+        var headerTenant = httpContext?.Request.Headers[TenantMiddleware.TenantHeaderName].FirstOrDefault()?.Trim().ToLowerInvariant();
+        if (!string.IsNullOrWhiteSpace(headerTenant) && !string.Equals(headerTenant, TenantMiddleware.ViewAllSentinel, StringComparison.OrdinalIgnoreCase))
+        {
+            tenant = headerTenant;
+        }
+    }
+
+    var tenantId = httpContext?.Items["TenantId"] as int? ?? 0;
+    if (!string.IsNullOrWhiteSpace(tenant) && tenantId == 0 && TenantSlugCache.HasTenant(tenant))
+    {
+        tenantId = TenantSlugCache.GetTenantId(tenant);
+    }
 
     ApplicationDbContext ctx;
-    if (!string.IsNullOrEmpty(tenant))
+    if (!string.IsNullOrWhiteSpace(tenant))
     {
-        // Tenant path: resolve via factory (connection string is cached)
         var factory = sp.GetRequiredService<ITenantDbContextFactory>();
         ctx = factory.CreateDbContext(tenant);
         var tenantLogger = sp.GetRequiredService<ILogger<TenantDbContextFactory>>();
@@ -212,12 +226,10 @@ builder.Services.AddScoped<ApplicationDbContext>(sp =>
     }
     else
     {
-        // Default path: use pre-built options
         var options = sp.GetRequiredService<DbContextOptions<ApplicationDbContext>>();
         ctx = new ApplicationDbContext(options);
     }
 
-    // ═══ MULTI-TENANCY: Set TenantId for global query filters ═══
     ctx.SetTenantId(tenantId);
     return ctx;
 });
@@ -448,17 +460,36 @@ app.Services.GetRequiredService<ILoggerFactory>().AddProvider(new InMemoryLogPro
 // ═══ MULTI-TENANCY: Initialize tenant slug → ID cache at startup ═══
 using (var tenantScope = app.Services.CreateScope())
 {
+    var tenantLogger = tenantScope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+
     try
     {
         var tenantDb = tenantScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         TenantSlugCache.Initialize(tenantDb);
-        var tenantLogger = tenantScope.ServiceProvider.GetRequiredService<ILogger<Program>>();
         tenantLogger.LogInformation("🏢 TenantSlugCache initialized successfully");
     }
     catch (Exception ex)
     {
-        var tenantLogger = tenantScope.ServiceProvider.GetRequiredService<ILogger<Program>>();
         tenantLogger.LogWarning(ex, "🏢 TenantSlugCache initialization failed (Tenants table may not exist yet)");
+    }
+
+    var configuredTenantConnections = TenantConnectionResolver.GetConfiguredTenantConnections();
+    if (configuredTenantConnections.Count == 0)
+    {
+        tenantLogger.LogWarning("🏢 No dedicated tenant DB mappings found via TENANT_*_DATABASE_URL. Valid tenants will use the default shared DB unless a dedicated env var is added.");
+    }
+    else
+    {
+        tenantLogger.LogInformation("🏢 Dedicated tenant DB mappings detected: {Count}", configuredTenantConnections.Count);
+        foreach (var mapping in configuredTenantConnections)
+        {
+            tenantLogger.LogInformation(
+                "🏢 Tenant DB mapping: tenant='{Tenant}' source={Source} env={EnvKey} target={Target}",
+                mapping.Tenant,
+                mapping.Source,
+                mapping.EnvironmentVariable,
+                TenantDbContextFactory.DescribeConnectionString(mapping.ConnectionString));
+        }
     }
 }
 
@@ -789,21 +820,38 @@ app.MapGet("/health", (IServiceProvider sp) =>
     };
 });
 
-// DEBUG: Tenant resolution check (REMOVE after confirming multi-tenant works)
+// DEBUG: Tenant resolution check
 app.MapGet("/api/debug/tenant", (HttpContext context, ITenantDbContextFactory factory) =>
 {
     var tenant = context.Request.Headers[MyApi.Infrastructure.TenantMiddleware.TenantHeaderName].FirstOrDefault();
-    var envKey = $"TENANT_{tenant?.ToUpperInvariant()}_DATABASE_URL";
-    var envValue = Environment.GetEnvironmentVariable(envKey);
-    var connStr = factory.GetConnectionString(tenant);
+    var envKey = !string.IsNullOrWhiteSpace(tenant)
+        ? TenantConnectionResolver.GetEnvironmentVariableName(tenant)
+        : "(none)";
+    var envValue = !string.IsNullOrWhiteSpace(tenant)
+        ? Environment.GetEnvironmentVariable(envKey)
+        : null;
+
+    string resolvedConnPreview;
+    string? resolutionError = null;
+    try
+    {
+        resolvedConnPreview = TenantDbContextFactory.DescribeConnectionString(factory.GetConnectionString(tenant));
+    }
+    catch (Exception ex)
+    {
+        resolvedConnPreview = "(resolution failed)";
+        resolutionError = ex.Message;
+    }
 
     return new
     {
         detectedTenant = tenant ?? "(none)",
+        knownTenant = !string.IsNullOrWhiteSpace(tenant) && TenantSlugCache.HasTenant(tenant),
         envVarName = envKey,
         envVarExists = !string.IsNullOrEmpty(envValue),
-        envVarPreview = envValue != null ? envValue.Substring(0, Math.Min(50, envValue.Length)) + "..." : "(not set)",
-        resolvedConnPreview = connStr?.Substring(0, Math.Min(50, connStr.Length)) + "..."
+        dedicatedDbConfigured = !string.IsNullOrWhiteSpace(tenant) && TenantConnectionResolver.HasDedicatedConnectionString(tenant),
+        resolvedConnPreview,
+        resolutionError
     };
 });
 

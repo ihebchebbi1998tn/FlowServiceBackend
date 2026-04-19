@@ -1,3 +1,4 @@
+using System.Collections;
 using Microsoft.EntityFrameworkCore;
 using MyApi.Data;
 
@@ -7,10 +8,10 @@ namespace MyApi.Infrastructure;
 /// Middleware that reads the X-Tenant header from the request,
 /// resolves a per-tenant connection string, and reconfigures
 /// the ApplicationDbContext for the current request scope.
-/// 
-/// If no header is provided (or the tenant is unknown), the 
-/// default connection string from DATABASE_URL / appsettings is used.
-/// 
+///
+/// If no header is provided, the default connection string from
+/// DATABASE_URL / appsettings is used.
+///
 /// Special value "__all__" enables cross-company mode for MainAdminUsers.
 /// Mutations require an additional X-Target-Tenant header specifying the
 /// target tenant ID, so that writes are properly scoped.
@@ -23,11 +24,13 @@ public class TenantMiddleware
 
     private readonly RequestDelegate _next;
     private readonly ILogger<TenantMiddleware> _logger;
+    private readonly IHostEnvironment _environment;
 
-    public TenantMiddleware(RequestDelegate next, ILogger<TenantMiddleware> logger)
+    public TenantMiddleware(RequestDelegate next, ILogger<TenantMiddleware> logger, IHostEnvironment environment)
     {
         _next = next;
         _logger = logger;
+        _environment = environment;
     }
 
     public async Task InvokeAsync(HttpContext context)
@@ -36,8 +39,6 @@ public class TenantMiddleware
 
         if (string.Equals(tenant, ViewAllSentinel, StringComparison.OrdinalIgnoreCase))
         {
-            // ── Cross-company "View All" mode ──
-            // Only MainAdminUser may use this. Check JWT claim.
             var isMainAdmin = context.User?.Claims
                 .Any(c => c.Type == "user_type" && c.Value == "MainAdminUser") == true;
 
@@ -54,15 +55,13 @@ public class TenantMiddleware
 
             if (isMutation)
             {
-                // Allow certain safe endpoints without X-Target-Tenant
                 var path = context.Request.Path.Value?.ToLowerInvariant() ?? "";
                 var isSafeEndpoint = path.Contains("/api/tenants") || path.Contains("/api/auth");
 
                 if (!isSafeEndpoint)
                 {
-                    // Mutations require X-Target-Tenant header
                     var targetTenantHeader = context.Request.Headers[TargetTenantHeaderName].FirstOrDefault();
-                    
+
                     if (string.IsNullOrEmpty(targetTenantHeader) || !int.TryParse(targetTenantHeader, out var targetTenantId))
                     {
                         _logger.LogWarning("🚫 TENANT-MIDDLEWARE: Mutation in view-all mode without valid X-Target-Tenant header");
@@ -71,7 +70,6 @@ public class TenantMiddleware
                         return;
                     }
 
-                    // Validate tenant exists and is active
                     var validTenantId = TenantSlugCache.IsValidTenantId(targetTenantId);
                     if (!validTenantId)
                     {
@@ -81,7 +79,6 @@ public class TenantMiddleware
                         return;
                     }
 
-                    // Scope this mutation to the target tenant
                     context.Items["Tenant"] = ViewAllSentinel;
                     context.Items["TenantId"] = targetTenantId;
                     context.Items["TenantViewAll"] = true;
@@ -94,24 +91,38 @@ public class TenantMiddleware
                 }
             }
 
-            // Read-only requests or safe endpoints: use -1 sentinel (no tenant filter)
             context.Items["Tenant"] = ViewAllSentinel;
-            context.Items["TenantId"] = -1; // Sentinel for "all tenants"
+            context.Items["TenantId"] = -1;
             context.Items["TenantViewAll"] = true;
             _logger.LogDebug("🏢 TENANT-MIDDLEWARE: Request {Method} {Path} → VIEW-ALL mode (MainAdmin)",
                 context.Request.Method, context.Request.Path);
         }
         else if (!string.IsNullOrEmpty(tenant))
         {
+            var knownTenant = TenantSlugCache.HasTenant(tenant);
+            if (!knownTenant)
+            {
+                var envKey = TenantConnectionResolver.GetEnvironmentVariableName(tenant);
+                if (_environment.IsProduction())
+                {
+                    _logger.LogWarning("🚫 TENANT-MIDDLEWARE: Unknown tenant '{Tenant}' rejected in production. Expected active tenant slug or dedicated DB env var '{EnvKey}'", tenant, envKey);
+                    context.Response.StatusCode = 404;
+                    await context.Response.WriteAsJsonAsync(new { error = $"Unknown tenant '{tenant}'." });
+                    return;
+                }
+
+                _logger.LogWarning("🏢 TENANT-MIDDLEWARE: Unknown tenant '{Tenant}' received in non-production. It will fall back to default behavior unless '{EnvKey}' is configured.", tenant, envKey);
+            }
+
             context.Items["Tenant"] = tenant;
             var tenantId = TenantSlugCache.GetTenantId(tenant);
             context.Items["TenantId"] = tenantId;
-            _logger.LogDebug("🏢 TENANT-MIDDLEWARE: Request {Method} {Path} → tenant='{Tenant}' (TenantId={TenantId})",
-                context.Request.Method, context.Request.Path, tenant, tenantId);
+            _logger.LogDebug("🏢 TENANT-MIDDLEWARE: Request {Method} {Path} → tenant='{Tenant}' (TenantId={TenantId}, KnownTenant={KnownTenant})",
+                context.Request.Method, context.Request.Path, tenant, tenantId, knownTenant);
         }
         else
         {
-            context.Items["TenantId"] = 0; // Default tenant
+            context.Items["TenantId"] = 0;
         }
 
         await _next(context);
@@ -123,29 +134,71 @@ public class TenantMiddleware
 /// Checks (in order):
 ///   1. In-memory dictionary (for hardcoded tenants)
 ///   2. Environment variable TENANT_{NAME}_DATABASE_URL
-///   3. Returns null → caller uses default connection
+///   3. Returns null → caller may use default connection
 /// </summary>
 public static class TenantConnectionResolver
 {
+    private const string TenantDatabasePrefix = "TENANT_";
+    private const string TenantDatabaseSuffix = "_DATABASE_URL";
+
     private static readonly Dictionary<string, string> _tenantConnections = new(StringComparer.OrdinalIgnoreCase)
     {
-        // Add tenant mappings here.
+        // Add tenant mappings here only if you intentionally want to hardcode them.
+        // Prefer Render env vars like TENANT_KROSSIER_DATABASE_URL instead.
     };
+
+    public sealed record ConfiguredTenantConnection(string Tenant, string Source, string EnvironmentVariable, string ConnectionString);
+
+    public static string GetEnvironmentVariableName(string tenant)
+        => $"{TenantDatabasePrefix}{tenant.ToUpperInvariant()}{TenantDatabaseSuffix}";
 
     public static string? GetConnectionString(string? tenant)
     {
-        if (string.IsNullOrEmpty(tenant))
+        if (string.IsNullOrWhiteSpace(tenant) || string.Equals(tenant, TenantMiddleware.ViewAllSentinel, StringComparison.OrdinalIgnoreCase))
             return null;
 
-        if (_tenantConnections.TryGetValue(tenant, out var connStr))
+        if (_tenantConnections.TryGetValue(tenant, out var connStr) && !string.IsNullOrWhiteSpace(connStr))
             return connStr;
 
-        var envKey = $"TENANT_{tenant.ToUpperInvariant()}_DATABASE_URL";
+        var envKey = GetEnvironmentVariableName(tenant);
         var envValue = Environment.GetEnvironmentVariable(envKey);
-        if (!string.IsNullOrEmpty(envValue))
+        if (!string.IsNullOrWhiteSpace(envValue))
             return envValue;
 
         return null;
+    }
+
+    public static bool HasDedicatedConnectionString(string? tenant)
+        => !string.IsNullOrWhiteSpace(GetConnectionString(tenant));
+
+    public static IReadOnlyList<ConfiguredTenantConnection> GetConfiguredTenantConnections()
+    {
+        var results = new Dictionary<string, ConfiguredTenantConnection>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (DictionaryEntry entry in Environment.GetEnvironmentVariables())
+        {
+            if (entry.Key is not string key || entry.Value is not string value) continue;
+            if (!key.StartsWith(TenantDatabasePrefix, StringComparison.OrdinalIgnoreCase) ||
+                !key.EndsWith(TenantDatabaseSuffix, StringComparison.OrdinalIgnoreCase) ||
+                string.IsNullOrWhiteSpace(value))
+            {
+                continue;
+            }
+
+            var tenant = key[TenantDatabasePrefix.Length..^TenantDatabaseSuffix.Length].ToLowerInvariant();
+            if (string.IsNullOrWhiteSpace(tenant)) continue;
+
+            results[tenant] = new ConfiguredTenantConnection(tenant, "environment", key, value);
+        }
+
+        foreach (var kv in _tenantConnections)
+        {
+            if (string.IsNullOrWhiteSpace(kv.Value)) continue;
+            var tenant = kv.Key.Trim().ToLowerInvariant();
+            results[tenant] = new ConfiguredTenantConnection(tenant, "code", GetEnvironmentVariableName(tenant), kv.Value);
+        }
+
+        return results.Values.OrderBy(x => x.Tenant).ToList();
     }
 }
 

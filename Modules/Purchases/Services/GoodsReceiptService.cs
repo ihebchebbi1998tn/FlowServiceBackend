@@ -197,6 +197,15 @@ namespace MyApi.Modules.Purchases.Services
             var receipt = await _context.GoodsReceipts.Include(r => r.Items).FirstOrDefaultAsync(r => r.Id == id);
             if (receipt == null) return false;
 
+            // Block deletion if any non-deleted SupplierInvoice references this receipt.
+            // Otherwise we'd leave a dangling SupplierInvoice.GoodsReceiptId and the
+            // stock reversal below would create a phantom decrement against goods that
+            // were already invoiced (and likely paid).
+            var linkedInvoiceExists = await _context.SupplierInvoices
+                .AnyAsync(i => i.GoodsReceiptId == id && !i.IsDeleted);
+            if (linkedInvoiceExists)
+                throw new InvalidOperationException($"Cannot delete goods receipt {receipt.ReceiptNumber}: it is referenced by one or more supplier invoices");
+
             using var tx = await _context.Database.BeginTransactionAsync();
             try
             {

@@ -23,7 +23,6 @@ public class TenantDbContextFactory : ITenantDbContextFactory
     private readonly bool _isDevelopment;
 
     // ── Connection string cache: tenant → normalized conn string ──
-    // Avoids re-parsing env vars & URIs on every request.
     private readonly ConcurrentDictionary<string, string> _connCache = new(StringComparer.OrdinalIgnoreCase);
 
     public TenantDbContextFactory(
@@ -34,7 +33,6 @@ public class TenantDbContextFactory : ITenantDbContextFactory
         _logger = logger;
         _isDevelopment = environment.IsDevelopment();
 
-        // Resolve default connection string the same way Program.cs does
         var raw = Environment.GetEnvironmentVariable("DATABASE_URL") ??
                   configuration.GetConnectionString("DefaultConnection") ?? "";
 
@@ -43,24 +41,38 @@ public class TenantDbContextFactory : ITenantDbContextFactory
 
     /// <summary>
     /// Returns the final connection string for a tenant (cached).
-    /// Returns the default connection string when tenant is null or unknown.
+    /// Returns the default connection string when tenant is null or unknown in development.
+    /// In production, unknown tenants fail loudly instead of silently falling back.
     /// </summary>
     public string GetConnectionString(string? tenant)
     {
-        if (string.IsNullOrEmpty(tenant))
+        if (string.IsNullOrWhiteSpace(tenant) || string.Equals(tenant, TenantMiddleware.ViewAllSentinel, StringComparison.OrdinalIgnoreCase))
             return _defaultConnectionString;
 
         return _connCache.GetOrAdd(tenant, t =>
         {
             var tenantConn = TenantConnectionResolver.GetConnectionString(t);
-            if (tenantConn != null)
+            if (!string.IsNullOrWhiteSpace(tenantConn))
             {
-                _logger.LogInformation("🏢 Tenant '{Tenant}' → tenant-specific DB resolved", t);
+                _logger.LogInformation("🏢 Tenant '{Tenant}' → dedicated DB resolved via {EnvKey}", t, TenantConnectionResolver.GetEnvironmentVariableName(t));
                 return NormalizePgUrl(tenantConn);
             }
 
-            _logger.LogInformation("🏢 Tenant '{Tenant}' → no specific DB, using default", t);
-            return _defaultConnectionString;
+            var envKey = TenantConnectionResolver.GetEnvironmentVariableName(t);
+            if (TenantSlugCache.HasTenant(t))
+            {
+                _logger.LogWarning("🏢 Tenant '{Tenant}' is valid but no dedicated DB is configured ({EnvKey}); using default shared DB", t, envKey);
+                return _defaultConnectionString;
+            }
+
+            if (_isDevelopment)
+            {
+                _logger.LogWarning("🏢 Unknown tenant '{Tenant}' and no dedicated DB env var '{EnvKey}' found; using default DB in development", t, envKey);
+                return _defaultConnectionString;
+            }
+
+            _logger.LogError("🏢 Unknown tenant '{Tenant}' with no dedicated DB env var '{EnvKey}'", t, envKey);
+            throw new InvalidOperationException($"Unknown tenant '{t}'. Expected an active tenant slug or dedicated env var '{envKey}'.");
         });
     }
 
@@ -72,7 +84,6 @@ public class TenantDbContextFactory : ITenantDbContextFactory
             .UseNpgsql(connStr, npgsql =>
             {
                 npgsql.EnableRetryOnFailure(3, TimeSpan.FromSeconds(10), null);
-                // ✅ PERFORMANCE: Prevent cartesian explosion on multi-Include queries
                 npgsql.UseQuerySplittingBehavior(QuerySplittingBehavior.SplitQuery);
                 npgsql.CommandTimeout(30);
             });
@@ -86,20 +97,44 @@ public class TenantDbContextFactory : ITenantDbContextFactory
         return new ApplicationDbContext(optionsBuilder.Options);
     }
 
+    public static string DescribeConnectionString(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return "(not set)";
+
+        try
+        {
+            var builder = BuildConnectionStringBuilder(raw);
+            var host = string.IsNullOrWhiteSpace(builder.Host) ? "unknown-host" : builder.Host;
+            var db = string.IsNullOrWhiteSpace(builder.Database) ? "unknown-db" : builder.Database;
+            return $"{host}/{db}";
+        }
+        catch
+        {
+            return "(unparseable)";
+        }
+    }
+
     /// <summary>
     /// Converts postgres:// URIs to Npgsql connection strings and applies pool settings.
     /// </summary>
     private static string NormalizePgUrl(string raw)
     {
-        if (string.IsNullOrEmpty(raw)) return raw;
+        if (string.IsNullOrWhiteSpace(raw)) return raw;
 
-        NpgsqlConnectionStringBuilder builder;
+        var builder = BuildConnectionStringBuilder(raw);
+        builder.MaxPoolSize = 50;
+        builder.MinPoolSize = 5;
 
-        if (raw.StartsWith("postgres://") || raw.StartsWith("postgresql://"))
+        return builder.ToString();
+    }
+
+    private static NpgsqlConnectionStringBuilder BuildConnectionStringBuilder(string raw)
+    {
+        if (raw.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase) || raw.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase))
         {
             var uri = new Uri(raw);
             var userInfo = uri.UserInfo?.Split(':', 2) ?? Array.Empty<string>();
-            builder = new NpgsqlConnectionStringBuilder
+            var builder = new NpgsqlConnectionStringBuilder
             {
                 Host = uri.Host,
                 Port = uri.Port > 0 ? uri.Port : 5432,
@@ -109,22 +144,15 @@ public class TenantDbContextFactory : ITenantDbContextFactory
                 SslMode = SslMode.Require,
             };
 
-            // Preserve query params (e.g. ?channel_binding=require)
             var queryParams = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(uri.Query);
             foreach (var kv in queryParams)
             {
                 try { builder[kv.Key] = kv.Value.ToString(); } catch { }
             }
-        }
-        else
-        {
-            builder = new NpgsqlConnectionStringBuilder(raw);
+
+            return builder;
         }
 
-        // Apply pool settings for performance
-        builder.MaxPoolSize = 50;
-        builder.MinPoolSize = 5;
-
-        return builder.ToString();
+        return new NpgsqlConnectionStringBuilder(raw);
     }
 }

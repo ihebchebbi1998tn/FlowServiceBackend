@@ -67,6 +67,28 @@ namespace MyApi.Modules.Purchases.Services
             var supplier = await _context.Contacts.FindAsync(dto.SupplierId)
                 ?? throw new KeyNotFoundException($"Supplier {dto.SupplierId} not found");
 
+            // Cross-entity integrity: linked PO and GR must belong to the same supplier
+            // as the invoice. Otherwise an invoice for Supplier A could reference
+            // Supplier B's PO/items, breaking reporting and the items integrity below.
+            if (dto.PurchaseOrderId.HasValue)
+            {
+                var po = await _context.PurchaseOrders.AsNoTracking()
+                    .FirstOrDefaultAsync(p => p.Id == dto.PurchaseOrderId.Value && !p.IsDeleted)
+                    ?? throw new KeyNotFoundException($"PurchaseOrder {dto.PurchaseOrderId} not found");
+                if (po.SupplierId != dto.SupplierId)
+                    throw new InvalidOperationException($"PurchaseOrder {po.Id} belongs to a different supplier");
+            }
+            if (dto.GoodsReceiptId.HasValue)
+            {
+                var gr = await _context.GoodsReceipts.AsNoTracking()
+                    .FirstOrDefaultAsync(g => g.Id == dto.GoodsReceiptId.Value)
+                    ?? throw new KeyNotFoundException($"GoodsReceipt {dto.GoodsReceiptId} not found");
+                if (gr.SupplierId != dto.SupplierId)
+                    throw new InvalidOperationException($"GoodsReceipt {gr.Id} belongs to a different supplier");
+                if (dto.PurchaseOrderId.HasValue && gr.PurchaseOrderId != dto.PurchaseOrderId.Value)
+                    throw new InvalidOperationException($"GoodsReceipt {gr.Id} does not belong to PO {dto.PurchaseOrderId}");
+            }
+
             string invoiceNumber;
             try { invoiceNumber = _numberingService != null ? await _numberingService.GetNextAsync("SupplierInvoice") : $"SI-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..5].ToUpper()}"; }
             catch { invoiceNumber = $"SI-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..5].ToUpper()}"; }
@@ -98,6 +120,23 @@ namespace MyApi.Modules.Purchases.Services
 
             if (dto.Items?.Any() == true)
             {
+                // If any line is linked to a PO item, validate it belongs to THIS invoice's PO.
+                // Same guard the AddItemAsync path uses — apply it here to catch bad batches at creation.
+                var linkedPoItemIds = dto.Items.Where(i => i.PurchaseOrderItemId.HasValue)
+                                               .Select(i => i.PurchaseOrderItemId!.Value)
+                                               .Distinct().ToList();
+                if (linkedPoItemIds.Count > 0)
+                {
+                    if (!invoice.PurchaseOrderId.HasValue)
+                        throw new InvalidOperationException("Cannot link PO items to an invoice that has no PurchaseOrderId");
+                    var validIds = await _context.PurchaseOrderItems
+                        .Where(p => linkedPoItemIds.Contains(p.Id) && p.PurchaseOrderId == invoice.PurchaseOrderId.Value)
+                        .Select(p => p.Id).ToListAsync();
+                    var orphans = linkedPoItemIds.Except(validIds).ToList();
+                    if (orphans.Count > 0)
+                        throw new InvalidOperationException($"PurchaseOrderItem(s) [{string.Join(",", orphans)}] do not belong to PO {invoice.PurchaseOrderId}");
+                }
+
                 var items = dto.Items.Select((item, idx) => new SupplierInvoiceItem
                 {
                     SupplierInvoiceId = invoice.Id,
@@ -156,8 +195,9 @@ namespace MyApi.Modules.Purchases.Services
             if (dto.AmountPaid.HasValue)
             {
                 invoice.AmountPaid = dto.AmountPaid.Value;
-                // Only auto-derive status from payment when caller did not pass an explicit Status.
-                if (dto.Status == null)
+                // Only auto-derive status from payment when caller did not pass an explicit Status,
+                // and never override the cancelled terminal state.
+                if (dto.Status == null && oldStatus != "cancelled")
                 {
                     if (invoice.AmountPaid >= invoice.GrandTotal && invoice.GrandTotal > 0)
                     {
@@ -167,6 +207,13 @@ namespace MyApi.Modules.Purchases.Services
                     else if (invoice.AmountPaid > 0)
                     {
                         invoice.Status = "partially_paid";
+                    }
+                    else
+                    {
+                        // Payment cleared (e.g. refund / correction) — fall back to pending
+                        // and clear PaymentDate so the invoice doesn't look settled.
+                        invoice.Status = "pending";
+                        invoice.PaymentDate = null;
                     }
                 }
             }
@@ -301,7 +348,25 @@ namespace MyApi.Modules.Purchases.Services
             invoice.SubTotal = items.Sum(i => i.Quantity * i.UnitPrice);
             var discAmt = invoice.DiscountType == "percentage" ? invoice.SubTotal * invoice.Discount / 100 : invoice.Discount;
             var afterDiscount = invoice.SubTotal - discAmt;
-            invoice.TaxAmount = items.Sum(i => i.Quantity * i.UnitPrice * i.TaxRate / 100);
+
+            // Tax must be computed on the DISCOUNTED base so the invoice reconciles
+            // with the originating PO (which applies discount before tax). Previously
+            // we taxed the gross sum, over-reporting VAT whenever a header discount existed.
+            // We pro-rate the header discount by line subtotal so per-line tax rates are preserved.
+            var subTotal = invoice.SubTotal;
+            invoice.TaxAmount = subTotal > 0
+                ? items.Sum(i =>
+                {
+                    var lineSub = i.Quantity * i.UnitPrice;
+                    var lineShare = lineSub / subTotal;       // proportion of header discount that applies to this line
+                    var lineAfterDisc = lineSub - (discAmt * lineShare);
+                    return lineAfterDisc * i.TaxRate / 100;
+                })
+                : 0m;
+
+            // RS (retenue à la source). Always reset first so toggling RsApplicable off
+            // (or clearing RsTypeCode) actually removes a previously-applied retention.
+            invoice.RsAmount = 0m;
             if (invoice.RsApplicable && !string.IsNullOrEmpty(invoice.RsTypeCode))
             {
                 var rsRate = invoice.RsTypeCode switch
