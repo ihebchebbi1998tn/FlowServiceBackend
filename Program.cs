@@ -474,17 +474,64 @@ using (var scope = app.Services.CreateScope())
     
     try
     {
-        // Just verify we can connect to the database
-        var canConnect = context.Database.CanConnect();
-        if (canConnect)
+        // Identify WHICH database we're talking to (host + db name) so we know
+        // exactly which database is failing in multi-DB / multi-tenant setups.
+        var rawConnStr = context.Database.GetConnectionString() ?? "";
+        string dbHost = "unknown", dbName = "unknown", dbUser = "unknown";
+        try
         {
-            migrationLogger.LogInformation("✅ Database connection successful!");
+            var csb = new NpgsqlConnectionStringBuilder(rawConnStr);
+            dbHost = csb.Host ?? "unknown";
+            dbName = csb.Database ?? "unknown";
+            dbUser = csb.Username ?? "unknown";
         }
-        else
+        catch (Exception parseEx)
         {
-            migrationLogger.LogError("❌ Unable to connect to database");
-            throw new InvalidOperationException("Cannot connect to the database");
+            migrationLogger.LogWarning("⚠️ Could not parse connection string: {Error}", parseEx.Message);
         }
+
+        migrationLogger.LogInformation("🔍 Probing DB → host={Host} db={Db} user={User}", dbHost, dbName, dbUser);
+
+        // Open a raw Npgsql connection so we surface the REAL Postgres error
+        // (e.g. Neon "exceeded compute time quota", auth failure, DNS, SSL, etc.)
+        try
+        {
+            using var probe = new NpgsqlConnection(rawConnStr);
+            probe.Open();
+            using var cmd = probe.CreateCommand();
+            cmd.CommandText = "SELECT current_database(), current_user, version();";
+            using var reader = cmd.ExecuteReader();
+            if (reader.Read())
+            {
+                migrationLogger.LogInformation(
+                    "✅ DB OK → database='{Db}' user='{User}' server='{Version}'",
+                    reader.GetString(0), reader.GetString(1), reader.GetString(2));
+            }
+        }
+        catch (PostgresException pgEx)
+        {
+            migrationLogger.LogError(
+                "❌ Postgres rejected connection to host='{Host}' db='{Db}' user='{User}' → SqlState={SqlState} Message={Message}",
+                dbHost, dbName, dbUser, pgEx.SqlState, pgEx.MessageText);
+            throw new InvalidOperationException(
+                $"Postgres error connecting to {dbHost}/{dbName}: [{pgEx.SqlState}] {pgEx.MessageText}", pgEx);
+        }
+        catch (NpgsqlException npgEx)
+        {
+            migrationLogger.LogError(npgEx,
+                "❌ Npgsql connection failure → host='{Host}' db='{Db}' user='{User}': {Message}",
+                dbHost, dbName, dbUser, npgEx.Message);
+            throw new InvalidOperationException(
+                $"Cannot connect to {dbHost}/{dbName}: {npgEx.Message}", npgEx);
+        }
+
+        // Final EF check (kept for parity with previous behavior)
+        if (!context.Database.CanConnect())
+        {
+            migrationLogger.LogError("❌ EF CanConnect() returned false for host='{Host}' db='{Db}'", dbHost, dbName);
+            throw new InvalidOperationException($"Cannot connect to the database ({dbHost}/{dbName})");
+        }
+        migrationLogger.LogInformation("✅ Database connection successful! ({Host}/{Db})", dbHost, dbName);
 
         // Validate database tables
         migrationLogger.LogInformation("📋 Validating database tables...");

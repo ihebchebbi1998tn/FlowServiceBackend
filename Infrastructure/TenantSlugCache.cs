@@ -41,8 +41,26 @@ public static class TenantSlugCache
         }
         catch (Exception ex)
         {
-            // If Tenants table doesn't exist yet (pre-migration), silently continue
-            Console.WriteLine($"[TenantSlugCache] Could not initialize: {ex.Message}");
+            // Surface the underlying Postgres error so we can tell whether it's
+            // a missing table (pre-migration) vs. a real DB failure (quota, auth, network).
+            var connStr = db.Database.GetConnectionString() ?? "";
+            string host = "unknown", name = "unknown";
+            try
+            {
+                var csb = new Npgsql.NpgsqlConnectionStringBuilder(connStr);
+                host = csb.Host ?? "unknown";
+                name = csb.Database ?? "unknown";
+            }
+            catch { }
+
+            if (ex is Npgsql.PostgresException pg)
+            {
+                Console.WriteLine($"[TenantSlugCache] ❌ Postgres error on host='{host}' db='{name}' → SqlState={pg.SqlState} Message={pg.MessageText}");
+            }
+            else
+            {
+                Console.WriteLine($"[TenantSlugCache] ❌ Could not initialize on host='{host}' db='{name}': {ex.GetType().Name}: {ex.Message}");
+            }
         }
     }
 
