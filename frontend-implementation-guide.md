@@ -3,7 +3,7 @@
 This guide explains how to implement the `SentCount` tracking feature in your React/Next.js frontend. Space these out into three logical steps:
 
 ## 1. Update TypeScript Types / Interfaces
-llll
+
 First, update your models/types in the frontend to include the new `sentCount` property that the backend now returns. Because APIs typically use camel case for responses, `SentCount` will likely serialize to `sentCount` depending on your backend configuration. 
 
 ```typescript
