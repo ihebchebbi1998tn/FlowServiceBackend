@@ -170,6 +170,12 @@ namespace MyApi.Modules.ExternalEndpoints.Controllers
             {
                 return NotFound(new { success = false, error = new { code = "NOT_FOUND", message = "Endpoint not found" } });
             }
+            catch (InvalidOperationException ex)
+            {
+                // Expected when the stored key is hashed and cannot be reversed.
+                // 409 Conflict + an explicit code lets the UI offer "Regenerate" as the recovery path.
+                return Conflict(new { success = false, error = new { code = "KEY_HASHED", message = ex.Message } });
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error revealing key for endpoint {Id}", id);

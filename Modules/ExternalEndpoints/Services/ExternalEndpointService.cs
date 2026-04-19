@@ -1,8 +1,10 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using MyApi.Data;
 using MyApi.Modules.ExternalEndpoints.DTOs;
 using MyApi.Modules.ExternalEndpoints.Models;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace MyApi.Modules.ExternalEndpoints.Services
@@ -11,17 +13,44 @@ namespace MyApi.Modules.ExternalEndpoints.Services
     {
         private readonly ApplicationDbContext _context;
         private readonly ILogger<ExternalEndpointService> _logger;
+        private readonly IServiceScopeFactory _scopeFactory;
+        private readonly IHttpClientFactory? _httpClientFactory;
 
-        public ExternalEndpointService(ApplicationDbContext context, ILogger<ExternalEndpointService> logger)
+        public ExternalEndpointService(ApplicationDbContext context, ILogger<ExternalEndpointService> logger,
+            IServiceScopeFactory scopeFactory, IHttpClientFactory? httpClientFactory = null)
         {
             _context = context;
             _logger = logger;
+            _scopeFactory = scopeFactory;
+            _httpClientFactory = httpClientFactory;
         }
+
+        // Plain key returned ONCE on create/regenerate. The DB only stores the hash.
+        private const string HashPrefix = "h$";
 
         private static string GenerateApiKey()
         {
             var bytes = RandomNumberGenerator.GetBytes(32);
             return "ext_" + Convert.ToBase64String(bytes).Replace("+", "").Replace("/", "").Replace("=", "")[..40];
+        }
+
+        private static string HashApiKey(string plain)
+        {
+            using var sha = SHA256.Create();
+            var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(plain));
+            return HashPrefix + Convert.ToHexString(hash);
+        }
+
+        // Constant-time verification. Supports legacy plaintext rows during migration.
+        private static bool VerifyApiKey(string stored, string provided)
+        {
+            if (string.IsNullOrEmpty(stored) || string.IsNullOrEmpty(provided)) return false;
+            string a = stored;
+            string b = stored.StartsWith(HashPrefix) ? HashApiKey(provided) : provided;
+            var aBytes = Encoding.UTF8.GetBytes(a);
+            var bBytes = Encoding.UTF8.GetBytes(b);
+            if (aBytes.Length != bBytes.Length) return false;
+            return CryptographicOperations.FixedTimeEquals(aBytes, bBytes);
         }
 
         private static string GenerateSlug(string name)
@@ -90,6 +119,23 @@ namespace MyApi.Modules.ExternalEndpoints.Services
                         if (bytes[0] == 192 && bytes[1] == 168) return (false, "Private IPs are not allowed");
                         if (bytes[0] == 169 && bytes[1] == 254) return (false, "Link-local / metadata IPs are not allowed");
                         if (bytes[0] == 127) return (false, "Loopback IPs are not allowed");
+                    }
+                    else if (addr.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6)
+                    {
+                        // ::1 loopback already caught by IsLoopback. Block ULA fc00::/7,
+                        // link-local fe80::/10, IPv4-mapped (::ffff:a.b.c.d) re-checked,
+                        // and the IPv6 metadata range (fd00:ec2::254 / Azure fd00::/8).
+                        if (addr.IsIPv6LinkLocal || addr.IsIPv6SiteLocal) return (false, "Link-local IPs are not allowed");
+                        if ((bytes[0] & 0xFE) == 0xFC) return (false, "Unique-local IPs are not allowed");
+                        if (addr.IsIPv4MappedToIPv6)
+                        {
+                            var v4 = addr.MapToIPv4().GetAddressBytes();
+                            if (v4[0] == 10 || v4[0] == 127 ||
+                                (v4[0] == 172 && v4[1] >= 16 && v4[1] <= 31) ||
+                                (v4[0] == 192 && v4[1] == 168) ||
+                                (v4[0] == 169 && v4[1] == 254))
+                                return (false, "Mapped private IPs are not allowed");
+                        }
                     }
                 }
             }
@@ -174,12 +220,13 @@ namespace MyApi.Modules.ExternalEndpoints.Services
                 .AnyAsync(e => e.Slug == slug && !e.IsDeleted);
             if (exists) slug = slug + "-" + Guid.NewGuid().ToString("N")[..4];
 
+            var plainKey = GenerateApiKey();
             var entity = new ExternalEndpoint
             {
                 Name = dto.Name,
                 Slug = slug,
                 Description = dto.Description,
-                ApiKey = GenerateApiKey(),
+                ApiKey = HashApiKey(plainKey),
                 IsActive = dto.IsActive,
                 AllowedMethods = dto.AllowedMethods,
                 AllowedOrigins = dto.AllowedOrigins,
@@ -192,8 +239,10 @@ namespace MyApi.Modules.ExternalEndpoints.Services
 
             _context.ExternalEndpoints.Add(entity);
             await _context.SaveChangesAsync();
-            // Reveal the API key once on creation so the user can copy it.
-            return MapToDto(entity, revealKey: true);
+            // Reveal the plain key ONCE on creation. After this it is unrecoverable.
+            var dtoOut = MapToDto(entity);
+            dtoOut.ApiKey = plainKey;
+            return dtoOut;
         }
 
         public async Task<ExternalEndpointDto> UpdateEndpointAsync(int id, UpdateExternalEndpointDto dto, string userId)
@@ -236,24 +285,24 @@ namespace MyApi.Modules.ExternalEndpoints.Services
         {
             var entity = await _context.ExternalEndpoints.FirstOrDefaultAsync(e => e.Id == id && !e.IsDeleted)
                 ?? throw new KeyNotFoundException("Endpoint not found");
-            entity.ApiKey = GenerateApiKey();
+            var plainKey = GenerateApiKey();
+            entity.ApiKey = HashApiKey(plainKey);
             entity.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
-            // Return the plain key once so the user can copy it.
-            var stats = await GetEndpointByIdAsync(id);
-            if (stats == null) return MapToDto(entity, revealKey: true);
-            stats.ApiKey = entity.ApiKey;
+            var stats = await GetEndpointByIdAsync(id) ?? MapToDto(entity);
+            stats.ApiKey = plainKey;
             return stats;
         }
 
-        // Reveal the plain API key for an authenticated user. Use sparingly —
-        // ideally rate-limited and behind a re-auth check at the controller level.
+        // Keys are hashed at rest. For legacy plaintext rows we still return the value
+        // (one-time migration aid). New keys must be regenerated to be revealed.
         public async Task<string> RevealKeyAsync(int id)
         {
             var entity = await _context.ExternalEndpoints.AsNoTracking()
                 .FirstOrDefaultAsync(e => e.Id == id && !e.IsDeleted)
                 ?? throw new KeyNotFoundException("Endpoint not found");
-            return entity.ApiKey;
+            if (!entity.ApiKey.StartsWith(HashPrefix)) return entity.ApiKey;
+            throw new InvalidOperationException("API key is hashed and cannot be revealed. Regenerate to obtain a new key.");
         }
 
         public async Task<ExternalEndpointStatsDto> GetStatsAsync()
@@ -342,9 +391,14 @@ namespace MyApi.Modules.ExternalEndpoints.Services
 
             if (candidates.Count == 0) return (404, "{\"error\":\"Endpoint not found\"}");
 
-            // Pick the endpoint whose API key matches. This both authenticates
-            // and disambiguates across tenants in the case of a slug collision.
-            var endpoint = candidates.FirstOrDefault(e => e.ApiKey == apiKey);
+            // Pick the endpoint whose API key matches. Constant-time compare against
+            // the (possibly hashed) stored value to prevent timing oracles. Iterate
+            // over ALL candidates regardless of early hit so total work is uniform.
+            ExternalEndpoint? endpoint = null;
+            foreach (var c in candidates)
+            {
+                if (VerifyApiKey(c.ApiKey, apiKey)) endpoint = c;
+            }
             if (endpoint == null) return (401, "{\"error\":\"Invalid API key\"}");
             if (!endpoint.IsActive) return (403, "{\"error\":\"Endpoint is inactive\"}");
 
@@ -382,18 +436,39 @@ namespace MyApi.Modules.ExternalEndpoints.Services
                 if (ok)
                 {
                     var forwardUrl = endpoint.WebhookForwardUrl;
+                    var forwardBody = body ?? string.Empty;
+                    var slugCopy = slug;
+                    var loggerCopy = _logger;
+                    var clientFactory = _httpClientFactory;
                     _ = Task.Run(async () =>
                     {
+                        HttpClient? client = null;
+                        HttpClientHandler? handler = null;
                         try
                         {
-                            using var handler = new HttpClientHandler { AllowAutoRedirect = false };
-                            using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(10) };
-                            var content = new StringContent(body ?? "", System.Text.Encoding.UTF8, "application/json");
-                            await client.PostAsync(forwardUrl, content);
+                            if (clientFactory != null)
+                            {
+                                client = clientFactory.CreateClient("ext-webhook");
+                                client.Timeout = TimeSpan.FromSeconds(10);
+                            }
+                            else
+                            {
+                                handler = new HttpClientHandler { AllowAutoRedirect = false };
+                                client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(10) };
+                            }
+                            using var content = new StringContent(forwardBody, Encoding.UTF8, "application/json");
+                            using var resp = await client.PostAsync(forwardUrl, content);
+                            if (!resp.IsSuccessStatusCode)
+                                loggerCopy.LogWarning("Webhook forward for {Slug} returned {Status}", slugCopy, (int)resp.StatusCode);
                         }
                         catch (Exception ex)
                         {
-                            _logger.LogWarning(ex, "Failed to forward webhook for endpoint {Slug}", slug);
+                            loggerCopy.LogWarning(ex, "Failed to forward webhook for endpoint {Slug}", slugCopy);
+                        }
+                        finally
+                        {
+                            if (clientFactory == null) client?.Dispose();
+                            handler?.Dispose();
                         }
                     });
                 }

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using MyApi.Data;
+using MyApi.Modules.Articles.Services;
 using MyApi.Modules.Purchases.DTOs;
 using MyApi.Modules.Purchases.Models;
 
@@ -10,13 +11,16 @@ namespace MyApi.Modules.Purchases.Services
         private readonly ApplicationDbContext _context;
         private readonly ILogger<GoodsReceiptService> _logger;
         private readonly MyApi.Modules.Numbering.Services.INumberingService? _numberingService;
+        private readonly IStockTransactionService? _stockService;
 
         public GoodsReceiptService(ApplicationDbContext context, ILogger<GoodsReceiptService> logger,
-            MyApi.Modules.Numbering.Services.INumberingService? numberingService = null)
+            MyApi.Modules.Numbering.Services.INumberingService? numberingService = null,
+            IStockTransactionService? stockService = null)
         {
             _context = context;
             _logger = logger;
             _numberingService = numberingService;
+            _stockService = stockService;
         }
 
         public async Task<PaginatedGoodsReceiptResponse> GetReceiptsAsync(
@@ -41,7 +45,6 @@ namespace MyApi.Modules.Purchases.Services
             query = sortOrder == "asc" ? query.OrderBy(r => r.CreatedDate) : query.OrderByDescending(r => r.CreatedDate);
             var receipts = await query.Skip((page - 1) * limit).Take(limit).Include(r => r.Items).ToListAsync();
 
-            // Get PO numbers
             var poIds = receipts.Select(r => r.PurchaseOrderId).Distinct().ToList();
             var poNumbers = await _context.PurchaseOrders.AsNoTracking().Where(p => poIds.Contains(p.Id))
                 .ToDictionaryAsync(p => p.Id, p => p.OrderNumber);
@@ -63,84 +66,130 @@ namespace MyApi.Modules.Purchases.Services
 
         public async Task<GoodsReceiptDto> CreateReceiptAsync(CreateGoodsReceiptDto dto, string userId)
         {
-            var po = await _context.PurchaseOrders.Include(p => p.Items).FirstOrDefaultAsync(p => p.Id == dto.PurchaseOrderId && !p.IsDeleted)
-                ?? throw new KeyNotFoundException($"PurchaseOrder {dto.PurchaseOrderId} not found");
-
-            string receiptNumber;
-            try { receiptNumber = _numberingService != null ? await _numberingService.GetNextAsync("GoodsReceipt") : $"GR-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..5].ToUpper()}"; }
-            catch { receiptNumber = $"GR-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..5].ToUpper()}"; }
-
-            var receipt = new GoodsReceipt
+            // Serializable isolation prevents two concurrent receipts for the same PO
+            // from both passing the over-receipt check on stale ReceivedQty values.
+            using var tx = await _context.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+            try
             {
-                ReceiptNumber = receiptNumber,
-                PurchaseOrderId = po.Id,
-                SupplierId = po.SupplierId,
-                SupplierName = po.SupplierName,
-                ReceiptDate = dto.ReceiptDate ?? DateTime.UtcNow,
-                Status = "partial",
-                DeliveryNoteRef = dto.DeliveryNoteRef,
-                Notes = dto.Notes,
-                ReceivedBy = userId,
-                CreatedBy = userId,
-                CreatedDate = DateTime.UtcNow
-            };
+                var po = await _context.PurchaseOrders.Include(p => p.Items)
+                    .FirstOrDefaultAsync(p => p.Id == dto.PurchaseOrderId && !p.IsDeleted)
+                    ?? throw new KeyNotFoundException($"PurchaseOrder {dto.PurchaseOrderId} not found");
 
-            _context.GoodsReceipts.Add(receipt);
-            await _context.SaveChangesAsync();
+                // Status guard: only "ordered" or "partially_received" POs can receive goods.
+                if (po.Status != "ordered" && po.Status != "partially_received")
+                    throw new InvalidOperationException($"Cannot receive goods on a PO in status '{po.Status}'");
 
-            if (dto.Items?.Any() == true)
-            {
-                foreach (var itemDto in dto.Items)
+                // Over-receipt guard: every requested qty must fit within remaining ordered qty.
+                if (dto.Items?.Any() == true)
                 {
-                    var poItem = po.Items?.FirstOrDefault(i => i.Id == itemDto.PurchaseOrderItemId);
-                    var grItem = new GoodsReceiptItem
+                    foreach (var itemDto in dto.Items)
                     {
-                        GoodsReceiptId = receipt.Id,
-                        PurchaseOrderItemId = itemDto.PurchaseOrderItemId,
-                        ArticleId = poItem?.ArticleId,
-                        ArticleName = poItem?.ArticleName,
-                        ArticleNumber = poItem?.ArticleNumber,
-                        OrderedQty = poItem?.Quantity ?? 0,
-                        QuantityReceived = itemDto.QuantityReceived,
-                        QuantityRejected = itemDto.QuantityRejected,
-                        RejectionReason = itemDto.RejectionReason,
-                        LocationId = itemDto.LocationId,
-                        Notes = itemDto.Notes
-                    };
-                    _context.GoodsReceiptItems.Add(grItem);
-
-                    // Update PO item received qty
-                    if (poItem != null)
-                        poItem.ReceivedQty += itemDto.QuantityReceived;
+                        var poItem = po.Items?.FirstOrDefault(i => i.Id == itemDto.PurchaseOrderItemId);
+                        if (poItem == null)
+                            throw new InvalidOperationException($"PurchaseOrderItem {itemDto.PurchaseOrderItemId} does not belong to PO {po.Id}");
+                        var remaining = poItem.Quantity - poItem.ReceivedQty;
+                        if (itemDto.QuantityReceived < 0)
+                            throw new InvalidOperationException("QuantityReceived cannot be negative");
+                        if (itemDto.QuantityReceived > remaining)
+                            throw new InvalidOperationException($"Over-receipt for item {poItem.Id}: requested {itemDto.QuantityReceived}, remaining {remaining}");
+                    }
                 }
+
+                string receiptNumber;
+                try { receiptNumber = _numberingService != null ? await _numberingService.GetNextAsync("GoodsReceipt") : $"GR-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..5].ToUpper()}"; }
+                catch { receiptNumber = $"GR-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..5].ToUpper()}"; }
+
+                var receipt = new GoodsReceipt
+                {
+                    ReceiptNumber = receiptNumber,
+                    PurchaseOrderId = po.Id,
+                    SupplierId = po.SupplierId,
+                    SupplierName = po.SupplierName,
+                    ReceiptDate = dto.ReceiptDate ?? DateTime.UtcNow,
+                    Status = "partial",
+                    DeliveryNoteRef = dto.DeliveryNoteRef,
+                    Notes = dto.Notes,
+                    ReceivedBy = userId,
+                    CreatedBy = userId,
+                    CreatedDate = DateTime.UtcNow
+                };
+
+                _context.GoodsReceipts.Add(receipt);
                 await _context.SaveChangesAsync();
-            }
 
-            // Update PO status
-            var allFullyReceived = po.Items?.All(i => i.ReceivedQty >= i.Quantity) ?? false;
-            var anyReceived = po.Items?.Any(i => i.ReceivedQty > 0) ?? false;
-            if (allFullyReceived)
-            {
-                po.Status = "received";
-                po.ActualDelivery = DateTime.UtcNow;
-                receipt.Status = "complete";
-            }
-            else if (anyReceived)
-            {
-                po.Status = "partially_received";
-            }
-            await _context.SaveChangesAsync();
+                var stockUpdates = new List<(int articleId, decimal qty)>();
 
-            // Log activity
-            _context.PurchaseActivities.Add(new PurchaseActivity
-            {
-                EntityType = "goods_receipt", EntityId = receipt.Id, ActivityType = "created",
-                Description = $"Goods receipt {receiptNumber} created for PO {po.OrderNumber}",
-                PerformedBy = userId, PerformedAt = DateTime.UtcNow
-            });
-            await _context.SaveChangesAsync();
+                if (dto.Items?.Any() == true)
+                {
+                    foreach (var itemDto in dto.Items)
+                    {
+                        var poItem = po.Items!.First(i => i.Id == itemDto.PurchaseOrderItemId);
+                        var grItem = new GoodsReceiptItem
+                        {
+                            GoodsReceiptId = receipt.Id,
+                            PurchaseOrderItemId = itemDto.PurchaseOrderItemId,
+                            ArticleId = poItem.ArticleId,
+                            ArticleName = poItem.ArticleName,
+                            ArticleNumber = poItem.ArticleNumber,
+                            OrderedQty = poItem.Quantity,
+                            QuantityReceived = itemDto.QuantityReceived,
+                            QuantityRejected = itemDto.QuantityRejected,
+                            RejectionReason = itemDto.RejectionReason,
+                            LocationId = itemDto.LocationId,
+                            Notes = itemDto.Notes
+                        };
+                        _context.GoodsReceiptItems.Add(grItem);
+                        poItem.ReceivedQty += itemDto.QuantityReceived;
 
-            return (await GetReceiptByIdAsync(receipt.Id))!;
+                        if (poItem.ArticleId.HasValue && itemDto.QuantityReceived > 0)
+                            stockUpdates.Add((poItem.ArticleId.Value, itemDto.QuantityReceived));
+                    }
+                    await _context.SaveChangesAsync();
+                }
+
+                var allFullyReceived = po.Items?.All(i => i.ReceivedQty >= i.Quantity) ?? false;
+                var anyReceived = po.Items?.Any(i => i.ReceivedQty > 0) ?? false;
+                if (allFullyReceived)
+                {
+                    po.Status = "received";
+                    po.ActualDelivery = DateTime.UtcNow;
+                    receipt.Status = "complete";
+                }
+                else if (anyReceived)
+                {
+                    po.Status = "partially_received";
+                }
+
+                _context.PurchaseActivities.Add(new PurchaseActivity
+                {
+                    EntityType = "goods_receipt", EntityId = receipt.Id, ActivityType = "created",
+                    Description = $"Goods receipt {receiptNumber} created for PO {po.OrderNumber}",
+                    PerformedBy = userId, PerformedAt = DateTime.UtcNow
+                });
+                await _context.SaveChangesAsync();
+
+                // Increment stock for received articles. Done inside the same transaction
+                // so a stock-write failure rolls back the receipt and PO updates.
+                if (_stockService != null)
+                {
+                    foreach (var (articleId, qty) in stockUpdates)
+                    {
+                        await _stockService.AddStockAsync(
+                            articleId, qty,
+                            reason: "goods_receipt",
+                            userId: userId,
+                            notes: $"Goods receipt {receiptNumber} (PO {po.OrderNumber})");
+                    }
+                }
+
+                await tx.CommitAsync();
+                return (await GetReceiptByIdAsync(receipt.Id))!;
+            }
+            catch
+            {
+                await tx.RollbackAsync();
+                throw;
+            }
         }
 
         public async Task<bool> DeleteReceiptAsync(int id, string userId)
@@ -148,52 +197,75 @@ namespace MyApi.Modules.Purchases.Services
             var receipt = await _context.GoodsReceipts.Include(r => r.Items).FirstOrDefaultAsync(r => r.Id == id);
             if (receipt == null) return false;
 
-            // Reverse ReceivedQty on PO items before deleting the receipt
-            var po = await _context.PurchaseOrders.Include(p => p.Items)
-                .FirstOrDefaultAsync(p => p.Id == receipt.PurchaseOrderId && !p.IsDeleted);
-
-            if (po != null && receipt.Items != null)
+            using var tx = await _context.Database.BeginTransactionAsync();
+            try
             {
-                foreach (var grItem in receipt.Items)
+                var po = await _context.PurchaseOrders.Include(p => p.Items)
+                    .FirstOrDefaultAsync(p => p.Id == receipt.PurchaseOrderId && !p.IsDeleted);
+
+                var stockReversals = new List<(int articleId, decimal qty)>();
+
+                if (po != null && receipt.Items != null)
                 {
-                    var poItem = po.Items?.FirstOrDefault(i => i.Id == grItem.PurchaseOrderItemId);
-                    if (poItem != null)
+                    foreach (var grItem in receipt.Items)
                     {
-                        poItem.ReceivedQty = Math.Max(0, poItem.ReceivedQty - grItem.QuantityReceived);
+                        var poItem = po.Items?.FirstOrDefault(i => i.Id == grItem.PurchaseOrderItemId);
+                        if (poItem != null)
+                        {
+                            poItem.ReceivedQty = Math.Max(0, poItem.ReceivedQty - grItem.QuantityReceived);
+                        }
+                        if (grItem.ArticleId.HasValue && grItem.QuantityReceived > 0)
+                            stockReversals.Add((grItem.ArticleId.Value, grItem.QuantityReceived));
+                    }
+
+                    var allFullyReceived = po.Items?.All(i => i.ReceivedQty >= i.Quantity) ?? false;
+                    var anyReceived = po.Items?.Any(i => i.ReceivedQty > 0) ?? false;
+                    if (allFullyReceived) po.Status = "received";
+                    else if (anyReceived) po.Status = "partially_received";
+                    else { po.Status = "ordered"; po.ActualDelivery = null; }
+                }
+
+                _context.GoodsReceiptItems.RemoveRange(receipt.Items ?? Enumerable.Empty<GoodsReceiptItem>());
+                _context.GoodsReceipts.Remove(receipt);
+
+                _context.PurchaseActivities.Add(new PurchaseActivity
+                {
+                    EntityType = "goods_receipt", EntityId = id, ActivityType = "deleted",
+                    Description = $"Goods receipt {receipt.ReceiptNumber} deleted, received quantities reversed",
+                    PerformedBy = userId, PerformedAt = DateTime.UtcNow
+                });
+
+                await _context.SaveChangesAsync();
+
+                // Reverse stock movements that the receipt had created.
+                if (_stockService != null)
+                {
+                    foreach (var (articleId, qty) in stockReversals)
+                    {
+                        try
+                        {
+                            await _stockService.RemoveStockAsync(
+                                articleId, qty,
+                                reason: "goods_receipt_reversal",
+                                userId: userId,
+                                notes: $"Reversal of receipt {receipt.ReceiptNumber}");
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Stock reversal failed for article {ArticleId} qty {Qty} on receipt {ReceiptId}", articleId, qty, id);
+                            throw;
+                        }
                     }
                 }
 
-                // Recalculate PO status based on remaining received quantities
-                var allFullyReceived = po.Items?.All(i => i.ReceivedQty >= i.Quantity) ?? false;
-                var anyReceived = po.Items?.Any(i => i.ReceivedQty > 0) ?? false;
-                if (allFullyReceived)
-                {
-                    po.Status = "received";
-                }
-                else if (anyReceived)
-                {
-                    po.Status = "partially_received";
-                }
-                else
-                {
-                    po.Status = "ordered";
-                    po.ActualDelivery = null;
-                }
+                await tx.CommitAsync();
+                return true;
             }
-
-            _context.GoodsReceiptItems.RemoveRange(receipt.Items ?? Enumerable.Empty<GoodsReceiptItem>());
-            _context.GoodsReceipts.Remove(receipt);
-
-            // Log activity
-            _context.PurchaseActivities.Add(new PurchaseActivity
+            catch
             {
-                EntityType = "goods_receipt", EntityId = id, ActivityType = "deleted",
-                Description = $"Goods receipt {receipt.ReceiptNumber} deleted, received quantities reversed",
-                PerformedBy = userId, PerformedAt = DateTime.UtcNow
-            });
-
-            await _context.SaveChangesAsync();
-            return true;
+                await tx.RollbackAsync();
+                throw;
+            }
         }
 
         private static GoodsReceiptDto MapToDto(GoodsReceipt r, string? poNumber) => new()

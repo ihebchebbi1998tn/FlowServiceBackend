@@ -76,6 +76,13 @@ namespace MyApi.Modules.Purchases.Controllers
             {
                 return NotFound(new { success = false, error = new { code = "NOT_FOUND", message = ex.Message } });
             }
+            // Service throws InvalidOperationException for: PO status guard
+            // ("Cannot receive goods on a PO in status 'X'"), over-receipt, negative qty,
+            // and orphan PurchaseOrderItemId. Surface the message instead of a 500.
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { success = false, error = new { code = "BAD_REQUEST", message = ex.Message } });
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error creating goods receipt");
@@ -94,6 +101,11 @@ namespace MyApi.Modules.Purchases.Controllers
                     return NotFound(new { success = false, error = new { code = "NOT_FOUND", message = "Goods receipt not found" } });
                 await _systemLogService.LogSuccessAsync($"Goods receipt deleted: {id}", "Purchases", "delete", userId, GetUserName(), "GoodsReceipt", id.ToString());
                 return Ok(new { success = true, message = "Deleted successfully" });
+            }
+            // Stock reversal failures bubble up here; surface the reason.
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { success = false, error = new { code = "BAD_REQUEST", message = ex.Message } });
             }
             catch (Exception ex)
             {

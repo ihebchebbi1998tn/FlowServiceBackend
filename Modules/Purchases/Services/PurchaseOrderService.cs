@@ -102,39 +102,75 @@ namespace MyApi.Modules.Purchases.Services
                 CreatedDate = DateTime.UtcNow
             };
 
-            _context.PurchaseOrders.Add(order);
-            await _context.SaveChangesAsync();
-
-            if (dto.Items?.Any() == true)
+            using var tx = await _context.Database.BeginTransactionAsync();
+            try
             {
-                var items = dto.Items.Select((item, idx) => new PurchaseOrderItem
-                {
-                    PurchaseOrderId = order.Id,
-                    ArticleId = item.ArticleId,
-                    ArticleName = item.ArticleName,
-                    ArticleNumber = item.ArticleNumber,
-                    SupplierRef = item.SupplierRef,
-                    Description = item.Description,
-                    Quantity = item.Quantity,
-                    UnitPrice = item.UnitPrice,
-                    TaxRate = item.TaxRate,
-                    Discount = item.Discount,
-                    DiscountType = item.DiscountType,
-                    Unit = item.Unit,
-                    DisplayOrder = idx,
-                    LineTotal = CalculateLineTotal(item.Quantity, item.UnitPrice, item.Discount, item.DiscountType, item.TaxRate)
-                }).ToList();
-                _context.PurchaseOrderItems.AddRange(items);
+                _context.PurchaseOrders.Add(order);
                 await _context.SaveChangesAsync();
-                RecalculateTotals(order, items);
-                await _context.SaveChangesAsync();
-            }
 
-            LogActivity("purchase_order", order.Id, "created", $"Purchase order {orderNumber} created", userId);
-            await _context.SaveChangesAsync();
+                if (dto.Items?.Any() == true)
+                {
+                    var items = dto.Items.Select((item, idx) => new PurchaseOrderItem
+                    {
+                        PurchaseOrderId = order.Id,
+                        ArticleId = item.ArticleId,
+                        ArticleName = item.ArticleName,
+                        ArticleNumber = item.ArticleNumber,
+                        SupplierRef = item.SupplierRef,
+                        Description = item.Description,
+                        Quantity = item.Quantity,
+                        UnitPrice = item.UnitPrice,
+                        TaxRate = item.TaxRate,
+                        Discount = item.Discount,
+                        DiscountType = item.DiscountType,
+                        Unit = item.Unit,
+                        DisplayOrder = idx,
+                        LineTotal = CalculateLineTotal(item.Quantity, item.UnitPrice, item.Discount, item.DiscountType, item.TaxRate)
+                    }).ToList();
+                    _context.PurchaseOrderItems.AddRange(items);
+                    RecalculateTotals(order, items);
+                    await _context.SaveChangesAsync();
+                }
+
+                LogActivity("purchase_order", order.Id, "created", $"Purchase order {orderNumber} created", userId);
+                await _context.SaveChangesAsync();
+                await tx.CommitAsync();
+            }
+            catch
+            {
+                await tx.RollbackAsync();
+                throw;
+            }
 
             return (await GetOrderByIdAsync(order.Id))!;
         }
+
+        // PO statuses where item structure (qty/price/lines) must be frozen — once
+        // a PO is ordered/received, items are referenced by GoodsReceiptItem.OrderedQty
+        // and stock has been moved against them.
+        private static readonly HashSet<string> ItemFrozenStatuses = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "ordered", "partially_received", "received", "cancelled", "closed"
+        };
+
+        private static void EnsureItemsMutable(PurchaseOrder order)
+        {
+            if (ItemFrozenStatuses.Contains(order.Status))
+                throw new InvalidOperationException($"Items cannot be modified on a PO in status '{order.Status}'");
+        }
+
+        // Allowed status transitions. Anything else is rejected so a user can't
+        // e.g. revert a "received" PO to "draft" and then mutate items.
+        private static readonly Dictionary<string, HashSet<string>> AllowedStatusTransitions = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["draft"] = new(StringComparer.OrdinalIgnoreCase) { "validated", "ordered", "cancelled" },
+            ["validated"] = new(StringComparer.OrdinalIgnoreCase) { "ordered", "draft", "cancelled" },
+            ["ordered"] = new(StringComparer.OrdinalIgnoreCase) { "partially_received", "received", "cancelled" },
+            ["partially_received"] = new(StringComparer.OrdinalIgnoreCase) { "received", "cancelled" },
+            ["received"] = new(StringComparer.OrdinalIgnoreCase) { "closed" },
+            ["cancelled"] = new(StringComparer.OrdinalIgnoreCase) { },
+            ["closed"] = new(StringComparer.OrdinalIgnoreCase) { },
+        };
 
         public async Task<PurchaseOrderDto> UpdateOrderAsync(int id, UpdatePurchaseOrderDto dto, string userId)
         {
@@ -142,6 +178,13 @@ namespace MyApi.Modules.Purchases.Services
                 ?? throw new KeyNotFoundException($"PurchaseOrder {id} not found");
 
             var oldStatus = order.Status;
+            // Validate status transition BEFORE applying any other changes.
+            if (dto.Status != null && !string.Equals(dto.Status, oldStatus, StringComparison.OrdinalIgnoreCase))
+            {
+                if (!AllowedStatusTransitions.TryGetValue(oldStatus, out var allowed) || !allowed.Contains(dto.Status))
+                    throw new InvalidOperationException($"Status transition not allowed: '{oldStatus}' → '{dto.Status}'");
+            }
+
             if (dto.Title != null) order.Title = dto.Title;
             if (dto.Description != null) order.Description = dto.Description;
             if (dto.Status != null) order.Status = dto.Status;
@@ -158,7 +201,11 @@ namespace MyApi.Modules.Purchases.Services
             order.ModifiedDate = DateTime.UtcNow;
             order.ModifiedBy = userId;
 
-            if (order.Items != null) RecalculateTotals(order, order.Items.ToList());
+            // Only recompute totals when something that affects them changed.
+            if (dto.Discount.HasValue || dto.DiscountType != null || dto.FiscalStamp.HasValue)
+            {
+                if (order.Items != null) RecalculateTotals(order, order.Items.ToList());
+            }
 
             if (dto.Status != null && dto.Status != oldStatus)
                 LogActivity("purchase_order", id, "status_changed", $"Status changed from {oldStatus} to {dto.Status}", userId, oldStatus, dto.Status);
@@ -206,6 +253,8 @@ namespace MyApi.Modules.Purchases.Services
         {
             var order = await _context.PurchaseOrders.Include(o => o.Items).FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted)
                 ?? throw new KeyNotFoundException($"PurchaseOrder {orderId} not found");
+            EnsureItemsMutable(order);
+
             var item = new PurchaseOrderItem
             {
                 PurchaseOrderId = orderId, ArticleId = dto.ArticleId, ArticleName = dto.ArticleName,
@@ -226,8 +275,15 @@ namespace MyApi.Modules.Purchases.Services
         {
             var order = await _context.PurchaseOrders.Include(o => o.Items).FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted)
                 ?? throw new KeyNotFoundException($"PurchaseOrder {orderId} not found");
+            EnsureItemsMutable(order);
+
             var item = order.Items?.FirstOrDefault(i => i.Id == itemId)
                 ?? throw new KeyNotFoundException($"Item {itemId} not found");
+
+            // Defensive: never let an edit reduce Quantity below what's already been received.
+            if (dto.Quantity < item.ReceivedQty)
+                throw new InvalidOperationException($"Quantity ({dto.Quantity}) cannot be less than already-received qty ({item.ReceivedQty})");
+
             item.ArticleId = dto.ArticleId; item.ArticleName = dto.ArticleName; item.ArticleNumber = dto.ArticleNumber;
             item.SupplierRef = dto.SupplierRef; item.Description = dto.Description; item.Quantity = dto.Quantity;
             item.UnitPrice = dto.UnitPrice; item.TaxRate = dto.TaxRate; item.Discount = dto.Discount;
@@ -241,11 +297,17 @@ namespace MyApi.Modules.Purchases.Services
         public async Task<bool> DeleteItemAsync(int orderId, int itemId)
         {
             var order = await _context.PurchaseOrders.Include(o => o.Items).FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted);
-            var item = order?.Items?.FirstOrDefault(i => i.Id == itemId);
+            if (order == null) return false;
+            EnsureItemsMutable(order);
+
+            var item = order.Items?.FirstOrDefault(i => i.Id == itemId);
             if (item == null) return false;
+            if (item.ReceivedQty > 0)
+                throw new InvalidOperationException("Cannot delete an item that already has received quantity");
+
             _context.PurchaseOrderItems.Remove(item);
             await _context.SaveChangesAsync();
-            RecalculateTotals(order!, order!.Items!.ToList());
+            RecalculateTotals(order, order.Items!.ToList());
             await _context.SaveChangesAsync();
             return true;
         }
@@ -268,12 +330,13 @@ namespace MyApi.Modules.Purchases.Services
 
         // ── Helpers ──
 
+        // Tax-EXCLUSIVE line total so Sum(LineTotal) reconciles to SubTotal.
+        // Tax is tracked separately in PurchaseOrder.TaxAmount via RecalculateTotals.
         private static decimal CalculateLineTotal(decimal qty, decimal price, decimal discount, string discountType, decimal taxRate)
         {
             var subtotal = qty * price;
             var discountAmount = discountType == "percentage" ? subtotal * discount / 100 : discount;
-            var afterDiscount = subtotal - discountAmount;
-            return afterDiscount + (afterDiscount * taxRate / 100);
+            return subtotal - discountAmount;
         }
 
         private static void RecalculateTotals(PurchaseOrder order, List<PurchaseOrderItem> items)

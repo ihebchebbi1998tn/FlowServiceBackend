@@ -108,28 +108,15 @@ namespace MyApi.Modules.Purchases.Services
                     Quantity = item.Quantity,
                     UnitPrice = item.UnitPrice,
                     TaxRate = item.TaxRate,
-                    LineTotal = item.Quantity * item.UnitPrice * (1 + item.TaxRate / 100),
+                    // LineTotal is tax-EXCLUSIVE so Sum(LineTotal) reconciles to SubTotal.
+                    LineTotal = item.Quantity * item.UnitPrice,
                     DisplayOrder = idx
                 }).ToList();
                 _context.SupplierInvoiceItems.AddRange(items);
                 await _context.SaveChangesAsync();
 
-                // Recalculate totals
-                invoice.SubTotal = items.Sum(i => i.Quantity * i.UnitPrice);
-                var discAmt = invoice.DiscountType == "percentage" ? invoice.SubTotal * invoice.Discount / 100 : invoice.Discount;
-                invoice.TaxAmount = items.Sum(i => i.Quantity * i.UnitPrice * i.TaxRate / 100);
-                invoice.GrandTotal = invoice.SubTotal - discAmt + invoice.TaxAmount + invoice.FiscalStamp;
-
-                // Calculate RS if applicable
-                if (invoice.RsApplicable && !string.IsNullOrEmpty(invoice.RsTypeCode))
-                {
-                    var rsRate = invoice.RsTypeCode switch
-                    {
-                        "P1" => 1.5m, "P2" => 5m, "P3" => 10m, "P4" => 15m, "P5" => 25m, _ => 0m
-                    };
-                    invoice.RsAmount = (invoice.SubTotal - discAmt) * rsRate / 100;
-                }
-                await _context.SaveChangesAsync();
+                // Single source of truth for totals.
+                await RecalculateInvoiceTotalsAsync(invoice.Id);
             }
 
             _context.PurchaseActivities.Add(new PurchaseActivity
@@ -158,14 +145,18 @@ namespace MyApi.Modules.Purchases.Services
             if (dto.AmountPaid.HasValue)
             {
                 invoice.AmountPaid = dto.AmountPaid.Value;
-                if (invoice.AmountPaid >= invoice.GrandTotal)
+                // Only auto-derive status from payment when caller did not pass an explicit Status.
+                if (dto.Status == null)
                 {
-                    invoice.Status = "paid";
-                    invoice.PaymentDate = DateTime.UtcNow;
-                }
-                else if (invoice.AmountPaid > 0)
-                {
-                    invoice.Status = "partially_paid";
+                    if (invoice.AmountPaid >= invoice.GrandTotal && invoice.GrandTotal > 0)
+                    {
+                        invoice.Status = "paid";
+                        invoice.PaymentDate ??= DateTime.UtcNow;
+                    }
+                    else if (invoice.AmountPaid > 0)
+                    {
+                        invoice.Status = "partially_paid";
+                    }
                 }
             }
             if (dto.PaymentDate.HasValue) invoice.PaymentDate = dto.PaymentDate;
@@ -194,6 +185,13 @@ namespace MyApi.Modules.Purchases.Services
                 });
             }
             await _context.SaveChangesAsync();
+
+            // If discount/fiscal-stamp/RS settings changed, totals must be recomputed.
+            if (dto.Discount.HasValue || dto.DiscountType != null || dto.FiscalStamp.HasValue
+                || dto.RsApplicable.HasValue || dto.RsTypeCode != null)
+            {
+                await RecalculateInvoiceTotalsAsync(id);
+            }
             return (await GetInvoiceByIdAsync(id))!;
         }
 
@@ -213,6 +211,17 @@ namespace MyApi.Modules.Purchases.Services
                 ?? throw new KeyNotFoundException($"SupplierInvoice {invoiceId} not found");
             if (invoice.Status != "draft")
                 throw new InvalidOperationException("Items can only be modified on draft invoices");
+
+            // If the line is linked to a PO, the PO item must belong to THIS invoice's PO.
+            if (dto.PurchaseOrderItemId.HasValue)
+            {
+                if (!invoice.PurchaseOrderId.HasValue)
+                    throw new InvalidOperationException("Cannot link a PO item to an invoice that has no PurchaseOrderId");
+                var poItemExists = await _context.PurchaseOrderItems.AnyAsync(p =>
+                    p.Id == dto.PurchaseOrderItemId.Value && p.PurchaseOrderId == invoice.PurchaseOrderId.Value);
+                if (!poItemExists)
+                    throw new InvalidOperationException($"PurchaseOrderItem {dto.PurchaseOrderItemId} does not belong to PO {invoice.PurchaseOrderId}");
+            }
 
             var item = new SupplierInvoiceItem
             {

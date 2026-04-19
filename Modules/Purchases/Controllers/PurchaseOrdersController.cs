@@ -110,6 +110,9 @@ namespace MyApi.Modules.Purchases.Controllers
                 return Ok(new { success = true, data = order });
             }
             catch (KeyNotFoundException) { return NotFound(new { success = false, error = new { code = "NOT_FOUND", message = "Purchase order not found" } }); }
+            // Status-machine and item-mutation guards throw this — surface the message
+            // (e.g. "Cannot move PO from received back to draft") to the user instead of a 500.
+            catch (InvalidOperationException ex) { return BadRequest(new { success = false, error = new { code = "INVALID_TRANSITION", message = ex.Message } }); }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error updating purchase order {Id}", id);
@@ -128,6 +131,7 @@ namespace MyApi.Modules.Purchases.Controllers
                 await _systemLogService.LogSuccessAsync($"Purchase order deleted: {id}", "Purchases", "delete", userId, GetUserName(), "PurchaseOrder", id.ToString());
                 return Ok(new { success = true, message = "Deleted successfully" });
             }
+            catch (InvalidOperationException ex) { return BadRequest(new { success = false, error = new { code = "BAD_REQUEST", message = ex.Message } }); }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error deleting purchase order {Id}", id);
@@ -159,6 +163,8 @@ namespace MyApi.Modules.Purchases.Controllers
                 return CreatedAtAction(nameof(GetOrder), new { id }, new { success = true, data = item });
             }
             catch (KeyNotFoundException ex) { return NotFound(new { success = false, error = new { code = "NOT_FOUND", message = ex.Message } }); }
+            // EnsureItemsMutable throws this when PO is ordered/received/cancelled/closed.
+            catch (InvalidOperationException ex) { return BadRequest(new { success = false, error = new { code = "ITEMS_FROZEN", message = ex.Message } }); }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error adding item to PO {Id}", id);
@@ -175,6 +181,8 @@ namespace MyApi.Modules.Purchases.Controllers
                 return Ok(new { success = true, data = item });
             }
             catch (KeyNotFoundException ex) { return NotFound(new { success = false, error = new { code = "NOT_FOUND", message = ex.Message } }); }
+            // Surfaces "Quantity (X) cannot be less than already-received qty (Y)" and ITEMS_FROZEN.
+            catch (InvalidOperationException ex) { return BadRequest(new { success = false, error = new { code = "BAD_REQUEST", message = ex.Message } }); }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error updating item {ItemId} in PO {Id}", itemId, id);
@@ -191,6 +199,9 @@ namespace MyApi.Modules.Purchases.Controllers
                     return NotFound(new { success = false, error = new { code = "NOT_FOUND", message = "Item not found" } });
                 return Ok(new { success = true, message = "Item deleted" });
             }
+            catch (KeyNotFoundException ex) { return NotFound(new { success = false, error = new { code = "NOT_FOUND", message = ex.Message } }); }
+            // Surfaces "Cannot delete an item that already has received quantity" and ITEMS_FROZEN.
+            catch (InvalidOperationException ex) { return BadRequest(new { success = false, error = new { code = "BAD_REQUEST", message = ex.Message } }); }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error deleting item {ItemId} from PO {Id}", itemId, id);
