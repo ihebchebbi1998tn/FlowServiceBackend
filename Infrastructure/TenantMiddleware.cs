@@ -100,25 +100,21 @@ public class TenantMiddleware
         else if (!string.IsNullOrEmpty(tenant))
         {
             var knownTenant = TenantSlugCache.HasTenant(tenant);
-            if (!knownTenant)
+            var hasDedicatedDb = TenantConnectionResolver.HasDedicatedConnectionString(tenant);
+
+            if (!knownTenant && !hasDedicatedDb)
             {
                 var envKey = TenantConnectionResolver.GetEnvironmentVariableName(tenant);
-                if (_environment.IsProduction())
-                {
-                    _logger.LogWarning("🚫 TENANT-MIDDLEWARE: Unknown tenant '{Tenant}' rejected in production. Expected active tenant slug or dedicated DB env var '{EnvKey}'", tenant, envKey);
-                    context.Response.StatusCode = 404;
-                    await context.Response.WriteAsJsonAsync(new { error = $"Unknown tenant '{tenant}'." });
-                    return;
-                }
-
-                _logger.LogWarning("🏢 TENANT-MIDDLEWARE: Unknown tenant '{Tenant}' received in non-production. It will fall back to default behavior unless '{EnvKey}' is configured.", tenant, envKey);
+                _logger.LogWarning(
+                    "🏢 TENANT-MIDDLEWARE: Unknown tenant '{Tenant}' will use the default shared DB. Configure '{EnvKey}' or activate the tenant slug to give it its own database.",
+                    tenant, envKey);
             }
 
             context.Items["Tenant"] = tenant;
             var tenantId = TenantSlugCache.GetTenantId(tenant);
             context.Items["TenantId"] = tenantId;
-            _logger.LogDebug("🏢 TENANT-MIDDLEWARE: Request {Method} {Path} → tenant='{Tenant}' (TenantId={TenantId}, KnownTenant={KnownTenant})",
-                context.Request.Method, context.Request.Path, tenant, tenantId, knownTenant);
+            _logger.LogDebug("🏢 TENANT-MIDDLEWARE: Request {Method} {Path} → tenant='{Tenant}' (TenantId={TenantId}, KnownTenant={KnownTenant}, DedicatedDb={DedicatedDb})",
+                context.Request.Method, context.Request.Path, tenant, tenantId, knownTenant, hasDedicatedDb);
         }
         else
         {
