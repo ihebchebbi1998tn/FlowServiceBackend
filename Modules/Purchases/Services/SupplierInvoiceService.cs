@@ -136,7 +136,18 @@ namespace MyApi.Modules.Purchases.Services
 
             var oldStatus = invoice.Status;
             if (dto.SupplierInvoiceRef != null) invoice.SupplierInvoiceRef = dto.SupplierInvoiceRef;
-            if (dto.Status != null) invoice.Status = dto.Status;
+            if (dto.Status != null)
+            {
+                // Status state machine: terminal states cannot silently revert.
+                // - "cancelled" is final.
+                // - "paid" can only go to "cancelled" (e.g., refund/correction).
+                // Anything else is a no-op transition allowed.
+                if (oldStatus == "cancelled" && dto.Status != "cancelled")
+                    throw new InvalidOperationException("Cancelled invoices cannot change status");
+                if (oldStatus == "paid" && dto.Status != "paid" && dto.Status != "cancelled")
+                    throw new InvalidOperationException($"Paid invoices cannot transition to '{dto.Status}'");
+                invoice.Status = dto.Status;
+            }
             if (dto.DueDate.HasValue) invoice.DueDate = dto.DueDate.Value;
             if (dto.Discount.HasValue) invoice.Discount = dto.Discount.Value;
             if (dto.DiscountType != null) invoice.DiscountType = dto.DiscountType;

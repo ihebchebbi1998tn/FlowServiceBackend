@@ -21,4 +21,15 @@ namespace MyApi.Modules.ExternalEndpoints.Database
             builder.HasIndex(l => l.ReceivedAt);
         }
     }
+
+    public class WebhookForwardJobConfiguration : IEntityTypeConfiguration<WebhookForwardJob>
+    {
+        public void Configure(EntityTypeBuilder<WebhookForwardJob> builder)
+        {
+            // Hot path: worker queries `WHERE Status = 'pending' AND NextAttemptAt <= now`.
+            builder.HasIndex(j => new { j.Status, j.NextAttemptAt });
+            builder.HasIndex(j => j.EndpointId);
+            builder.HasIndex(j => j.TenantId);
+        }
+    }
 }

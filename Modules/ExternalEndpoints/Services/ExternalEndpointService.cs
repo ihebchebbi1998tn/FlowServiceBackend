@@ -15,14 +15,17 @@ namespace MyApi.Modules.ExternalEndpoints.Services
         private readonly ILogger<ExternalEndpointService> _logger;
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly IHttpClientFactory? _httpClientFactory;
+        private readonly IWebhookForwardQueue? _forwardQueue;
 
         public ExternalEndpointService(ApplicationDbContext context, ILogger<ExternalEndpointService> logger,
-            IServiceScopeFactory scopeFactory, IHttpClientFactory? httpClientFactory = null)
+            IServiceScopeFactory scopeFactory, IHttpClientFactory? httpClientFactory = null,
+            IWebhookForwardQueue? forwardQueue = null)
         {
             _context = context;
             _logger = logger;
             _scopeFactory = scopeFactory;
             _httpClientFactory = httpClientFactory;
+            _forwardQueue = forwardQueue;
         }
 
         // Plain key returned ONCE on create/regenerate. The DB only stores the hash.
@@ -428,49 +431,36 @@ namespace MyApi.Modules.ExternalEndpoints.Services
             _context.ExternalEndpointLogs.Add(log);
             await _context.SaveChangesAsync();
 
-            // Optional webhook forwarding (re-validate URL at send time;
-            // disable redirects to prevent redirect-based SSRF).
+            // Optional webhook forwarding — enqueue a durable job and signal the
+            // background worker. The worker handles retries, backoff, and the
+            // dead-letter state. This survives process restarts because the
+            // WebhookForwardJobs table is the source of truth.
             if (!string.IsNullOrEmpty(endpoint.WebhookForwardUrl))
             {
                 var (ok, _) = ValidateWebhookUrl(endpoint.WebhookForwardUrl);
                 if (ok)
                 {
-                    var forwardUrl = endpoint.WebhookForwardUrl;
-                    var forwardBody = body ?? string.Empty;
-                    var slugCopy = slug;
-                    var loggerCopy = _logger;
-                    var clientFactory = _httpClientFactory;
-                    _ = Task.Run(async () =>
+                    var job = new WebhookForwardJob
                     {
-                        HttpClient? client = null;
-                        HttpClientHandler? handler = null;
-                        try
-                        {
-                            if (clientFactory != null)
-                            {
-                                client = clientFactory.CreateClient("ext-webhook");
-                                client.Timeout = TimeSpan.FromSeconds(10);
-                            }
-                            else
-                            {
-                                handler = new HttpClientHandler { AllowAutoRedirect = false };
-                                client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(10) };
-                            }
-                            using var content = new StringContent(forwardBody, Encoding.UTF8, "application/json");
-                            using var resp = await client.PostAsync(forwardUrl, content);
-                            if (!resp.IsSuccessStatusCode)
-                                loggerCopy.LogWarning("Webhook forward for {Slug} returned {Status}", slugCopy, (int)resp.StatusCode);
-                        }
-                        catch (Exception ex)
-                        {
-                            loggerCopy.LogWarning(ex, "Failed to forward webhook for endpoint {Slug}", slugCopy);
-                        }
-                        finally
-                        {
-                            if (clientFactory == null) client?.Dispose();
-                            handler?.Dispose();
-                        }
-                    });
+                        TenantId = endpoint.TenantId,
+                        EndpointId = endpoint.Id,
+                        LogId = log.Id,
+                        ForwardUrl = endpoint.WebhookForwardUrl!,
+                        Body = body,
+                        Status = "pending",
+                        NextAttemptAt = DateTime.UtcNow,
+                        CreatedAt = DateTime.UtcNow,
+                    };
+                    _context.WebhookForwardJobs.Add(job);
+                    await _context.SaveChangesAsync();
+
+                    // Best-effort wake-up: missing the signal is harmless because
+                    // the worker also polls for due jobs on a timer.
+                    if (_forwardQueue != null)
+                    {
+                        try { await _forwardQueue.EnqueueAsync(job.Id); }
+                        catch (Exception ex) { _logger.LogDebug(ex, "Could not signal worker for job {JobId} (poll will pick it up)", job.Id); }
+                    }
                 }
                 else
                 {

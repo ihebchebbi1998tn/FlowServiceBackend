@@ -312,6 +312,12 @@ builder.Services.AddScoped<ISyncService, SyncService>();
 
 // External Endpoints Module Services
 builder.Services.AddScoped<MyApi.Modules.ExternalEndpoints.Services.IExternalEndpointService, MyApi.Modules.ExternalEndpoints.Services.ExternalEndpointService>();
+// Durable webhook-forward queue: in-memory signal channel + DB-backed worker.
+builder.Services.AddSingleton<MyApi.Modules.ExternalEndpoints.Services.IWebhookForwardQueue, MyApi.Modules.ExternalEndpoints.Services.WebhookForwardQueue>();
+// Named HttpClient with redirects disabled (defense-in-depth against redirect-based SSRF).
+builder.Services.AddHttpClient("ext-webhook")
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+builder.Services.AddHostedService<MyApi.Modules.ExternalEndpoints.Services.WebhookForwardWorker>();
 
 // Upload Services (UploadThing integration)
 builder.Services.AddHttpClient();

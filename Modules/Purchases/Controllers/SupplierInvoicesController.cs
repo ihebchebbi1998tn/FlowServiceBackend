@@ -95,6 +95,7 @@ namespace MyApi.Modules.Purchases.Controllers
                 return Ok(new { success = true, data = invoice });
             }
             catch (KeyNotFoundException) { return NotFound(new { success = false, error = new { code = "NOT_FOUND", message = "Invoice not found" } }); }
+            catch (InvalidOperationException ex) { return Conflict(new { success = false, error = new { code = "INVALID_TRANSITION", message = ex.Message } }); }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error updating supplier invoice {Id}", id);

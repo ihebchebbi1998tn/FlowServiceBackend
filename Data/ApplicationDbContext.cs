@@ -261,6 +261,7 @@ namespace MyApi.Data
         // External Endpoints Module
         public DbSet<MyApi.Modules.ExternalEndpoints.Models.ExternalEndpoint> ExternalEndpoints { get; set; }
         public DbSet<MyApi.Modules.ExternalEndpoints.Models.ExternalEndpointLog> ExternalEndpointLogs { get; set; }
+        public DbSet<MyApi.Modules.ExternalEndpoints.Models.WebhookForwardJob> WebhookForwardJobs { get; set; }
 
         // Purchases Module
         public DbSet<MyApi.Modules.Purchases.Models.PurchaseOrder> PurchaseOrders { get; set; }
@@ -465,6 +466,7 @@ namespace MyApi.Data
             // External Endpoints Module configurations
             modelBuilder.ApplyConfiguration(new MyApi.Modules.ExternalEndpoints.Database.ExternalEndpointConfiguration());
             modelBuilder.ApplyConfiguration(new MyApi.Modules.ExternalEndpoints.Database.ExternalEndpointLogConfiguration());
+            modelBuilder.ApplyConfiguration(new MyApi.Modules.ExternalEndpoints.Database.WebhookForwardJobConfiguration());
         }
 
         private void ConfigureArticleEntities(ModelBuilder modelBuilder)

@@ -272,7 +272,18 @@ namespace MyApi.Modules.ExternalEndpoints.Controllers
                 var endpoint = await _service.GetEndpointByIdAsync(id);
                 if (endpoint == null) return NotFound(new { success = false, error = new { code = "NOT_FOUND", message = "Endpoint not found" } });
 
-                var plainApiKey = await _service.RevealKeyAsync(id);
+                string plainApiKey;
+                try
+                {
+                    plainApiKey = await _service.RevealKeyAsync(id);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    // RevealKeyAsync throws when the stored key is hashed (the normal,
+                    // post-migration state). The Test button can't replay a hashed key,
+                    // so surface a clear 409 instead of a generic 500.
+                    return Conflict(new { success = false, error = new { code = "KEY_HASHED", message = ex.Message } });
+                }
 
                 var (statusCode, responseBody) = await _service.ReceiveAsync(
                     endpoint.Slug, "POST", null, null,
