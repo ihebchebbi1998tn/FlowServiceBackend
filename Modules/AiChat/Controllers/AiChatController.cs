@@ -52,22 +52,41 @@ namespace MyApi.Modules.AiChat.Controllers
             int id,
             [FromQuery] bool includeMessages = true)
         {
+            var userId = GetCurrentUserId();
+
+            // Validate route param early — surfaces bad client calls clearly
+            if (id <= 0)
+            {
+                _logger.LogWarning(
+                    "GetConversation called with invalid id={ConversationId} by user {UserId}",
+                    id, userId);
+                return BadRequest(new { error = "INVALID_ID", message = $"Conversation id must be positive (got {id})." });
+            }
+
             try
             {
-                var userId = GetCurrentUserId();
+                _logger.LogDebug(
+                    "GetConversation start id={ConversationId} userId={UserId} includeMessages={IncludeMessages}",
+                    id, userId, includeMessages);
+
                 var conversation = await _aiChatService.GetConversationByIdAsync(id, userId, includeMessages);
 
                 if (conversation == null)
                 {
-                    return NotFound($"Conversation with ID {id} not found");
+                    _logger.LogInformation(
+                        "Conversation {ConversationId} not found for user {UserId} (deleted, wrong owner, or never existed)",
+                        id, userId);
+                    return NotFound(new { error = "NOT_FOUND", message = $"Conversation with ID {id} not found" });
                 }
 
                 return Ok(conversation);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error getting conversation {ConversationId}", id);
-                return StatusCode(500, "An error occurred while retrieving the conversation");
+                _logger.LogError(ex,
+                    "Error getting conversation {ConversationId} for user {UserId} (includeMessages={IncludeMessages})",
+                    id, userId, includeMessages);
+                return StatusCode(500, new { error = "INTERNAL_ERROR", message = "An error occurred while retrieving the conversation" });
             }
         }
 

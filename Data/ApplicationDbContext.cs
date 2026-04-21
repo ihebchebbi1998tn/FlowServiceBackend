@@ -170,12 +170,16 @@ namespace MyApi.Data
         
         // HR Module
         public DbSet<HrEmployeeSalaryConfig> HrEmployeeSalaryConfigs { get; set; }
-        public DbSet<HrAttendanceRecord> HrAttendanceRecords { get; set; }
-        public DbSet<HrAttendanceSettings> HrAttendanceSettings { get; set; }
         public DbSet<HrDepartment> HrDepartments { get; set; }
         public DbSet<HrLeaveBalance> HrLeaveBalances { get; set; }
         public DbSet<HrPayrollRun> HrPayrollRuns { get; set; }
         public DbSet<HrPayrollEntry> HrPayrollEntries { get; set; }
+        public DbSet<HrBonusCost> HrBonusCosts { get; set; }
+        public DbSet<HrAuditLog> HrAuditLogs { get; set; }
+        public DbSet<HrCnssRate> HrCnssRates { get; set; }
+        public DbSet<HrPublicHoliday> HrPublicHolidays { get; set; }
+        public DbSet<HrEmployeeDocument> HrEmployeeDocuments { get; set; }
+        public DbSet<HrSalaryHistory> HrSalaryHistory { get; set; }
 
         // Notifications Module
         public DbSet<Notification> Notifications { get; set; }
@@ -915,19 +919,6 @@ namespace MyApi.Data
                 entity.HasIndex(e => e.UserId).IsUnique();
             });
 
-            modelBuilder.Entity<HrAttendanceRecord>(entity =>
-            {
-                entity.ToTable("hr_attendance_records");
-                entity.HasKey(e => e.Id);
-                entity.HasIndex(e => new { e.UserId, e.Date });
-            });
-
-            modelBuilder.Entity<HrAttendanceSettings>(entity =>
-            {
-                entity.ToTable("hr_attendance_settings");
-                entity.HasKey(e => e.Id);
-            });
-
             modelBuilder.Entity<HrDepartment>(entity =>
             {
                 entity.ToTable("hr_departments");
@@ -954,6 +945,47 @@ namespace MyApi.Data
                 entity.ToTable("hr_payroll_entries");
                 entity.HasKey(e => e.Id);
                 entity.HasIndex(e => new { e.PayrollRunId, e.UserId });
+            });
+
+            modelBuilder.Entity<HrBonusCost>(entity =>
+            {
+                entity.ToTable("hr_bonus_costs");
+                entity.HasKey(e => e.Id);
+                entity.HasIndex(e => new { e.UserId, e.Year, e.Month });
+            });
+
+            modelBuilder.Entity<HrAuditLog>(entity =>
+            {
+                entity.ToTable("hr_audit_logs");
+                entity.HasKey(e => e.Id);
+                entity.HasIndex(e => new { e.UserId, e.EventType });
+            });
+
+            modelBuilder.Entity<HrCnssRate>(entity =>
+            {
+                entity.ToTable("hr_cnss_rates");
+                entity.HasKey(e => e.Id);
+            });
+
+            modelBuilder.Entity<HrPublicHoliday>(entity =>
+            {
+                entity.ToTable("hr_public_holidays");
+                entity.HasKey(e => e.Id);
+                entity.HasIndex(e => e.Date);
+            });
+
+            modelBuilder.Entity<HrEmployeeDocument>(entity =>
+            {
+                entity.ToTable("hr_employee_documents");
+                entity.HasKey(e => e.Id);
+                entity.HasIndex(e => e.UserId);
+            });
+
+            modelBuilder.Entity<HrSalaryHistory>(entity =>
+            {
+                entity.ToTable("hr_salary_history");
+                entity.HasKey(e => e.Id);
+                entity.HasIndex(e => e.UserId);
             });
         }
 

@@ -20,12 +20,14 @@ namespace MyApi.Modules.HR.Services
             _db = db;
         }
 
+        // ===========================================================================
+        // EMPLOYEES
+        // ===========================================================================
         public async Task<List<object>> GetEmployeesAsync()
         {
             var users = await _db.Users
                 .Where(u => u.IsActive && !u.IsDeleted)
-                .OrderBy(u => u.FirstName)
-                .ThenBy(u => u.LastName)
+                .OrderBy(u => u.FirstName).ThenBy(u => u.LastName)
                 .ToListAsync();
 
             var userIds = users.Select(u => u.Id).ToList();
@@ -35,11 +37,11 @@ namespace MyApi.Modules.HR.Services
 
             return users.Select(u =>
             {
-                var salaryConfig = salaryConfigs.FirstOrDefault(s => s.UserId == u.Id);
+                var cfg = salaryConfigs.FirstOrDefault(s => s.UserId == u.Id);
                 return new
                 {
                     user = MapSafeUser(u),
-                    salaryConfig = salaryConfig != null ? MapSalaryConfigDto(salaryConfig) : null
+                    salaryConfig = cfg != null ? MapSalaryConfigDto(cfg) : null
                 };
             }).Cast<object>().ToList();
         }
@@ -50,35 +52,53 @@ namespace MyApi.Modules.HR.Services
             if (user == null) throw new KeyNotFoundException("Employee not found");
 
             var salaryConfig = await _db.Set<HrEmployeeSalaryConfig>().FirstOrDefaultAsync(x => x.UserId == userId);
-            var recentAttendance = await _db.Set<HrAttendanceRecord>()
-                .Where(x => x.UserId == userId)
-                .OrderByDescending(x => x.Date)
-                .Take(31)
-                .ToListAsync();
             var leaves = await _db.Set<UserLeave>()
                 .Where(x => x.UserId == userId)
                 .OrderByDescending(x => x.StartDate)
                 .Take(20)
+                .ToListAsync();
+            var documents = await _db.Set<HrEmployeeDocument>()
+                .Where(x => x.UserId == userId && !x.IsDeleted)
+                .OrderByDescending(x => x.CreatedAt)
+                .Select(x => new HrEmployeeDocumentDto
+                {
+                    Id = x.Id, UserId = x.UserId, DocType = x.DocType, Title = x.Title,
+                    FileUrl = x.FileUrl, FileName = x.FileName, MimeType = x.MimeType,
+                    FileSize = x.FileSize, IssuedDate = x.IssuedDate, ExpiresAt = x.ExpiresAt,
+                    CreatedAt = x.CreatedAt
+                })
+                .ToListAsync();
+            var salaryHistory = await _db.Set<HrSalaryHistory>()
+                .Where(x => x.UserId == userId)
+                .OrderByDescending(x => x.EffectiveDate)
+                .Take(50)
+                .Select(x => new HrSalaryHistoryDto
+                {
+                    Id = x.Id, UserId = x.UserId, PreviousGross = x.PreviousGross,
+                    NewGross = x.NewGross, Currency = x.Currency, EffectiveDate = x.EffectiveDate,
+                    Reason = x.Reason, ChangedBy = x.ChangedBy
+                })
                 .ToListAsync();
 
             return new
             {
                 user = MapSafeUser(user),
                 salaryConfig = salaryConfig != null ? MapSalaryConfigDto(salaryConfig) : null,
-                attendance = recentAttendance.Select(MapAttendanceDto).ToList(),
-                leaves
+                leaves,
+                documents,
+                salaryHistory
             };
         }
 
-        public async Task<HrEmployeeSalaryConfigDto> UpsertSalaryConfigAsync(int userId, UpsertSalaryConfigDto dto)
+        public async Task<HrEmployeeSalaryConfigDto> UpsertSalaryConfigAsync(int userId, UpsertSalaryConfigDto dto, int actorUserId)
         {
             var entity = await _db.Set<HrEmployeeSalaryConfig>().FirstOrDefaultAsync(x => x.UserId == userId);
+            var isNew = entity == null;
+            var previousGross = entity?.GrossSalary;
+
             if (entity == null)
             {
-                entity = new HrEmployeeSalaryConfig
-                {
-                    UserId = userId
-                };
+                entity = new HrEmployeeSalaryConfig { UserId = userId };
                 _db.Set<HrEmployeeSalaryConfig>().Add(entity);
             }
 
@@ -103,155 +123,54 @@ namespace MyApi.Modules.HR.Services
             entity.EmergencyContactPhone = dto.EmergencyContactPhone ?? entity.EmergencyContactPhone;
             entity.UpdatedAt = DateTime.UtcNow;
 
+            // ---- Versioning: salary history + audit ----
+            var newGross = entity.GrossSalary;
+            if (isNew || (previousGross.HasValue && previousGross.Value != newGross) || (!previousGross.HasValue && dto.GrossSalary.HasValue))
+            {
+                _db.Set<HrSalaryHistory>().Add(new HrSalaryHistory
+                {
+                    UserId = userId,
+                    PreviousGross = previousGross,
+                    NewGross = newGross,
+                    EffectiveDate = DateTime.UtcNow,
+                    Reason = dto.SalaryChangeReason,
+                    ChangedBy = actorUserId
+                });
+                await LogAsync(userId, "salary_change", $"Salary set to {newGross:0.000} TND",
+                    new { previous = previousGross, current = newGross, reason = dto.SalaryChangeReason }, actorUserId);
+            }
+            else
+            {
+                await LogAsync(userId, "profile_updated", "Employee profile updated", null, actorUserId);
+            }
+
             await _db.SaveChangesAsync();
             return MapSalaryConfigDto(entity);
         }
 
-        public async Task<List<HrAttendanceDto>> GetAttendanceAsync(int month, int year, int? userId)
+        public async Task<List<HrSalaryHistoryDto>> GetSalaryHistoryAsync(int userId)
         {
-            var query = _db.Set<HrAttendanceRecord>()
-                .Where(x => x.Date.Month == month && x.Date.Year == year);
-
-            if (userId.HasValue)
-            {
-                query = query.Where(x => x.UserId == userId.Value);
-            }
-
-            var rows = await query.OrderBy(x => x.Date).ToListAsync();
-            return rows.Select(MapAttendanceDto).ToList();
-        }
-
-        public async Task<HrAttendanceDto> CreateAttendanceAsync(UpsertAttendanceDto dto)
-        {
-            if (!dto.UserId.HasValue || !dto.Date.HasValue)
-            {
-                throw new InvalidOperationException("userId and date are required");
-            }
-
-            var existing = await _db.Set<HrAttendanceRecord>()
-                .FirstOrDefaultAsync(x => x.UserId == dto.UserId.Value && x.Date == dto.Date.Value.Date);
-            if (existing != null)
-            {
-                existing.CheckIn = ParseTime(dto.CheckIn);
-                existing.CheckOut = ParseTime(dto.CheckOut);
-                existing.BreakDuration = dto.BreakDuration;
-                existing.Source = dto.Source ?? existing.Source;
-                existing.RawData = dto.RawData != null ? JsonSerializer.Serialize(dto.RawData) : existing.RawData;
-                existing.HoursWorked = dto.HoursWorked ?? existing.HoursWorked;
-                existing.OvertimeHours = dto.OvertimeHours ?? existing.OvertimeHours;
-                existing.Status = dto.Status ?? existing.Status;
-                existing.Notes = dto.Notes ?? existing.Notes;
-                existing.UpdatedAt = DateTime.UtcNow;
-                await _db.SaveChangesAsync();
-                return MapAttendanceDto(existing);
-            }
-            else
-            {
-                var entity = new HrAttendanceRecord
+            return await _db.Set<HrSalaryHistory>()
+                .Where(x => x.UserId == userId)
+                .OrderByDescending(x => x.EffectiveDate)
+                .Select(x => new HrSalaryHistoryDto
                 {
-                    UserId = dto.UserId.Value,
-                    Date = dto.Date.Value.Date,
-                    CheckIn = ParseTime(dto.CheckIn),
-                    CheckOut = ParseTime(dto.CheckOut),
-                    BreakDuration = dto.BreakDuration,
-                    Source = dto.Source ?? "manual",
-                    RawData = dto.RawData != null ? JsonSerializer.Serialize(dto.RawData) : null,
-                    HoursWorked = dto.HoursWorked,
-                    OvertimeHours = dto.OvertimeHours,
-                    Status = dto.Status ?? "present",
-                    Notes = dto.Notes,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
-                };
-
-                _db.Set<HrAttendanceRecord>().Add(entity);
-                await _db.SaveChangesAsync();
-                return MapAttendanceDto(entity);
-            }
+                    Id = x.Id, UserId = x.UserId, PreviousGross = x.PreviousGross,
+                    NewGross = x.NewGross, Currency = x.Currency, EffectiveDate = x.EffectiveDate,
+                    Reason = x.Reason, ChangedBy = x.ChangedBy
+                })
+                .ToListAsync();
         }
 
-        public async Task<HrAttendanceDto> UpdateAttendanceAsync(int id, UpsertAttendanceDto dto)
-        {
-            var entity = await _db.Set<HrAttendanceRecord>().FirstOrDefaultAsync(x => x.Id == id);
-            if (entity == null) throw new KeyNotFoundException("Attendance record not found");
-
-            if (dto.UserId.HasValue) entity.UserId = dto.UserId.Value;
-            if (dto.Date.HasValue) entity.Date = dto.Date.Value.Date;
-            if (dto.CheckIn != null) entity.CheckIn = ParseTime(dto.CheckIn);
-            if (dto.CheckOut != null) entity.CheckOut = ParseTime(dto.CheckOut);
-            if (dto.BreakDuration.HasValue) entity.BreakDuration = dto.BreakDuration;
-            entity.Source = dto.Source ?? entity.Source;
-            entity.RawData = dto.RawData != null ? JsonSerializer.Serialize(dto.RawData) : entity.RawData;
-            entity.HoursWorked = dto.HoursWorked ?? entity.HoursWorked;
-            entity.OvertimeHours = dto.OvertimeHours ?? entity.OvertimeHours;
-            entity.Status = dto.Status ?? entity.Status;
-            entity.Notes = dto.Notes ?? entity.Notes;
-            entity.UpdatedAt = DateTime.UtcNow;
-
-            await _db.SaveChangesAsync();
-            return MapAttendanceDto(entity);
-        }
-
-        public async Task<object> ImportAttendanceAsync(ImportAttendanceDto dto)
-        {
-            var imported = 0;
-            var errors = new List<object>();
-
-            foreach (var row in dto.Rows)
-            {
-                try
-                {
-                    await CreateAttendanceAsync(row);
-                    imported++;
-                }
-                catch (Exception ex)
-                {
-                    errors.Add(new { row.UserId, row.Date, error = ex.Message });
-                }
-            }
-
-            return new { imported, errors };
-        }
-
-        public async Task<HrAttendanceSettingsDto> GetAttendanceSettingsAsync()
-        {
-            var entity = await _db.Set<HrAttendanceSettings>().FirstOrDefaultAsync();
-            if (entity == null)
-            {
-                entity = new HrAttendanceSettings();
-                _db.Set<HrAttendanceSettings>().Add(entity);
-                await _db.SaveChangesAsync();
-            }
-            return MapAttendanceSettings(entity);
-        }
-
-        public async Task<HrAttendanceSettingsDto> UpdateAttendanceSettingsAsync(UpsertAttendanceSettingsDto dto)
-        {
-            var entity = await _db.Set<HrAttendanceSettings>().FirstOrDefaultAsync();
-            if (entity == null)
-            {
-                entity = new HrAttendanceSettings();
-                _db.Set<HrAttendanceSettings>().Add(entity);
-            }
-
-            if (dto.WeekendDays != null) entity.WeekendDays = JsonSerializer.Serialize(dto.WeekendDays);
-            if (dto.StandardHoursPerDay.HasValue) entity.StandardHoursPerDay = dto.StandardHoursPerDay.Value;
-            if (dto.OvertimeThreshold.HasValue) entity.OvertimeThreshold = dto.OvertimeThreshold.Value;
-            if (dto.OvertimeMultiplier.HasValue) entity.OvertimeMultiplier = dto.OvertimeMultiplier.Value;
-            if (!string.IsNullOrWhiteSpace(dto.RoundingMethod)) entity.RoundingMethod = dto.RoundingMethod;
-            if (!string.IsNullOrWhiteSpace(dto.CalculationMethod)) entity.CalculationMethod = dto.CalculationMethod;
-            if (dto.LateThresholdMinutes.HasValue) entity.LateThresholdMinutes = dto.LateThresholdMinutes.Value;
-            if (dto.Holidays != null) entity.Holidays = JsonSerializer.Serialize(dto.Holidays);
-            entity.UpdatedAt = DateTime.UtcNow;
-
-            await _db.SaveChangesAsync();
-            return MapAttendanceSettings(entity);
-        }
-
+        // ===========================================================================
+        // LEAVES (HR-owned; uses Planning's UserLeave for actual events)
+        // ===========================================================================
         public async Task<List<HrLeaveBalanceDto>> GetLeaveBalancesAsync(int year)
         {
             var balances = await _db.Set<HrLeaveBalance>().Where(x => x.Year == year).ToListAsync();
-            var leaves = await _db.Set<UserLeave>().Where(x => x.StartDate.Year == year || x.EndDate.Year == year).ToListAsync();
+            var leaves = await _db.Set<UserLeave>()
+                .Where(x => x.StartDate.Year == year || x.EndDate.Year == year)
+                .ToListAsync();
 
             foreach (var bal in balances)
             {
@@ -264,12 +183,8 @@ namespace MyApi.Modules.HR.Services
 
             return balances.Select(x => new HrLeaveBalanceDto
             {
-                UserId = x.UserId,
-                LeaveType = x.LeaveType,
-                AnnualAllowance = x.AnnualAllowance,
-                Used = x.Used,
-                Pending = x.Pending,
-                Remaining = x.Remaining
+                UserId = x.UserId, LeaveType = x.LeaveType, AnnualAllowance = x.AnnualAllowance,
+                Used = x.Used, Pending = x.Pending, Remaining = x.Remaining
             }).ToList();
         }
 
@@ -279,66 +194,74 @@ namespace MyApi.Modules.HR.Services
                 .FirstOrDefaultAsync(x => x.UserId == userId && x.Year == dto.Year && x.LeaveType == dto.LeaveType);
             if (balance == null)
             {
-                balance = new HrLeaveBalance
-                {
-                    UserId = userId,
-                    Year = dto.Year,
-                    LeaveType = dto.LeaveType
-                };
+                balance = new HrLeaveBalance { UserId = userId, Year = dto.Year, LeaveType = dto.LeaveType };
                 _db.Set<HrLeaveBalance>().Add(balance);
             }
-
             balance.AnnualAllowance = dto.AnnualAllowance;
             balance.UpdatedAt = DateTime.UtcNow;
             await _db.SaveChangesAsync();
-
             return await GetLeaveBalancesAsync(dto.Year);
         }
 
+        // ===========================================================================
+        // PAYROLL (Tunisia: Gross + Allowances + Bonuses → CNSS, IRPP, CSS → Net)
+        // ===========================================================================
         public async Task<HrPayrollRunDto> GeneratePayrollRunAsync(CreatePayrollRunDto dto, int createdByUserId)
         {
+            var rate = await GetActiveCnssRateEntityAsync();
+            var brackets = ParseBrackets(rate.IrppBracketsJson);
+
             var run = new HrPayrollRun
             {
-                Month = dto.Month,
-                Year = dto.Year,
-                Status = "draft",
-                CreatedBy = createdByUserId,
-                CreatedAt = DateTime.UtcNow
+                Month = dto.Month, Year = dto.Year, Status = "draft",
+                CreatedBy = createdByUserId, CreatedAt = DateTime.UtcNow
             };
             _db.Set<HrPayrollRun>().Add(run);
             await _db.SaveChangesAsync();
 
             var users = await _db.Users.Where(u => u.IsActive && !u.IsDeleted).ToListAsync();
-            var salaryConfigs = await _db.Set<HrEmployeeSalaryConfig>().Where(x => users.Select(u => u.Id).Contains(x.UserId)).ToListAsync();
-            var attendances = await _db.Set<HrAttendanceRecord>()
-                .Where(x => x.Date.Month == dto.Month && x.Date.Year == dto.Year)
-                .ToListAsync();
+            var userIds = users.Select(u => u.Id).ToList();
+            var salaryConfigs = await _db.Set<HrEmployeeSalaryConfig>().Where(x => userIds.Contains(x.UserId)).ToListAsync();
             var leaves = await _db.Set<UserLeave>()
                 .Where(x => (x.StartDate.Month == dto.Month && x.StartDate.Year == dto.Year) || (x.EndDate.Month == dto.Month && x.EndDate.Year == dto.Year))
+                .ToListAsync();
+            var bonuses = await _db.Set<HrBonusCost>()
+                .Where(x => !x.IsDeleted && x.Year == dto.Year && x.Month == dto.Month && x.AffectsPayroll)
                 .ToListAsync();
 
             foreach (var user in users)
             {
-                var config = salaryConfigs.FirstOrDefault(x => x.UserId == user.Id);
-                var gross = config?.GrossSalary ?? 0;
-                var overtimeHours = attendances.Where(x => x.UserId == user.Id).Sum(x => x.OvertimeHours ?? 0);
-                var totalHours = attendances.Where(x => x.UserId == user.Id).Sum(x => x.HoursWorked ?? 0);
+                var cfg = salaryConfigs.FirstOrDefault(x => x.UserId == user.Id);
+                var baseGross = cfg?.GrossSalary ?? 0m;
+
+                var userBonuses = bonuses.Where(b => b.UserId == user.Id).ToList();
+                var allowances = userBonuses.Where(b => b.Kind == "allowance").Sum(b => b.Amount);
+                var bonusAmount = userBonuses.Where(b => b.Kind == "bonus").Sum(b => b.Amount);
+                var subjectExtra = userBonuses.Where(b => b.SubjectToCnss).Sum(b => b.Amount);
+
+                var grossSubjectToCnss = baseGross + subjectExtra;
+                var grossTotal = baseGross + allowances + bonusAmount;
+
+                var cnssBase = rate.SalaryCeiling > 0 ? Math.Min(grossSubjectToCnss, rate.SalaryCeiling) : grossSubjectToCnss;
+                var cnss = Math.Round(cnssBase * rate.EmployeeRate, 3);
+                var employerCnss = Math.Round(cnssBase * rate.EmployerRate, 3);
+
+                var taxableGross = grossTotal - cnss;
+                var abattement = (cfg?.IsHeadOfFamily ?? false ? rate.AbattementHeadOfFamily : 0m)
+                                 + (cfg?.ChildrenCount ?? 0) * rate.AbattementPerChild;
+                var taxableBase = Math.Max(0, taxableGross - abattement);
+                var irpp = Math.Round(ComputeIrpp(taxableBase, brackets), 3);
+                var css = Math.Round(taxableGross * rate.CssRate, 3);
                 var leaveDays = leaves.Where(x => x.UserId == user.Id && x.Status == "approved")
                     .Sum(x => (decimal)(x.EndDate.Date - x.StartDate.Date).TotalDays + 1);
 
-                var cnss = Math.Round(gross * 0.0918m, 3);
-                var taxableGross = gross - cnss;
-                var abattement = Math.Round((config?.IsHeadOfFamily ?? false ? 300m : 0m) + (config?.ChildrenCount ?? 0) * 100m, 3);
-                var taxableBase = Math.Max(0, taxableGross - abattement);
-                var irpp = Math.Round(taxableBase * 0.15m, 3);
-                var css = Math.Round(gross * 0.01m, 3);
-                var net = gross - cnss - irpp - css - (config?.CustomDeductions ?? 0m);
+                var net = grossTotal - cnss - irpp - css - (cfg?.CustomDeductions ?? 0m);
 
                 _db.Set<HrPayrollEntry>().Add(new HrPayrollEntry
                 {
                     PayrollRunId = run.Id,
                     UserId = user.Id,
-                    GrossSalary = gross,
+                    GrossSalary = grossTotal,
                     Cnss = cnss,
                     TaxableGross = taxableGross,
                     Abattement = abattement,
@@ -346,20 +269,27 @@ namespace MyApi.Modules.HR.Services
                     Irpp = irpp,
                     Css = css,
                     NetSalary = Math.Round(net, 3),
-                    WorkedDays = Math.Round(totalHours / 8m, 2),
-                    TotalHours = totalHours,
-                    OvertimeHours = overtimeHours,
+                    WorkedDays = 0,
+                    TotalHours = 0,
+                    OvertimeHours = 0,
                     LeaveDays = leaveDays,
                     Details = JsonSerializer.Serialize(new
                     {
-                        formula = "default_tn_v1",
-                        customDeductions = config?.CustomDeductions ?? 0m
+                        formula = "tn_v2",
+                        baseGross,
+                        allowances,
+                        bonuses = bonusAmount,
+                        employerCnss,
+                        cnssBase,
+                        rate = new { rate.EmployeeRate, rate.EmployerRate, rate.CssRate },
+                        customDeductions = cfg?.CustomDeductions ?? 0m
                     }),
                     CreatedAt = DateTime.UtcNow
                 });
             }
 
             await _db.SaveChangesAsync();
+            await LogAsync(0, "payroll_generated", $"Payroll run {dto.Month}/{dto.Year} generated", new { runId = run.Id, dto.Month, dto.Year }, createdByUserId);
             return await GetPayrollRunAsync(run.Id);
         }
 
@@ -367,8 +297,7 @@ namespace MyApi.Modules.HR.Services
         {
             var runs = await _db.Set<HrPayrollRun>()
                 .Where(x => x.Year == year)
-                .OrderByDescending(x => x.Year)
-                .ThenByDescending(x => x.Month)
+                .OrderByDescending(x => x.Year).ThenByDescending(x => x.Month)
                 .ToListAsync();
 
             var runIds = runs.Select(x => x.Id).ToList();
@@ -403,13 +332,14 @@ namespace MyApi.Modules.HR.Services
             return MapPayrollRunDto(run, entries, userMap);
         }
 
-        public async Task<HrPayrollRunDto> ConfirmPayrollRunAsync(int id)
+        public async Task<HrPayrollRunDto> ConfirmPayrollRunAsync(int id, int actorUserId)
         {
             var run = await _db.Set<HrPayrollRun>().FirstOrDefaultAsync(x => x.Id == id);
             if (run == null) throw new KeyNotFoundException("Payroll run not found");
             run.Status = "confirmed";
             run.ConfirmedAt = DateTime.UtcNow;
             await _db.SaveChangesAsync();
+            await LogAsync(0, "payroll_confirmed", $"Payroll run {run.Month}/{run.Year} confirmed", new { runId = id }, actorUserId);
             return await GetPayrollRunAsync(id);
         }
 
@@ -417,7 +347,6 @@ namespace MyApi.Modules.HR.Services
         {
             var entry = await _db.Set<HrPayrollEntry>().FirstOrDefaultAsync(x => x.Id == entryId);
             if (entry == null) throw new KeyNotFoundException("Payroll entry not found");
-
             var run = await _db.Set<HrPayrollRun>().FirstOrDefaultAsync(x => x.Id == entry.PayrollRunId);
             var user = await _db.Users.FirstOrDefaultAsync(x => x.Id == entry.UserId);
 
@@ -425,56 +354,38 @@ namespace MyApi.Modules.HR.Services
             {
                 entryId = entry.Id,
                 payrollRunId = entry.PayrollRunId,
-                month = run?.Month,
-                year = run?.Year,
+                month = run?.Month, year = run?.Year,
                 userId = entry.UserId,
                 userName = user != null ? $"{user.FirstName} {user.LastName}".Trim() : string.Empty,
                 breakdown = new
                 {
-                    entry.GrossSalary,
-                    entry.Cnss,
-                    entry.TaxableGross,
-                    entry.Abattement,
-                    entry.TaxableBase,
-                    entry.Irpp,
-                    entry.Css,
-                    entry.NetSalary,
-                    entry.WorkedDays,
-                    entry.TotalHours,
-                    entry.OvertimeHours,
-                    entry.LeaveDays
+                    entry.GrossSalary, entry.Cnss, entry.TaxableGross, entry.Abattement,
+                    entry.TaxableBase, entry.Irpp, entry.Css, entry.NetSalary, entry.LeaveDays
                 },
                 details = ParseJsonObject(entry.Details)
             };
         }
 
+        // ===========================================================================
+        // DEPARTMENTS
+        // ===========================================================================
         public async Task<List<HrDepartmentDto>> GetDepartmentsAsync()
         {
             var rows = await _db.Set<HrDepartment>()
                 .Where(x => !x.IsDeleted)
-                .OrderBy(x => x.Position ?? int.MaxValue)
-                .ThenBy(x => x.Name)
+                .OrderBy(x => x.Position ?? int.MaxValue).ThenBy(x => x.Name)
                 .ToListAsync();
             return rows.Select(MapDepartmentDto).ToList();
         }
 
         public async Task<HrDepartmentDto> CreateDepartmentAsync(UpsertDepartmentDto dto)
         {
-            if (string.IsNullOrWhiteSpace(dto.Name))
-            {
-                throw new InvalidOperationException("Department name is required");
-            }
-
+            if (string.IsNullOrWhiteSpace(dto.Name)) throw new InvalidOperationException("Department name is required");
             var row = new HrDepartment
             {
-                Name = dto.Name.Trim(),
-                Code = dto.Code,
-                ParentId = dto.ParentId,
-                ManagerId = dto.ManagerId,
-                Description = dto.Description,
-                Position = dto.Position,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
+                Name = dto.Name.Trim(), Code = dto.Code, ParentId = dto.ParentId,
+                ManagerId = dto.ManagerId, Description = dto.Description, Position = dto.Position,
+                CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow
             };
             _db.Set<HrDepartment>().Add(row);
             await _db.SaveChangesAsync();
@@ -485,7 +396,6 @@ namespace MyApi.Modules.HR.Services
         {
             var row = await _db.Set<HrDepartment>().FirstOrDefaultAsync(x => x.Id == id && !x.IsDeleted);
             if (row == null) throw new KeyNotFoundException("Department not found");
-
             if (!string.IsNullOrWhiteSpace(dto.Name)) row.Name = dto.Name.Trim();
             if (dto.Code != null) row.Code = dto.Code;
             if (dto.ParentId.HasValue) row.ParentId = dto.ParentId;
@@ -506,155 +416,477 @@ namespace MyApi.Modules.HR.Services
             await _db.SaveChangesAsync();
         }
 
+        // ===========================================================================
+        // BONUSES & COSTS
+        // ===========================================================================
+        public async Task<List<HrBonusCostDto>> GetBonusCostsAsync(int? userId, int? year, int? month, string? kind)
+        {
+            var q = _db.Set<HrBonusCost>().Where(x => !x.IsDeleted);
+            if (userId.HasValue) q = q.Where(x => x.UserId == userId.Value);
+            if (year.HasValue) q = q.Where(x => x.Year == year.Value);
+            if (month.HasValue) q = q.Where(x => x.Month == month.Value);
+            if (!string.IsNullOrWhiteSpace(kind)) q = q.Where(x => x.Kind == kind);
+
+            var rows = await q.OrderByDescending(x => x.Year).ThenByDescending(x => x.Month).ThenByDescending(x => x.CreatedAt).ToListAsync();
+            var ids = rows.Select(r => r.UserId).Distinct().ToList();
+            var users = await _db.Users.Where(u => ids.Contains(u.Id)).ToDictionaryAsync(u => u.Id, u => $"{u.FirstName} {u.LastName}".Trim());
+
+            return rows.Select(r => new HrBonusCostDto
+            {
+                Id = r.Id, UserId = r.UserId, UserName = users.ContainsKey(r.UserId) ? users[r.UserId] : null,
+                Kind = r.Kind, Category = r.Category, Label = r.Label, Amount = r.Amount,
+                Frequency = r.Frequency, Year = r.Year, Month = r.Month,
+                AffectsPayroll = r.AffectsPayroll, SubjectToCnss = r.SubjectToCnss,
+                Notes = r.Notes, CreatedAt = r.CreatedAt
+            }).ToList();
+        }
+
+        public async Task<HrBonusCostDto> CreateBonusCostAsync(UpsertBonusCostDto dto, int actorUserId)
+        {
+            var row = new HrBonusCost
+            {
+                UserId = dto.UserId, Kind = dto.Kind, Category = dto.Category, Label = dto.Label,
+                Amount = dto.Amount, Frequency = dto.Frequency, Year = dto.Year, Month = dto.Month,
+                AffectsPayroll = dto.AffectsPayroll, SubjectToCnss = dto.SubjectToCnss,
+                Notes = dto.Notes, CreatedBy = actorUserId
+            };
+            _db.Set<HrBonusCost>().Add(row);
+            await _db.SaveChangesAsync();
+            await LogAsync(dto.UserId, "bonus_added", $"{dto.Kind}: {dto.Label} ({dto.Amount:0.000})", dto, actorUserId);
+            return (await GetBonusCostsAsync(dto.UserId, dto.Year, dto.Month, null)).First(b => b.Id == row.Id);
+        }
+
+        public async Task<HrBonusCostDto> UpdateBonusCostAsync(int id, UpsertBonusCostDto dto, int actorUserId)
+        {
+            var row = await _db.Set<HrBonusCost>().FirstOrDefaultAsync(x => x.Id == id && !x.IsDeleted);
+            if (row == null) throw new KeyNotFoundException("Bonus/cost not found");
+            row.UserId = dto.UserId; row.Kind = dto.Kind; row.Category = dto.Category;
+            row.Label = dto.Label; row.Amount = dto.Amount; row.Frequency = dto.Frequency;
+            row.Year = dto.Year; row.Month = dto.Month; row.AffectsPayroll = dto.AffectsPayroll;
+            row.SubjectToCnss = dto.SubjectToCnss; row.Notes = dto.Notes; row.UpdatedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync();
+            await LogAsync(dto.UserId, "bonus_updated", $"{dto.Kind}: {dto.Label}", dto, actorUserId);
+            return (await GetBonusCostsAsync(dto.UserId, dto.Year, dto.Month, null)).First(b => b.Id == row.Id);
+        }
+
+        public async Task DeleteBonusCostAsync(int id, int actorUserId)
+        {
+            var row = await _db.Set<HrBonusCost>().FirstOrDefaultAsync(x => x.Id == id && !x.IsDeleted);
+            if (row == null) throw new KeyNotFoundException("Bonus/cost not found");
+            row.IsDeleted = true;
+            row.UpdatedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync();
+            await LogAsync(row.UserId, "bonus_removed", row.Label, new { id }, actorUserId);
+        }
+
+        // ===========================================================================
+        // CNSS RATES
+        // ===========================================================================
+        public async Task<List<HrCnssRateDto>> GetCnssRatesAsync()
+        {
+            var rows = await _db.Set<HrCnssRate>().OrderByDescending(x => x.EffectiveFrom).ToListAsync();
+            return rows.Select(MapCnssRateDto).ToList();
+        }
+
+        public async Task<HrCnssRateDto> GetActiveCnssRateAsync()
+        {
+            var row = await GetActiveCnssRateEntityAsync();
+            return MapCnssRateDto(row);
+        }
+
+        private async Task<HrCnssRate> GetActiveCnssRateEntityAsync()
+        {
+            var row = await _db.Set<HrCnssRate>()
+                .Where(x => x.IsActive)
+                .OrderByDescending(x => x.EffectiveFrom)
+                .FirstOrDefaultAsync();
+            if (row == null)
+            {
+                // Seed defaults (Tunisia 2025)
+                row = new HrCnssRate
+                {
+                    EffectiveFrom = DateTime.UtcNow,
+                    EmployeeRate = 0.0918m,
+                    EmployerRate = 0.1657m,
+                    CssRate = 0.01m,
+                    AbattementHeadOfFamily = 150m,
+                    AbattementPerChild = 100m,
+                    IrppBracketsJson = JsonSerializer.Serialize(new[]
+                    {
+                        new { from = 0m, to = (decimal?)416.67m, rate = 0m },
+                        new { from = 416.67m, to = (decimal?)833.33m, rate = 0.15m },
+                        new { from = 833.33m, to = (decimal?)1666.67m, rate = 0.25m },
+                        new { from = 1666.67m, to = (decimal?)2500m, rate = 0.30m },
+                        new { from = 2500m, to = (decimal?)3333.33m, rate = 0.33m },
+                        new { from = 3333.33m, to = (decimal?)4166.67m, rate = 0.36m },
+                        new { from = 4166.67m, to = (decimal?)5833.33m, rate = 0.38m },
+                        new { from = 5833.33m, to = (decimal?)null, rate = 0.40m }
+                    }),
+                    IsActive = true
+                };
+                _db.Set<HrCnssRate>().Add(row);
+                await _db.SaveChangesAsync();
+            }
+            return row;
+        }
+
+        public async Task<HrCnssRateDto> UpsertCnssRateAsync(UpsertCnssRateDto dto, int actorUserId)
+        {
+            // Deactivate any existing active rate
+            var existingActives = await _db.Set<HrCnssRate>().Where(x => x.IsActive).ToListAsync();
+            foreach (var r in existingActives) r.IsActive = false;
+
+            var row = new HrCnssRate
+            {
+                EffectiveFrom = dto.EffectiveFrom,
+                EmployeeRate = dto.EmployeeRate,
+                EmployerRate = dto.EmployerRate,
+                CssRate = dto.CssRate,
+                SalaryCeiling = dto.SalaryCeiling,
+                AbattementHeadOfFamily = dto.AbattementHeadOfFamily,
+                AbattementPerChild = dto.AbattementPerChild,
+                IrppBracketsJson = JsonSerializer.Serialize(dto.IrppBrackets),
+                IsActive = dto.IsActive,
+                Notes = dto.Notes
+            };
+            _db.Set<HrCnssRate>().Add(row);
+            await _db.SaveChangesAsync();
+            await LogAsync(0, "cnss_rate_changed", "CNSS rates updated", dto, actorUserId);
+            return MapCnssRateDto(row);
+        }
+
+        // ===========================================================================
+        // PUBLIC HOLIDAYS
+        // ===========================================================================
+        public async Task<List<HrPublicHolidayDto>> GetPublicHolidaysAsync(int? year)
+        {
+            var q = _db.Set<HrPublicHoliday>().AsQueryable();
+            if (year.HasValue) q = q.Where(x => x.Date.Year == year.Value || x.IsRecurring);
+            var rows = await q.OrderBy(x => x.Date).ToListAsync();
+            return rows.Select(MapHolidayDto).ToList();
+        }
+
+        public async Task<HrPublicHolidayDto> CreatePublicHolidayAsync(UpsertPublicHolidayDto dto)
+        {
+            var row = new HrPublicHoliday { Date = dto.Date.Date, Name = dto.Name, Category = dto.Category, IsRecurring = dto.IsRecurring };
+            _db.Set<HrPublicHoliday>().Add(row);
+            await _db.SaveChangesAsync();
+            return MapHolidayDto(row);
+        }
+
+        public async Task<HrPublicHolidayDto> UpdatePublicHolidayAsync(int id, UpsertPublicHolidayDto dto)
+        {
+            var row = await _db.Set<HrPublicHoliday>().FirstOrDefaultAsync(x => x.Id == id);
+            if (row == null) throw new KeyNotFoundException("Holiday not found");
+            row.Date = dto.Date.Date; row.Name = dto.Name; row.Category = dto.Category; row.IsRecurring = dto.IsRecurring;
+            await _db.SaveChangesAsync();
+            return MapHolidayDto(row);
+        }
+
+        public async Task DeletePublicHolidayAsync(int id)
+        {
+            var row = await _db.Set<HrPublicHoliday>().FirstOrDefaultAsync(x => x.Id == id);
+            if (row == null) throw new KeyNotFoundException("Holiday not found");
+            _db.Set<HrPublicHoliday>().Remove(row);
+            await _db.SaveChangesAsync();
+        }
+
+        // ===========================================================================
+        // EMPLOYEE DOCUMENTS
+        // ===========================================================================
+        public async Task<List<HrEmployeeDocumentDto>> GetEmployeeDocumentsAsync(int userId)
+        {
+            return await _db.Set<HrEmployeeDocument>()
+                .Where(x => x.UserId == userId && !x.IsDeleted)
+                .OrderByDescending(x => x.CreatedAt)
+                .Select(x => new HrEmployeeDocumentDto
+                {
+                    Id = x.Id, UserId = x.UserId, DocType = x.DocType, Title = x.Title,
+                    FileUrl = x.FileUrl, FileName = x.FileName, MimeType = x.MimeType,
+                    FileSize = x.FileSize, IssuedDate = x.IssuedDate, ExpiresAt = x.ExpiresAt,
+                    CreatedAt = x.CreatedAt
+                })
+                .ToListAsync();
+        }
+
+        public async Task<HrEmployeeDocumentDto> CreateEmployeeDocumentAsync(UpsertEmployeeDocumentDto dto, int actorUserId)
+        {
+            var row = new HrEmployeeDocument
+            {
+                UserId = dto.UserId, DocType = dto.DocType, Title = dto.Title, FileUrl = dto.FileUrl,
+                FileName = dto.FileName, MimeType = dto.MimeType, FileSize = dto.FileSize,
+                IssuedDate = dto.IssuedDate, ExpiresAt = dto.ExpiresAt, UploadedBy = actorUserId
+            };
+            _db.Set<HrEmployeeDocument>().Add(row);
+            await _db.SaveChangesAsync();
+            await LogAsync(dto.UserId, "document_uploaded", $"{dto.DocType}: {dto.Title}", new { dto.DocType, dto.Title }, actorUserId);
+            return new HrEmployeeDocumentDto
+            {
+                Id = row.Id, UserId = row.UserId, DocType = row.DocType, Title = row.Title,
+                FileUrl = row.FileUrl, FileName = row.FileName, MimeType = row.MimeType,
+                FileSize = row.FileSize, IssuedDate = row.IssuedDate, ExpiresAt = row.ExpiresAt,
+                CreatedAt = row.CreatedAt
+            };
+        }
+
+        public async Task DeleteEmployeeDocumentAsync(int id)
+        {
+            var row = await _db.Set<HrEmployeeDocument>().FirstOrDefaultAsync(x => x.Id == id && !x.IsDeleted);
+            if (row == null) throw new KeyNotFoundException("Document not found");
+            row.IsDeleted = true;
+            await _db.SaveChangesAsync();
+        }
+
+        // ===========================================================================
+        // AUDIT LOG
+        // ===========================================================================
+        public async Task<List<HrAuditLogDto>> GetAuditLogAsync(int? userId, int take = 100)
+        {
+            var q = _db.Set<HrAuditLog>().AsQueryable();
+            if (userId.HasValue) q = q.Where(x => x.UserId == userId.Value);
+            var rows = await q.OrderByDescending(x => x.CreatedAt).Take(Math.Clamp(take, 1, 500)).ToListAsync();
+            return rows.Select(x => new HrAuditLogDto
+            {
+                Id = x.Id, UserId = x.UserId, EventType = x.EventType, Description = x.Description,
+                Payload = ParseJsonObject(x.Payload), ActorUserId = x.ActorUserId, ActorName = x.ActorName,
+                CreatedAt = x.CreatedAt
+            }).ToList();
+        }
+
+        private async Task LogAsync(int userId, string eventType, string? description, object? payload, int actorUserId)
+        {
+            var actor = actorUserId > 0 ? await _db.Users.FirstOrDefaultAsync(u => u.Id == actorUserId) : null;
+            _db.Set<HrAuditLog>().Add(new HrAuditLog
+            {
+                UserId = userId,
+                EventType = eventType,
+                Description = description,
+                Payload = payload != null ? JsonSerializer.Serialize(payload) : null,
+                ActorUserId = actorUserId > 0 ? actorUserId : (int?)null,
+                ActorName = actor != null ? $"{actor.FirstName} {actor.LastName}".Trim() : null,
+                CreatedAt = DateTime.UtcNow
+            });
+            // Caller is responsible for SaveChangesAsync (we batch in same tx)
+        }
+
+        // ===========================================================================
+        // REPORTS
+        // ===========================================================================
+        public async Task<List<HrEmployeeCostDto>> GetEmployeeCostReportAsync(int year, int? month)
+        {
+            var users = await _db.Users.Where(u => u.IsActive && !u.IsDeleted).ToListAsync();
+            var userIds = users.Select(u => u.Id).ToList();
+            var configs = await _db.Set<HrEmployeeSalaryConfig>().Where(x => userIds.Contains(x.UserId)).ToListAsync();
+            var rate = await GetActiveCnssRateEntityAsync();
+
+            var bonusQ = _db.Set<HrBonusCost>().Where(x => !x.IsDeleted && x.Year == year);
+            if (month.HasValue) bonusQ = bonusQ.Where(x => x.Month == month.Value);
+            var bonuses = await bonusQ.ToListAsync();
+
+            var monthsCount = month.HasValue ? 1 : 12;
+            return users.Select(u =>
+            {
+                var cfg = configs.FirstOrDefault(c => c.UserId == u.Id);
+                var baseGross = (cfg?.GrossSalary ?? 0m) * monthsCount;
+                var b = bonuses.Where(x => x.UserId == u.Id).ToList();
+                var bonusAmt = b.Where(x => x.Kind == "bonus").Sum(x => x.Amount);
+                var allowanceAmt = b.Where(x => x.Kind == "allowance").Sum(x => x.Amount);
+                var subjectExtra = b.Where(x => x.SubjectToCnss).Sum(x => x.Amount);
+                var cnssBase = baseGross + subjectExtra;
+                var employerCnss = Math.Round(cnssBase * rate.EmployerRate, 3);
+
+                return new HrEmployeeCostDto
+                {
+                    UserId = u.Id,
+                    UserName = $"{u.FirstName} {u.LastName}".Trim(),
+                    Department = cfg?.Department,
+                    Gross = baseGross,
+                    Bonuses = bonusAmt,
+                    Allowances = allowanceAmt,
+                    EmployerCnss = employerCnss,
+                    TotalCost = baseGross + bonusAmt + allowanceAmt + employerCnss
+                };
+            }).ToList();
+        }
+
+        public async Task<HrCnssMonthlyDeclarationDto> GetCnssDeclarationAsync(int year, int month)
+        {
+            var rate = await GetActiveCnssRateEntityAsync();
+            var users = await _db.Users.Where(u => u.IsActive && !u.IsDeleted).ToListAsync();
+            var userIds = users.Select(u => u.Id).ToList();
+            var configs = await _db.Set<HrEmployeeSalaryConfig>().Where(x => userIds.Contains(x.UserId)).ToListAsync();
+            var bonuses = await _db.Set<HrBonusCost>()
+                .Where(x => !x.IsDeleted && x.Year == year && x.Month == month && x.SubjectToCnss)
+                .ToListAsync();
+
+            var lines = new List<HrCnssEmployeeLineDto>();
+            decimal totalSubject = 0, totalEmpCnss = 0, totalErCnss = 0, totalCss = 0;
+
+            foreach (var u in users)
+            {
+                var cfg = configs.FirstOrDefault(c => c.UserId == u.Id);
+                if (cfg == null) continue;
+                var extra = bonuses.Where(b => b.UserId == u.Id).Sum(b => b.Amount);
+                var subject = cfg.GrossSalary + extra;
+                var capped = rate.SalaryCeiling > 0 ? Math.Min(subject, rate.SalaryCeiling) : subject;
+                var emp = Math.Round(capped * rate.EmployeeRate, 3);
+                var er = Math.Round(capped * rate.EmployerRate, 3);
+                var css = Math.Round((capped - emp) * rate.CssRate, 3);
+
+                lines.Add(new HrCnssEmployeeLineDto
+                {
+                    UserId = u.Id,
+                    UserName = $"{u.FirstName} {u.LastName}".Trim(),
+                    CnssNumber = cfg.CnssNumber,
+                    SalarySubject = subject,
+                    EmployeeCnss = emp,
+                    EmployerCnss = er,
+                    Css = css
+                });
+                totalSubject += subject; totalEmpCnss += emp; totalErCnss += er; totalCss += css;
+            }
+
+            return new HrCnssMonthlyDeclarationDto
+            {
+                Year = year, Month = month,
+                TotalSalarySubject = totalSubject,
+                TotalEmployeeCnss = totalEmpCnss,
+                TotalEmployerCnss = totalErCnss,
+                TotalCss = totalCss,
+                Lines = lines
+            };
+        }
+
+        // ===========================================================================
+        // MAPPERS / HELPERS
+        // ===========================================================================
+        private static List<(decimal from, decimal? to, decimal rate)> ParseBrackets(string? json)
+        {
+            var defaults = new List<(decimal, decimal?, decimal)>
+            {
+                (0m, 416.67m, 0m), (416.67m, 833.33m, 0.15m), (833.33m, 1666.67m, 0.25m),
+                (1666.67m, 2500m, 0.30m), (2500m, 3333.33m, 0.33m), (3333.33m, 4166.67m, 0.36m),
+                (4166.67m, 5833.33m, 0.38m), (5833.33m, null, 0.40m)
+            };
+            if (string.IsNullOrWhiteSpace(json)) return defaults;
+            try
+            {
+                var doc = JsonDocument.Parse(json);
+                var list = new List<(decimal, decimal?, decimal)>();
+                foreach (var el in doc.RootElement.EnumerateArray())
+                {
+                    decimal from = 0, rate = 0; decimal? to = null;
+                    if (el.TryGetProperty("from", out var f)) from = f.GetDecimal();
+                    if (el.TryGetProperty("rate", out var r)) rate = r.GetDecimal();
+                    if (el.TryGetProperty("to", out var t) && t.ValueKind != JsonValueKind.Null) to = t.GetDecimal();
+                    list.Add((from, to, rate));
+                }
+                return list.Count > 0 ? list : defaults;
+            }
+            catch { return defaults; }
+        }
+
+        private static decimal ComputeIrpp(decimal taxableBase, List<(decimal from, decimal? to, decimal rate)> brackets)
+        {
+            decimal irpp = 0;
+            foreach (var (from, to, rate) in brackets)
+            {
+                if (taxableBase <= from) break;
+                var ceiling = to ?? decimal.MaxValue;
+                var portion = Math.Min(taxableBase, ceiling) - from;
+                if (portion > 0) irpp += portion * rate;
+            }
+            return Math.Max(0, irpp);
+        }
+
+        private static HrCnssRateDto MapCnssRateDto(HrCnssRate x) => new()
+        {
+            Id = x.Id, EffectiveFrom = x.EffectiveFrom,
+            EmployeeRate = x.EmployeeRate, EmployerRate = x.EmployerRate, CssRate = x.CssRate,
+            SalaryCeiling = x.SalaryCeiling,
+            AbattementHeadOfFamily = x.AbattementHeadOfFamily,
+            AbattementPerChild = x.AbattementPerChild,
+            IrppBrackets = ParseBrackets(x.IrppBracketsJson)
+                .Select(b => new IrppBracketDto { From = b.from, To = b.to, Rate = b.rate }).ToList(),
+            IsActive = x.IsActive, Notes = x.Notes
+        };
+
+        private static HrPublicHolidayDto MapHolidayDto(HrPublicHoliday x) => new()
+        {
+            Id = x.Id, Date = x.Date, Name = x.Name, Category = x.Category, IsRecurring = x.IsRecurring
+        };
+
         private static HrEmployeeSalaryConfigDto MapSalaryConfigDto(HrEmployeeSalaryConfig x) => new()
         {
-            Id = x.Id,
-            UserId = x.UserId,
-            GrossSalary = x.GrossSalary,
-            IsHeadOfFamily = x.IsHeadOfFamily,
-            ChildrenCount = x.ChildrenCount,
-            CustomDeductions = x.CustomDeductions,
-            BankAccount = x.BankAccount,
-            CnssNumber = x.CnssNumber,
-            HireDate = x.HireDate,
-            Department = x.Department,
-            Position = x.Position,
-            EmploymentType = x.EmploymentType,
-            Cin = x.Cin,
-            BirthDate = x.BirthDate,
-            MaritalStatus = x.MaritalStatus,
-            AddressLine1 = x.AddressLine1,
-            AddressLine2 = x.AddressLine2,
-            City = x.City,
-            PostalCode = x.PostalCode,
+            Id = x.Id, UserId = x.UserId, GrossSalary = x.GrossSalary,
+            IsHeadOfFamily = x.IsHeadOfFamily, ChildrenCount = x.ChildrenCount,
+            CustomDeductions = x.CustomDeductions, BankAccount = x.BankAccount,
+            CnssNumber = x.CnssNumber, HireDate = x.HireDate, Department = x.Department,
+            Position = x.Position, EmploymentType = x.EmploymentType, Cin = x.Cin,
+            BirthDate = x.BirthDate, MaritalStatus = x.MaritalStatus,
+            AddressLine1 = x.AddressLine1, AddressLine2 = x.AddressLine2,
+            City = x.City, PostalCode = x.PostalCode,
             EmergencyContactName = x.EmergencyContactName,
             EmergencyContactPhone = x.EmergencyContactPhone
         };
 
-        private static HrAttendanceDto MapAttendanceDto(HrAttendanceRecord x) => new()
-        {
-            Id = x.Id,
-            UserId = x.UserId,
-            Date = x.Date,
-            CheckIn = x.CheckIn?.ToString(@"hh\:mm"),
-            CheckOut = x.CheckOut?.ToString(@"hh\:mm"),
-            BreakDuration = x.BreakDuration,
-            Source = x.Source,
-            RawData = ParseJsonObject(x.RawData),
-            HoursWorked = x.HoursWorked,
-            OvertimeHours = x.OvertimeHours,
-            Status = x.Status,
-            Notes = x.Notes
-        };
-
-        private static HrAttendanceSettingsDto MapAttendanceSettings(HrAttendanceSettings x) => new()
-        {
-            Id = x.Id,
-            WeekendDays = ParseJsonList<int>(x.WeekendDays),
-            StandardHoursPerDay = x.StandardHoursPerDay,
-            OvertimeThreshold = x.OvertimeThreshold,
-            OvertimeMultiplier = x.OvertimeMultiplier,
-            RoundingMethod = x.RoundingMethod,
-            CalculationMethod = x.CalculationMethod,
-            LateThresholdMinutes = x.LateThresholdMinutes,
-            Holidays = ParseJsonList<string>(x.Holidays)
-        };
-
         private static HrPayrollRunDto MapPayrollRunDto(HrPayrollRun run, List<HrPayrollEntry> entries, Dictionary<int, string> userMap)
         {
+            decimal totalCnss = 0, totalErCnss = 0;
+            var entryDtos = entries.Select(e =>
+            {
+                var details = ParseJsonObject(e.Details) as JsonElement?;
+                decimal allowances = 0, bonuses = 0, employerCnss = 0;
+                try
+                {
+                    if (details.HasValue)
+                    {
+                        if (details.Value.TryGetProperty("allowances", out var a)) allowances = a.GetDecimal();
+                        if (details.Value.TryGetProperty("bonuses", out var b)) bonuses = b.GetDecimal();
+                        if (details.Value.TryGetProperty("employerCnss", out var er)) employerCnss = er.GetDecimal();
+                    }
+                }
+                catch { }
+                totalCnss += e.Cnss; totalErCnss += employerCnss;
+                return new HrPayrollEntryDto
+                {
+                    Id = e.Id, PayrollRunId = e.PayrollRunId, UserId = e.UserId,
+                    UserName = userMap.ContainsKey(e.UserId) ? userMap[e.UserId] : string.Empty,
+                    GrossSalary = e.GrossSalary, Allowances = allowances, Bonuses = bonuses,
+                    Cnss = e.Cnss, EmployerCnss = employerCnss,
+                    TaxableGross = e.TaxableGross, Abattement = e.Abattement, TaxableBase = e.TaxableBase,
+                    Irpp = e.Irpp, Css = e.Css, NetSalary = e.NetSalary, LeaveDays = e.LeaveDays,
+                    Details = details
+                };
+            }).ToList();
+
             return new HrPayrollRunDto
             {
-                Id = run.Id,
-                Month = run.Month,
-                Year = run.Year,
-                Status = run.Status,
-                TotalGross = run.TotalGross,
-                TotalNet = run.TotalNet,
-                CreatedBy = run.CreatedBy,
-                CreatedAt = run.CreatedAt,
-                ConfirmedAt = run.ConfirmedAt,
-                Entries = entries.Select(e => new HrPayrollEntryDto
-                {
-                    Id = e.Id,
-                    PayrollRunId = e.PayrollRunId,
-                    UserId = e.UserId,
-                    UserName = userMap.ContainsKey(e.UserId) ? userMap[e.UserId] : string.Empty,
-                    GrossSalary = e.GrossSalary,
-                    Cnss = e.Cnss,
-                    TaxableGross = e.TaxableGross,
-                    Abattement = e.Abattement,
-                    TaxableBase = e.TaxableBase,
-                    Irpp = e.Irpp,
-                    Css = e.Css,
-                    NetSalary = e.NetSalary,
-                    WorkedDays = e.WorkedDays,
-                    TotalHours = e.TotalHours,
-                    OvertimeHours = e.OvertimeHours,
-                    LeaveDays = e.LeaveDays,
-                    Details = ParseJsonObject(e.Details)
-                }).ToList()
+                Id = run.Id, Month = run.Month, Year = run.Year, Status = run.Status,
+                TotalGross = run.TotalGross, TotalNet = run.TotalNet,
+                TotalCnss = totalCnss, TotalEmployerCnss = totalErCnss,
+                CreatedBy = run.CreatedBy, CreatedAt = run.CreatedAt, ConfirmedAt = run.ConfirmedAt,
+                Entries = entryDtos
             };
         }
 
         private static HrDepartmentDto MapDepartmentDto(HrDepartment x) => new()
         {
-            Id = x.Id,
-            Name = x.Name,
-            Code = x.Code,
-            ParentId = x.ParentId,
-            ManagerId = x.ManagerId,
-            Description = x.Description,
-            Position = x.Position
+            Id = x.Id, Name = x.Name, Code = x.Code, ParentId = x.ParentId,
+            ManagerId = x.ManagerId, Description = x.Description, Position = x.Position
         };
-
-        private static TimeSpan? ParseTime(string? value)
-        {
-            if (string.IsNullOrWhiteSpace(value)) return null;
-            return TimeSpan.TryParse(value, out var parsed) ? parsed : null;
-        }
-
-        private static List<T> ParseJsonList<T>(string? json)
-        {
-            if (string.IsNullOrWhiteSpace(json)) return new List<T>();
-            try
-            {
-                return JsonSerializer.Deserialize<List<T>>(json) ?? new List<T>();
-            }
-            catch
-            {
-                return new List<T>();
-            }
-        }
 
         private static object? ParseJsonObject(string? json)
         {
             if (string.IsNullOrWhiteSpace(json)) return null;
-            try
-            {
-                return JsonSerializer.Deserialize<object>(json);
-            }
-            catch
-            {
-                return null;
-            }
+            try { return JsonDocument.Parse(json).RootElement.Clone(); } catch { return null; }
         }
 
-        private static object MapSafeUser(MyApi.Modules.Users.Models.User user)
+        private static object MapSafeUser(MyApi.Modules.Users.Models.User user) => new
         {
-            return new
-            {
-                user.Id,
-                user.FirstName,
-                user.LastName,
-                user.Email,
-                user.PhoneNumber,
-                user.Role,
-                user.IsActive,
-                user.ProfilePictureUrl,
-                user.CurrentStatus,
-                user.CreatedDate,
-                user.ModifiedDate
-            };
-        }
+            user.Id, user.FirstName, user.LastName, user.Email, user.PhoneNumber,
+            user.Role, user.IsActive, user.ProfilePictureUrl, user.CurrentStatus,
+            user.CreatedDate, user.ModifiedDate
+        };
     }
 }
