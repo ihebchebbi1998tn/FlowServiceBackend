@@ -112,6 +112,8 @@ namespace MyApi.Modules.HR.Services
             entity.Department = dto.Department ?? entity.Department;
             entity.Position = dto.Position ?? entity.Position;
             entity.EmploymentType = dto.EmploymentType ?? entity.EmploymentType;
+            entity.ContractType = dto.ContractType ?? entity.ContractType;
+            entity.ContractEndDate = dto.ContractEndDate ?? entity.ContractEndDate;
             entity.Cin = dto.Cin ?? entity.Cin;
             entity.BirthDate = dto.BirthDate ?? entity.BirthDate;
             entity.MaritalStatus = dto.MaritalStatus ?? entity.MaritalStatus;
@@ -204,11 +206,189 @@ namespace MyApi.Modules.HR.Services
         }
 
         // ===========================================================================
+        // ATTENDANCE
+        // ===========================================================================
+        public async Task<List<HrAttendanceDto>> GetAttendanceAsync(int year, int month, int? userId = null)
+        {
+            // Treat attendance dates as calendar days (Unspecified kind) — never UTC-convert.
+            var start = DateTime.SpecifyKind(new DateTime(year, month, 1), DateTimeKind.Unspecified);
+            var end = start.AddMonths(1);
+
+            var q = _db.Set<HrAttendance>()
+                .Where(x => x.Date >= start && x.Date < end);
+            if (userId.HasValue) q = q.Where(x => x.UserId == userId.Value);
+
+            var rows = await q.OrderBy(x => x.Date).ThenBy(x => x.UserId).ToListAsync();
+            var userIds = rows.Select(x => x.UserId).Distinct().ToList();
+            var userMap = await _db.Users.Where(u => userIds.Contains(u.Id))
+                .ToDictionaryAsync(u => u.Id, u => string.IsNullOrWhiteSpace(($"{u.FirstName} {u.LastName}").Trim()) ? (u.Email ?? $"#{u.Id}") : ($"{u.FirstName} {u.LastName}").Trim());
+
+            return rows.Select(x => MapAttendanceDto(x, userMap)).ToList();
+        }
+
+        public async Task<HrAttendanceDto> UpsertAttendanceAsync(UpsertHrAttendanceDto dto, int actorUserId)
+        {
+            var settings = await GetAttendanceSettingsEntityAsync();
+            // Calendar-day semantics: strip time + kind so server TZ cannot shift the day.
+            var date = DateTime.SpecifyKind(dto.Date.Date, DateTimeKind.Unspecified);
+            // Anchor check-in/out to the same calendar day (wall-clock, no TZ conversion).
+            var checkIn = NormalizeWallClock(dto.CheckIn, date);
+            var checkOut = NormalizeWallClock(dto.CheckOut, date);
+
+            // ---- Validation ----
+            if (dto.UserId <= 0)
+                throw new ArgumentException("attendance.invalid_user", nameof(dto.UserId));
+            if (date == default)
+                throw new ArgumentException("attendance.invalid_date", nameof(dto.Date));
+            if (date > DateTime.Today.AddDays(1))
+                throw new ArgumentException("attendance.future_date", nameof(dto.Date));
+            if (dto.BreakMinutes < 0 || dto.BreakMinutes > 24 * 60)
+                throw new ArgumentException("attendance.invalid_break", nameof(dto.BreakMinutes));
+            if (checkIn.HasValue && checkOut.HasValue)
+            {
+                if (checkOut.Value <= checkIn.Value)
+                    throw new ArgumentException("attendance.checkout_before_checkin", nameof(dto.CheckOut));
+                var workedMinutes = (checkOut.Value - checkIn.Value).TotalMinutes - dto.BreakMinutes;
+                if (workedMinutes <= 0)
+                    throw new ArgumentException("attendance.break_exceeds_worked", nameof(dto.BreakMinutes));
+                if ((checkOut.Value - checkIn.Value).TotalHours > 24)
+                    throw new ArgumentException("attendance.range_too_long", nameof(dto.CheckOut));
+            }
+            else if (checkOut.HasValue && !checkIn.HasValue)
+            {
+                throw new ArgumentException("attendance.checkout_without_checkin", nameof(dto.CheckIn));
+            }
+            var allowedStatuses = new[] { "present", "absent", "late", "half_day", "leave", "holiday" };
+            if (!string.IsNullOrWhiteSpace(dto.Status) && Array.IndexOf(allowedStatuses, dto.Status.Trim()) < 0)
+                throw new ArgumentException("attendance.invalid_status", nameof(dto.Status));
+
+            var row = await _db.Set<HrAttendance>().FirstOrDefaultAsync(x => x.UserId == dto.UserId && x.Date == date);
+            var isNew = row == null;
+            if (row == null)
+            {
+                row = new HrAttendance { UserId = dto.UserId, Date = date };
+                _db.Set<HrAttendance>().Add(row);
+            }
+
+            row.Date = date;
+            row.CheckIn = checkIn;
+            row.CheckOut = checkOut;
+            row.BreakMinutes = Math.Max(0, dto.BreakMinutes);
+            row.Status = string.IsNullOrWhiteSpace(dto.Status) ? row.Status : dto.Status.Trim();
+            row.Notes = dto.Notes;
+            row.Source = string.IsNullOrWhiteSpace(dto.Source) ? row.Source : dto.Source.Trim();
+            var computed = ComputeAttendanceHours(checkIn, checkOut, row.BreakMinutes, settings);
+            row.TotalHours = Math.Round(dto.TotalHours ?? computed.totalHours, 2);
+            row.OvertimeHours = Math.Round(dto.OvertimeHours ?? computed.overtimeHours, 2);
+            row.UpdatedAt = DateTime.UtcNow;
+
+            await _db.SaveChangesAsync();
+            await LogAsync(dto.UserId, isNew ? "attendance_added" : "attendance_updated", $"Attendance saved for {date:yyyy-MM-dd}", new { dto.UserId, date, row.TotalHours, row.OvertimeHours }, actorUserId);
+
+            var userMap = await _db.Users.Where(u => u.Id == dto.UserId)
+                .ToDictionaryAsync(u => u.Id, u => string.IsNullOrWhiteSpace(($"{u.FirstName} {u.LastName}").Trim()) ? (u.Email ?? $"#{u.Id}") : ($"{u.FirstName} {u.LastName}").Trim());
+            return MapAttendanceDto(row, userMap);
+        }
+
+        public async Task DeleteAttendanceAsync(int id, int actorUserId)
+        {
+            var row = await _db.Set<HrAttendance>().FirstOrDefaultAsync(x => x.Id == id);
+            if (row == null) throw new KeyNotFoundException("Attendance record not found");
+            _db.Set<HrAttendance>().Remove(row);
+            await _db.SaveChangesAsync();
+            await LogAsync(row.UserId, "attendance_deleted", $"Attendance deleted for {row.Date:yyyy-MM-dd}", new { id }, actorUserId);
+        }
+
+        public async Task<HrAttendanceSettingsDto> GetAttendanceSettingsAsync()
+        {
+            return MapAttendanceSettingsDto(await GetAttendanceSettingsEntityAsync());
+        }
+
+        public async Task<HrAttendanceSettingsDto> UpsertAttendanceSettingsAsync(UpsertHrAttendanceSettingsDto dto, int actorUserId)
+        {
+            var row = await GetAttendanceSettingsEntityAsync();
+            row.WorkDaysJson = JsonSerializer.Serialize((dto.WorkDays ?? new List<int>()).Distinct().OrderBy(x => x).ToList());
+            row.StandardHoursPerDay = dto.StandardHoursPerDay;
+            row.OvertimeThresholdHours = dto.OvertimeThresholdHours;
+            row.OvertimeMultiplier = dto.OvertimeMultiplier;
+            row.LateThresholdMinutes = dto.LateThresholdMinutes;
+            row.RoundingMethod = dto.RoundingMethod;
+            row.CalculationMethod = dto.CalculationMethod;
+            row.UpdatedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync();
+            await LogAsync(0, "attendance_settings_updated", "Attendance settings updated", dto, actorUserId);
+            return MapAttendanceSettingsDto(row);
+        }
+
+        public async Task<HrAttendanceImportResultDto> ImportAttendanceAsync(List<ImportHrAttendanceRowDto> rows, int actorUserId)
+        {
+            var result = new HrAttendanceImportResultDto();
+            if (rows == null || rows.Count == 0) return result;
+
+            var settings = await GetAttendanceSettingsEntityAsync();
+            var allowedStatuses = new[] { "present", "absent", "late", "half_day", "leave", "holiday" };
+            var validRows = new List<ImportHrAttendanceRowDto>();
+            foreach (var r in rows)
+            {
+                if (r.UserId <= 0) { result.Skipped++; continue; }
+                if (r.Date.Date == default || r.Date.Date > DateTime.Today.AddDays(1)) { result.Skipped++; continue; }
+                if (r.BreakMinutes < 0 || r.BreakMinutes > 24 * 60) { result.Skipped++; continue; }
+                var ci = NormalizeWallClock(r.CheckIn, r.Date.Date);
+                var co = NormalizeWallClock(r.CheckOut, r.Date.Date);
+                if (ci.HasValue && co.HasValue && co.Value <= ci.Value) { result.Skipped++; continue; }
+                if (co.HasValue && !ci.HasValue) { result.Skipped++; continue; }
+                if (!string.IsNullOrWhiteSpace(r.Status) && Array.IndexOf(allowedStatuses, r.Status.Trim()) < 0) { result.Skipped++; continue; }
+                validRows.Add(r);
+            }
+            if (validRows.Count == 0) return result;
+            var userIds = validRows.Select(r => r.UserId).Distinct().ToList();
+            var dates = validRows.Select(r => DateTime.SpecifyKind(r.Date.Date, DateTimeKind.Unspecified)).Distinct().ToList();
+            var existing = await _db.Set<HrAttendance>()
+                .Where(x => userIds.Contains(x.UserId) && dates.Contains(x.Date))
+                .ToListAsync();
+
+            foreach (var dto in validRows)
+            {
+                var date = DateTime.SpecifyKind(dto.Date.Date, DateTimeKind.Unspecified);
+                var checkIn = NormalizeWallClock(dto.CheckIn, date);
+                var checkOut = NormalizeWallClock(dto.CheckOut, date);
+                var row = existing.FirstOrDefault(x => x.UserId == dto.UserId && x.Date == date);
+                var isNew = row == null;
+                if (row == null)
+                {
+                    row = new HrAttendance { UserId = dto.UserId, Date = date };
+                    _db.Set<HrAttendance>().Add(row);
+                    existing.Add(row);
+                    result.Created++;
+                }
+                else result.Updated++;
+
+                row.Date = date;
+                row.CheckIn = checkIn;
+                row.CheckOut = checkOut;
+                row.BreakMinutes = Math.Max(0, dto.BreakMinutes);
+                row.Status = string.IsNullOrWhiteSpace(dto.Status) ? "present" : dto.Status.Trim();
+                row.Notes = dto.Notes;
+                row.Source = string.IsNullOrWhiteSpace(dto.Source) ? "csv_import" : dto.Source.Trim();
+                var computed = ComputeAttendanceHours(checkIn, checkOut, row.BreakMinutes, settings);
+                row.TotalHours = Math.Round(dto.TotalHours ?? computed.totalHours, 2);
+                row.OvertimeHours = Math.Round(dto.OvertimeHours ?? computed.overtimeHours, 2);
+                row.UpdatedAt = DateTime.UtcNow;
+                result.Imported++;
+            }
+
+            await _db.SaveChangesAsync();
+            await LogAsync(0, "attendance_imported", $"Imported {result.Imported} attendance rows", result, actorUserId);
+            return result;
+        }
+
+        // ===========================================================================
         // PAYROLL (Tunisia: Gross + Allowances + Bonuses → CNSS, IRPP, CSS → Net)
         // ===========================================================================
         public async Task<HrPayrollRunDto> GeneratePayrollRunAsync(CreatePayrollRunDto dto, int createdByUserId)
         {
             var rate = await GetActiveCnssRateEntityAsync();
+            var attendanceSettings = await GetAttendanceSettingsEntityAsync();
             var brackets = ParseBrackets(rate.IrppBracketsJson);
 
             var run = new HrPayrollRun
@@ -228,19 +408,30 @@ namespace MyApi.Modules.HR.Services
             var bonuses = await _db.Set<HrBonusCost>()
                 .Where(x => !x.IsDeleted && x.Year == dto.Year && x.Month == dto.Month && x.AffectsPayroll)
                 .ToListAsync();
+            var attendance = await _db.Set<HrAttendance>()
+                .Where(x => x.Date.Year == dto.Year && x.Date.Month == dto.Month)
+                .ToListAsync();
 
             foreach (var user in users)
             {
                 var cfg = salaryConfigs.FirstOrDefault(x => x.UserId == user.Id);
                 var baseGross = cfg?.GrossSalary ?? 0m;
+                var userAttendance = attendance.Where(a => a.UserId == user.Id).ToList();
 
                 var userBonuses = bonuses.Where(b => b.UserId == user.Id).ToList();
                 var allowances = userBonuses.Where(b => b.Kind == "allowance").Sum(b => b.Amount);
                 var bonusAmount = userBonuses.Where(b => b.Kind == "bonus").Sum(b => b.Amount);
                 var subjectExtra = userBonuses.Where(b => b.SubjectToCnss).Sum(b => b.Amount);
+                var totalHours = userAttendance.Sum(a => a.TotalHours);
+                var overtimeHours = userAttendance.Sum(a => a.OvertimeHours);
+                var workedDays = userAttendance.Count(a => a.Status != "absent" && a.Status != "leave");
+                var hourlyRate = attendanceSettings.StandardHoursPerDay > 0
+                    ? Math.Round(baseGross / 26m / attendanceSettings.StandardHoursPerDay, 6)
+                    : 0m;
+                var overtimeAmount = Math.Round(overtimeHours * hourlyRate * Math.Max(1m, attendanceSettings.OvertimeMultiplier), 3);
 
-                var grossSubjectToCnss = baseGross + subjectExtra;
-                var grossTotal = baseGross + allowances + bonusAmount;
+                var grossSubjectToCnss = baseGross + subjectExtra + overtimeAmount;
+                var grossTotal = baseGross + allowances + bonusAmount + overtimeAmount;
 
                 var cnssBase = rate.SalaryCeiling > 0 ? Math.Min(grossSubjectToCnss, rate.SalaryCeiling) : grossSubjectToCnss;
                 var cnss = Math.Round(cnssBase * rate.EmployeeRate, 3);
@@ -269,9 +460,9 @@ namespace MyApi.Modules.HR.Services
                     Irpp = irpp,
                     Css = css,
                     NetSalary = Math.Round(net, 3),
-                    WorkedDays = 0,
-                    TotalHours = 0,
-                    OvertimeHours = 0,
+                    WorkedDays = workedDays,
+                    TotalHours = totalHours,
+                    OvertimeHours = overtimeHours,
                     LeaveDays = leaveDays,
                     Details = JsonSerializer.Serialize(new
                     {
@@ -279,6 +470,10 @@ namespace MyApi.Modules.HR.Services
                         baseGross,
                         allowances,
                         bonuses = bonusAmount,
+                        overtimeAmount,
+                        overtimeHours,
+                        hourlyRate,
+                        overtimeMultiplier = attendanceSettings.OvertimeMultiplier,
                         employerCnss,
                         cnssBase,
                         rate = new { rate.EmployeeRate, rate.EmployerRate, rate.CssRate },
@@ -360,7 +555,8 @@ namespace MyApi.Modules.HR.Services
                 breakdown = new
                 {
                     entry.GrossSalary, entry.Cnss, entry.TaxableGross, entry.Abattement,
-                    entry.TaxableBase, entry.Irpp, entry.Css, entry.NetSalary, entry.LeaveDays
+                    entry.TaxableBase, entry.Irpp, entry.Css, entry.NetSalary, entry.LeaveDays,
+                    entry.WorkedDays, entry.TotalHours, entry.OvertimeHours
                 },
                 details = ParseJsonObject(entry.Details)
             };
@@ -684,6 +880,10 @@ namespace MyApi.Modules.HR.Services
             var bonuses = await bonusQ.ToListAsync();
 
             var monthsCount = month.HasValue ? 1 : 12;
+            // YTD: from January up to (and including) selected month, or whole year if month is null
+            var ytdMonthsCount = month.HasValue ? month.Value : 12;
+            var ytdBonusQ = _db.Set<HrBonusCost>().Where(x => !x.IsDeleted && x.Year == year && (!month.HasValue || x.Month <= month.Value));
+            var ytdBonuses = await ytdBonusQ.ToListAsync();
             return users.Select(u =>
             {
                 var cfg = configs.FirstOrDefault(c => c.UserId == u.Id);
@@ -695,6 +895,13 @@ namespace MyApi.Modules.HR.Services
                 var cnssBase = baseGross + subjectExtra;
                 var employerCnss = Math.Round(cnssBase * rate.EmployerRate, 3);
 
+                // YTD aggregates
+                var ytdGross = (cfg?.GrossSalary ?? 0m) * ytdMonthsCount;
+                var ytdB = ytdBonuses.Where(x => x.UserId == u.Id).ToList();
+                var ytdBonusAmt = ytdB.Where(x => x.Kind == "bonus" || x.Kind == "allowance").Sum(x => x.Amount);
+                var ytdSubjectExtra = ytdB.Where(x => x.SubjectToCnss).Sum(x => x.Amount);
+                var ytdEmployerCnss = Math.Round((ytdGross + ytdSubjectExtra) * rate.EmployerRate, 3);
+
                 return new HrEmployeeCostDto
                 {
                     UserId = u.Id,
@@ -704,7 +911,11 @@ namespace MyApi.Modules.HR.Services
                     Bonuses = bonusAmt,
                     Allowances = allowanceAmt,
                     EmployerCnss = employerCnss,
-                    TotalCost = baseGross + bonusAmt + allowanceAmt + employerCnss
+                    TotalCost = baseGross + bonusAmt + allowanceAmt + employerCnss,
+                    YtdGross = ytdGross,
+                    YtdBonuses = ytdBonusAmt,
+                    YtdEmployerCnss = ytdEmployerCnss,
+                    YtdTotalCost = ytdGross + ytdBonusAmt + ytdEmployerCnss
                 };
             }).ToList();
         }
@@ -823,11 +1034,42 @@ namespace MyApi.Modules.HR.Services
             CustomDeductions = x.CustomDeductions, BankAccount = x.BankAccount,
             CnssNumber = x.CnssNumber, HireDate = x.HireDate, Department = x.Department,
             Position = x.Position, EmploymentType = x.EmploymentType, Cin = x.Cin,
+            ContractType = x.ContractType, ContractEndDate = x.ContractEndDate,
             BirthDate = x.BirthDate, MaritalStatus = x.MaritalStatus,
             AddressLine1 = x.AddressLine1, AddressLine2 = x.AddressLine2,
             City = x.City, PostalCode = x.PostalCode,
             EmergencyContactName = x.EmergencyContactName,
             EmergencyContactPhone = x.EmergencyContactPhone
+        };
+
+        private static HrAttendanceDto MapAttendanceDto(HrAttendance x, Dictionary<int, string> userMap) => new()
+        {
+            Id = x.Id,
+            UserId = x.UserId,
+            UserName = userMap.TryGetValue(x.UserId, out var name) ? name : $"#{x.UserId}",
+            // Force Unspecified kind so JSON serialization stays as a wall-clock
+            // value (no trailing "Z"), preventing client-side TZ rollover.
+            Date = DateTime.SpecifyKind(x.Date.Date, DateTimeKind.Unspecified),
+            CheckIn = x.CheckIn.HasValue ? DateTime.SpecifyKind(x.CheckIn.Value, DateTimeKind.Unspecified) : (DateTime?)null,
+            CheckOut = x.CheckOut.HasValue ? DateTime.SpecifyKind(x.CheckOut.Value, DateTimeKind.Unspecified) : (DateTime?)null,
+            BreakMinutes = x.BreakMinutes,
+            TotalHours = x.TotalHours,
+            OvertimeHours = x.OvertimeHours,
+            Status = x.Status,
+            Notes = x.Notes,
+            Source = x.Source,
+        };
+
+        private static HrAttendanceSettingsDto MapAttendanceSettingsDto(HrAttendanceSettings x) => new()
+        {
+            Id = x.Id,
+            WorkDays = ParseWorkDays(x.WorkDaysJson),
+            StandardHoursPerDay = x.StandardHoursPerDay,
+            OvertimeThresholdHours = x.OvertimeThresholdHours,
+            OvertimeMultiplier = x.OvertimeMultiplier,
+            LateThresholdMinutes = x.LateThresholdMinutes,
+            RoundingMethod = x.RoundingMethod,
+            CalculationMethod = x.CalculationMethod,
         };
 
         private static HrPayrollRunDto MapPayrollRunDto(HrPayrollRun run, List<HrPayrollEntry> entries, Dictionary<int, string> userMap)
@@ -855,7 +1097,9 @@ namespace MyApi.Modules.HR.Services
                     GrossSalary = e.GrossSalary, Allowances = allowances, Bonuses = bonuses,
                     Cnss = e.Cnss, EmployerCnss = employerCnss,
                     TaxableGross = e.TaxableGross, Abattement = e.Abattement, TaxableBase = e.TaxableBase,
-                    Irpp = e.Irpp, Css = e.Css, NetSalary = e.NetSalary, LeaveDays = e.LeaveDays,
+                    Irpp = e.Irpp, Css = e.Css, NetSalary = e.NetSalary,
+                    WorkedDays = e.WorkedDays, TotalHours = e.TotalHours, OvertimeHours = e.OvertimeHours,
+                    LeaveDays = e.LeaveDays,
                     Details = details
                 };
             }).ToList();
@@ -882,11 +1126,123 @@ namespace MyApi.Modules.HR.Services
             try { return JsonDocument.Parse(json).RootElement.Clone(); } catch { return null; }
         }
 
+        private async Task<HrAttendanceSettings> GetAttendanceSettingsEntityAsync()
+        {
+            var row = await _db.Set<HrAttendanceSettings>().OrderBy(x => x.Id).FirstOrDefaultAsync();
+            if (row != null) return row;
+
+            row = new HrAttendanceSettings();
+            _db.Set<HrAttendanceSettings>().Add(row);
+            await _db.SaveChangesAsync();
+            return row;
+        }
+
+        private static List<int> ParseWorkDays(string? json)
+        {
+            if (string.IsNullOrWhiteSpace(json)) return new List<int> { 1, 2, 3, 4, 5 };
+            try
+            {
+                var parsed = JsonSerializer.Deserialize<List<int>>(json);
+                return parsed?.Distinct().OrderBy(x => x).ToList() ?? new List<int> { 1, 2, 3, 4, 5 };
+            }
+            catch
+            {
+                return new List<int> { 1, 2, 3, 4, 5 };
+            }
+        }
+
+        private static (decimal totalHours, decimal overtimeHours) ComputeAttendanceHours(DateTime? checkIn, DateTime? checkOut, int breakMinutes, HrAttendanceSettings settings)
+        {
+            if (!checkIn.HasValue || !checkOut.HasValue || checkOut <= checkIn) return (0m, 0m);
+            var total = (decimal)(checkOut.Value - checkIn.Value).TotalHours - (breakMinutes / 60m);
+            total = Math.Max(0m, total);
+            var threshold = settings.OvertimeThresholdHours > 0 ? settings.OvertimeThresholdHours : settings.StandardHoursPerDay;
+            var overtime = Math.Max(0m, total - threshold);
+            return (Math.Round(total, 2), Math.Round(overtime, 2));
+        }
+
+        // ---------------------------------------------------------------
+        // Timezone-safe helpers
+        // ---------------------------------------------------------------
+        // Treat incoming check-in/out as wall-clock on the row's calendar day.
+        // If the value arrived as UTC ("...Z") it is converted to local first,
+        // then re-anchored to the target date. Returned value is Unspecified
+        // kind so the JSON serializer never appends a "Z" suffix that could
+        // shift the day on the client.
+        private static DateTime? NormalizeWallClock(DateTime? value, DateTime targetDate)
+        {
+            if (!value.HasValue) return null;
+            var v = value.Value.Kind == DateTimeKind.Utc ? value.Value.ToLocalTime() : value.Value;
+            return DateTime.SpecifyKind(
+                new DateTime(targetDate.Year, targetDate.Month, targetDate.Day, v.Hour, v.Minute, v.Second),
+                DateTimeKind.Unspecified);
+        }
+
         private static object MapSafeUser(MyApi.Modules.Users.Models.User user) => new
         {
             user.Id, user.FirstName, user.LastName, user.Email, user.PhoneNumber,
             user.Role, user.IsActive, user.ProfilePictureUrl, user.CurrentStatus,
             user.CreatedDate, user.ModifiedDate
         };
+
+        // ===========================================================================
+        // ACTIVE LEAVES + CONTRACT EXPIRY (Round 1 — Planning integration & alerts)
+        // ===========================================================================
+        public async Task<List<HrActiveLeaveDto>> GetActiveLeavesAsync(DateTime date)
+        {
+            var d = date.Date;
+            var leaves = await _db.Set<UserLeave>()
+                .Where(l => l.Status == "approved" && l.StartDate.Date <= d && l.EndDate.Date >= d)
+                .ToListAsync();
+            if (leaves.Count == 0) return new List<HrActiveLeaveDto>();
+            var userIds = leaves.Select(l => l.UserId).Distinct().ToList();
+            var users = await _db.Users.Where(u => userIds.Contains(u.Id))
+                .Select(u => new { u.Id, u.FirstName, u.LastName, u.Email })
+                .ToListAsync();
+            var nameMap = users.ToDictionary(
+                u => u.Id,
+                u => string.IsNullOrWhiteSpace(($"{u.FirstName} {u.LastName}").Trim())
+                        ? (u.Email ?? $"#{u.Id}")
+                        : ($"{u.FirstName} {u.LastName}").Trim());
+            return leaves.Select(l => new HrActiveLeaveDto
+            {
+                UserId = l.UserId,
+                UserName = nameMap.TryGetValue(l.UserId, out var n) ? n : $"#{l.UserId}",
+                LeaveType = l.LeaveType,
+                StartDate = l.StartDate,
+                EndDate = l.EndDate,
+                Status = l.Status,
+            }).ToList();
+        }
+
+        public async Task<List<HrContractExpiryDto>> GetExpiringContractsAsync(int withinDays = 60)
+        {
+            var today = DateTime.UtcNow.Date;
+            var limit = today.AddDays(Math.Max(1, withinDays));
+            var configs = await _db.Set<HrEmployeeSalaryConfig>()
+                .Where(c => c.ContractEndDate != null && c.ContractEndDate >= today && c.ContractEndDate <= limit)
+                .ToListAsync();
+            if (configs.Count == 0) return new List<HrContractExpiryDto>();
+            var userIds = configs.Select(c => c.UserId).ToList();
+            var users = await _db.Users.Where(u => userIds.Contains(u.Id) && !u.IsDeleted)
+                .Select(u => new { u.Id, u.FirstName, u.LastName, u.Email })
+                .ToListAsync();
+            var nameMap = users.ToDictionary(
+                u => u.Id,
+                u => string.IsNullOrWhiteSpace(($"{u.FirstName} {u.LastName}").Trim())
+                        ? (u.Email ?? $"#{u.Id}")
+                        : ($"{u.FirstName} {u.LastName}").Trim());
+            return configs
+                .Where(c => nameMap.ContainsKey(c.UserId))
+                .OrderBy(c => c.ContractEndDate)
+                .Select(c => new HrContractExpiryDto
+                {
+                    UserId = c.UserId,
+                    UserName = nameMap[c.UserId],
+                    ContractType = c.ContractType,
+                    ContractEndDate = c.ContractEndDate!.Value,
+                    DaysUntilExpiry = (int)(c.ContractEndDate!.Value.Date - today).TotalDays,
+                }).ToList();
+        }
     }
 }

@@ -1148,54 +1148,21 @@ namespace MyApi.Modules.Sync.Services
 
         private async Task<int?> ApplyHrAttendanceAsync(SyncOperationDto op, string operation, string user)
         {
-            var ep0 = op.Endpoint ?? "";
-            if (ep0.Contains("hr/attendance", StringComparison.OrdinalIgnoreCase)
-                && !ep0.Contains("/settings", StringComparison.OrdinalIgnoreCase)
-                && !ep0.Contains("/import", StringComparison.OrdinalIgnoreCase))
-            {
-                var method0 = (op.Method ?? "").Trim().ToUpperInvariant();
-                var attMatch = System.Text.RegularExpressions.Regex.Match(ep0, @"attendance/(\d+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-                if (attMatch.Success && (method0 == "PUT" || method0 == "PATCH"))
-                {
-                    var dto0 = DeserializePayload<UpsertAttendanceDto>(op.Payload);
-                    if (dto0 != null)
-                    {
-                        var aid = int.Parse(attMatch.Groups[1].Value);
-                        var r0 = await _hrService.UpdateAttendanceAsync(aid, dto0);
-                        await RecordChangeAsync("hr_attendance", r0.Id, operation, r0, user);
-                        return r0.Id;
-                    }
-                }
-                if (method0 == "POST")
-                {
-                    var dto0 = DeserializePayload<UpsertAttendanceDto>(op.Payload);
-                    if (dto0 != null && dto0.UserId.HasValue && dto0.Date.HasValue)
-                    {
-                        var r0 = await _hrService.CreateAttendanceAsync(dto0);
-                        await RecordChangeAsync("hr_attendance", r0.Id, "create", r0, user);
-                        return r0.Id;
-                    }
-                }
-            }
-
+            // NOTE: Attendance create/update via IHrService is not exposed in the current
+            // HR module surface; handled directly against the DbContext below.
             if (operation == "delete") return null;
             var userIdVal = ReadInt(op.Payload, "userId") ?? ReadInt(op.Payload, "UserId") ?? 0;
             var dateVal = ReadDate(op.Payload, "date") ?? ReadDate(op.Payload, "Date");
             if (userIdVal <= 0 || !dateVal.HasValue) throw new InvalidOperationException("userId and date are required for attendance");
             var date = dateVal.Value.Date;
-            var existing = await _context.Set<HrAttendanceRecord>().FirstOrDefaultAsync(x => x.UserId == userIdVal && x.Date == date);
-            TimeSpan? ParseTime(string? val)
-            {
-                if (string.IsNullOrEmpty(val)) return null;
-                return TimeSpan.TryParse(val, out var ts) ? ts : null;
-            }
+            var existing = await _context.Set<HrAttendance>().FirstOrDefaultAsync(x => x.UserId == userIdVal && x.Date == date);
             if (existing != null)
             {
-                existing.CheckIn = ParseTime(ReadString(op.Payload, "checkIn") ?? ReadString(op.Payload, "CheckIn"));
-                existing.CheckOut = ParseTime(ReadString(op.Payload, "checkOut") ?? ReadString(op.Payload, "CheckOut"));
-                existing.BreakDuration = ReadInt(op.Payload, "breakDuration") ?? ReadInt(op.Payload, "BreakDuration") ?? existing.BreakDuration;
+                existing.CheckIn = ReadDate(op.Payload, "checkIn") ?? ReadDate(op.Payload, "CheckIn") ?? existing.CheckIn;
+                existing.CheckOut = ReadDate(op.Payload, "checkOut") ?? ReadDate(op.Payload, "CheckOut") ?? existing.CheckOut;
+                existing.BreakMinutes = ReadInt(op.Payload, "breakMinutes") ?? ReadInt(op.Payload, "BreakMinutes") ?? existing.BreakMinutes;
                 existing.Source = ReadString(op.Payload, "source") ?? ReadString(op.Payload, "Source") ?? existing.Source;
-                existing.HoursWorked = ReadDecimal(op.Payload, "hoursWorked") ?? ReadDecimal(op.Payload, "HoursWorked") ?? existing.HoursWorked;
+                existing.TotalHours = ReadDecimal(op.Payload, "totalHours") ?? ReadDecimal(op.Payload, "TotalHours") ?? existing.TotalHours;
                 existing.OvertimeHours = ReadDecimal(op.Payload, "overtimeHours") ?? ReadDecimal(op.Payload, "OvertimeHours") ?? existing.OvertimeHours;
                 existing.Status = ReadString(op.Payload, "status") ?? ReadString(op.Payload, "Status") ?? existing.Status;
                 existing.Notes = ReadString(op.Payload, "notes") ?? ReadString(op.Payload, "Notes") ?? existing.Notes;
@@ -1203,20 +1170,20 @@ namespace MyApi.Modules.Sync.Services
             }
             else
             {
-                var rec = new HrAttendanceRecord
+                var rec = new HrAttendance
                 {
                     UserId = userIdVal,
                     Date = date,
-                    CheckIn = ParseTime(ReadString(op.Payload, "checkIn") ?? ReadString(op.Payload, "CheckIn")),
-                    CheckOut = ParseTime(ReadString(op.Payload, "checkOut") ?? ReadString(op.Payload, "CheckOut")),
-                    BreakDuration = ReadInt(op.Payload, "breakDuration") ?? ReadInt(op.Payload, "BreakDuration"),
+                    CheckIn = ReadDate(op.Payload, "checkIn") ?? ReadDate(op.Payload, "CheckIn"),
+                    CheckOut = ReadDate(op.Payload, "checkOut") ?? ReadDate(op.Payload, "CheckOut"),
+                    BreakMinutes = ReadInt(op.Payload, "breakMinutes") ?? ReadInt(op.Payload, "BreakMinutes") ?? 0,
                     Source = ReadString(op.Payload, "source") ?? ReadString(op.Payload, "Source") ?? "manual",
-                    HoursWorked = ReadDecimal(op.Payload, "hoursWorked") ?? ReadDecimal(op.Payload, "HoursWorked"),
+                    TotalHours = ReadDecimal(op.Payload, "totalHours") ?? ReadDecimal(op.Payload, "TotalHours") ?? 0m,
                     OvertimeHours = ReadDecimal(op.Payload, "overtimeHours") ?? ReadDecimal(op.Payload, "OvertimeHours"),
                     Status = ReadString(op.Payload, "status") ?? ReadString(op.Payload, "Status") ?? "present",
                     Notes = ReadString(op.Payload, "notes") ?? ReadString(op.Payload, "Notes")
                 };
-                _context.Set<HrAttendanceRecord>().Add(rec);
+                _context.Set<HrAttendance>().Add(rec);
                 await _context.SaveChangesAsync();
                 await RecordChangeAsync("hr_attendance", rec.Id, "create", rec, user);
                 return rec.Id;
@@ -2458,18 +2425,17 @@ namespace MyApi.Modules.Sync.Services
             var uid = int.Parse(m.Groups[1].Value);
             var dto = DeserializePayload<UpsertSalaryConfigDto>(op.Payload);
             if (dto == null) throw new InvalidOperationException("UpsertSalaryConfigDto payload required");
-            var r = await _hrService.UpsertSalaryConfigAsync(uid, dto);
+            var actorId = await ResolveCurrentUserIdAsync(user)
+                ?? throw new UnauthorizedAccessException("Unable to resolve user for salary-config sync");
+            var r = await _hrService.UpsertSalaryConfigAsync(uid, dto, actorId);
             await RecordChangeAsync("hr_salary_config", r.Id, op.Operation ?? "upsert", r, user);
             return r.Id;
         }
 
         private async Task<int?> ApplyHrAttendanceSettingsAsync(SyncOperationDto op, string user)
         {
-            var dto = DeserializePayload<UpsertAttendanceSettingsDto>(op.Payload);
-            if (dto == null) throw new InvalidOperationException("UpsertAttendanceSettingsDto payload required");
-            var r = await _hrService.UpdateAttendanceSettingsAsync(dto);
-            await RecordChangeAsync("hr_attendance_settings", r.Id, op.Operation ?? "upsert", r, user);
-            return r.Id;
+            // Attendance settings sync is not supported by the current HR service surface.
+            throw new NotSupportedException("hr_attendance_settings sync is not supported");
         }
 
         private async Task<int?> ApplyHrLeaveBalanceAsync(SyncOperationDto op, string user)
@@ -2486,10 +2452,8 @@ namespace MyApi.Modules.Sync.Services
 
         private async Task<int?> ApplyHrAttendanceImportAsync(SyncOperationDto op, string user)
         {
-            var dto = DeserializePayload<ImportAttendanceDto>(op.Payload);
-            if (dto == null) throw new InvalidOperationException("ImportAttendanceDto payload required");
-            _ = await _hrService.ImportAttendanceAsync(dto);
-            return null;
+            // Attendance import sync is not supported by the current HR service surface.
+            throw new NotSupportedException("hr_attendance_import sync is not supported");
         }
 
         private async Task<int?> ApplyHrPayrollRunAsync(SyncOperationDto op, string operation, string currentUser)
@@ -2501,7 +2465,7 @@ namespace MyApi.Modules.Sync.Services
             {
                 var runId = ParseIdFromEndpoint(ep, "runs");
                 if (!runId.HasValue) throw new InvalidOperationException("Payroll run id required");
-                var r = await _hrService.ConfirmPayrollRunAsync(runId.Value);
+                var r = await _hrService.ConfirmPayrollRunAsync(runId.Value, uid.Value);
                 await RecordChangeAsync("hr_payroll_run", r.Id, "confirm", r, currentUser);
                 return r.Id;
             }

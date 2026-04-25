@@ -17,6 +17,14 @@ namespace MyApi.Modules.HR.Services
         Task<List<HrLeaveBalanceDto>> GetLeaveBalancesAsync(int year);
         Task<List<HrLeaveBalanceDto>> SetLeaveAllowanceAsync(int userId, SetLeaveAllowanceDto dto);
 
+        // ---- Attendance ----
+        Task<List<HrAttendanceDto>> GetAttendanceAsync(int year, int month, int? userId = null);
+        Task<HrAttendanceDto> UpsertAttendanceAsync(UpsertHrAttendanceDto dto, int actorUserId);
+        Task DeleteAttendanceAsync(int id, int actorUserId);
+        Task<HrAttendanceSettingsDto> GetAttendanceSettingsAsync();
+        Task<HrAttendanceSettingsDto> UpsertAttendanceSettingsAsync(UpsertHrAttendanceSettingsDto dto, int actorUserId);
+        Task<HrAttendanceImportResultDto> ImportAttendanceAsync(List<ImportHrAttendanceRowDto> rows, int actorUserId);
+
         // ---- Payroll ----
         Task<HrPayrollRunDto> GeneratePayrollRunAsync(CreatePayrollRunDto dto, int createdByUserId);
         Task<List<HrPayrollRunDto>> ListPayrollRunsAsync(int year);
@@ -58,5 +66,9 @@ namespace MyApi.Modules.HR.Services
         // ---- Reports ----
         Task<List<HrEmployeeCostDto>> GetEmployeeCostReportAsync(int year, int? month);
         Task<HrCnssMonthlyDeclarationDto> GetCnssDeclarationAsync(int year, int month);
+
+        // ---- Planning integration & contract alerts (Round 1) ----
+        Task<List<HrActiveLeaveDto>> GetActiveLeavesAsync(DateTime date);
+        Task<List<HrContractExpiryDto>> GetExpiringContractsAsync(int withinDays = 60);
     }
 }

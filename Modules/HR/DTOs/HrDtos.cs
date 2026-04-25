@@ -17,6 +17,8 @@ namespace MyApi.Modules.HR.DTOs
         public string? Department { get; set; }
         public string? Position { get; set; }
         public string? EmploymentType { get; set; }
+        public string? ContractType { get; set; }
+        public DateTime? ContractEndDate { get; set; }
         public string? Cin { get; set; }
         public DateTime? BirthDate { get; set; }
         public string? MaritalStatus { get; set; }
@@ -44,6 +46,8 @@ namespace MyApi.Modules.HR.DTOs
         public string? Department { get; set; }
         public string? Position { get; set; }
         public string EmploymentType { get; set; } = "full_time";
+        public string? ContractType { get; set; }
+        public DateTime? ContractEndDate { get; set; }
         public string? Cin { get; set; }
         public DateTime? BirthDate { get; set; }
         public string? MaritalStatus { get; set; }
@@ -73,6 +77,82 @@ namespace MyApi.Modules.HR.DTOs
         [Required] public decimal AnnualAllowance { get; set; }
     }
 
+    // -------- Attendance (Round 2) --------
+    public class HrAttendanceDto
+    {
+        public int Id { get; set; }
+        public int UserId { get; set; }
+        public string UserName { get; set; } = string.Empty;
+        public DateTime Date { get; set; }
+        public DateTime? CheckIn { get; set; }
+        public DateTime? CheckOut { get; set; }
+        public int BreakMinutes { get; set; }
+        public decimal TotalHours { get; set; }
+        public decimal OvertimeHours { get; set; }
+        public string Status { get; set; } = "present";
+        public string? Notes { get; set; }
+        public string Source { get; set; } = "manual";
+    }
+
+    public class UpsertHrAttendanceDto
+    {
+        [Required] public int UserId { get; set; }
+        [Required] public DateTime Date { get; set; }
+        public DateTime? CheckIn { get; set; }
+        public DateTime? CheckOut { get; set; }
+        public int BreakMinutes { get; set; }
+        public decimal? TotalHours { get; set; }
+        public decimal? OvertimeHours { get; set; }
+        public string Status { get; set; } = "present";
+        public string? Notes { get; set; }
+        public string Source { get; set; } = "manual";
+    }
+
+    public class HrAttendanceSettingsDto
+    {
+        public int Id { get; set; }
+        public List<int> WorkDays { get; set; } = new();
+        public decimal StandardHoursPerDay { get; set; }
+        public decimal OvertimeThresholdHours { get; set; }
+        public decimal OvertimeMultiplier { get; set; }
+        public int LateThresholdMinutes { get; set; }
+        public string RoundingMethod { get; set; } = "15min";
+        public string CalculationMethod { get; set; } = "actual_hours";
+    }
+
+    public class UpsertHrAttendanceSettingsDto
+    {
+        public List<int> WorkDays { get; set; } = new();
+        [Required] public decimal StandardHoursPerDay { get; set; }
+        [Required] public decimal OvertimeThresholdHours { get; set; }
+        [Required] public decimal OvertimeMultiplier { get; set; }
+        public int LateThresholdMinutes { get; set; }
+        public string RoundingMethod { get; set; } = "15min";
+        public string CalculationMethod { get; set; } = "actual_hours";
+    }
+
+    public class ImportHrAttendanceRowDto
+    {
+        [Required] public int UserId { get; set; }
+        [Required] public DateTime Date { get; set; }
+        public DateTime? CheckIn { get; set; }
+        public DateTime? CheckOut { get; set; }
+        public int BreakMinutes { get; set; }
+        public decimal? TotalHours { get; set; }
+        public decimal? OvertimeHours { get; set; }
+        public string Status { get; set; } = "present";
+        public string? Notes { get; set; }
+        public string Source { get; set; } = "csv_import";
+    }
+
+    public class HrAttendanceImportResultDto
+    {
+        public int Imported { get; set; }
+        public int Created { get; set; }
+        public int Updated { get; set; }
+        public int Skipped { get; set; }
+    }
+
     // -------- Payroll (extended with allowances/bonuses + employer CNSS) --------
     public class CreatePayrollRunDto
     {
@@ -97,6 +177,9 @@ namespace MyApi.Modules.HR.DTOs
         public decimal Irpp { get; set; }
         public decimal Css { get; set; }
         public decimal NetSalary { get; set; }
+        public decimal WorkedDays { get; set; }
+        public decimal TotalHours { get; set; }
+        public decimal OvertimeHours { get; set; }
         public decimal LeaveDays { get; set; }
         public object? Details { get; set; }
     }
@@ -300,6 +383,10 @@ namespace MyApi.Modules.HR.DTOs
         public decimal Allowances { get; set; }
         public decimal EmployerCnss { get; set; }
         public decimal TotalCost { get; set; }
+        public decimal YtdGross { get; set; }
+        public decimal YtdBonuses { get; set; }
+        public decimal YtdEmployerCnss { get; set; }
+        public decimal YtdTotalCost { get; set; }
     }
 
     public class HrCnssMonthlyDeclarationDto
@@ -322,5 +409,26 @@ namespace MyApi.Modules.HR.DTOs
         public decimal EmployeeCnss { get; set; }
         public decimal EmployerCnss { get; set; }
         public decimal Css { get; set; }
+    }
+
+    // -------- Active Leaves for Planning calendar (Round 1) --------
+    public class HrActiveLeaveDto
+    {
+        public int UserId { get; set; }
+        public string UserName { get; set; } = string.Empty;
+        public string LeaveType { get; set; } = "annual";
+        public DateTime StartDate { get; set; }
+        public DateTime EndDate { get; set; }
+        public string Status { get; set; } = "approved";
+    }
+
+    // -------- Contract expiry alerts (Round 1) --------
+    public class HrContractExpiryDto
+    {
+        public int UserId { get; set; }
+        public string UserName { get; set; } = string.Empty;
+        public string? ContractType { get; set; }
+        public DateTime ContractEndDate { get; set; }
+        public int DaysUntilExpiry { get; set; }
     }
 }

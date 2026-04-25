@@ -52,6 +52,14 @@ namespace MyApi.Modules.HR.Models
         [MaxLength(50)]
         public string EmploymentType { get; set; } = "full_time";
 
+        // ---- Contract tracking (Round 1) ----
+        [Column("contract_type")]
+        [MaxLength(20)]
+        public string? ContractType { get; set; } // CDI | CDD | Stage
+
+        [Column("contract_end_date")]
+        public DateTime? ContractEndDate { get; set; }
+
         [Column("cin")]
         [MaxLength(50)]
         public string? Cin { get; set; }

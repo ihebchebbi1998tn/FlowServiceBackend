@@ -170,6 +170,8 @@ namespace MyApi.Data
         
         // HR Module
         public DbSet<HrEmployeeSalaryConfig> HrEmployeeSalaryConfigs { get; set; }
+        public DbSet<HrAttendance> HrAttendance { get; set; }
+        public DbSet<HrAttendanceSettings> HrAttendanceSettings { get; set; }
         public DbSet<HrDepartment> HrDepartments { get; set; }
         public DbSet<HrLeaveBalance> HrLeaveBalances { get; set; }
         public DbSet<HrPayrollRun> HrPayrollRuns { get; set; }

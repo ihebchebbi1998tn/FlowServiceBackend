@@ -40,6 +40,43 @@ namespace MyApi.Modules.HR.Controllers
         public async Task<IActionResult> SetLeaveAllowance(int userId, [FromBody] SetLeaveAllowanceDto dto)
             => Ok(new { success = true, data = await _hr.SetLeaveAllowanceAsync(userId, dto) });
 
+        // ---- Attendance ----
+        [HttpGet("attendance")]
+        public async Task<IActionResult> GetAttendance([FromQuery] int year, [FromQuery] int month, [FromQuery] int? userId)
+            => Ok(new { success = true, data = await _hr.GetAttendanceAsync(year, month, userId) });
+
+        [HttpPost("attendance")]
+        public async Task<IActionResult> UpsertAttendance([FromBody] UpsertHrAttendanceDto dto)
+        {
+            try
+            {
+                return Ok(new { success = true, data = await _hr.UpsertAttendanceAsync(dto, GetActorId()) });
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { success = false, errorCode = ex.Message, field = ex.ParamName });
+            }
+        }
+
+        [HttpDelete("attendance/{id:int}")]
+        public async Task<IActionResult> DeleteAttendance(int id)
+        {
+            await _hr.DeleteAttendanceAsync(id, GetActorId());
+            return Ok(new { success = true });
+        }
+
+        [HttpGet("attendance/settings")]
+        public async Task<IActionResult> GetAttendanceSettings()
+            => Ok(new { success = true, data = await _hr.GetAttendanceSettingsAsync() });
+
+        [HttpPut("attendance/settings")]
+        public async Task<IActionResult> UpsertAttendanceSettings([FromBody] UpsertHrAttendanceSettingsDto dto)
+            => Ok(new { success = true, data = await _hr.UpsertAttendanceSettingsAsync(dto, GetActorId()) });
+
+        [HttpPost("attendance/import")]
+        public async Task<IActionResult> ImportAttendance([FromBody] List<ImportHrAttendanceRowDto> rows)
+            => Ok(new { success = true, data = await _hr.ImportAttendanceAsync(rows, GetActorId()) });
+
         // ---- Payroll ----
         [HttpPost("payroll/run")]
         public async Task<IActionResult> GenerateRun([FromBody] CreatePayrollRunDto dto)
@@ -138,6 +175,15 @@ namespace MyApi.Modules.HR.Controllers
         [HttpGet("reports/employee-cost")]
         public async Task<IActionResult> EmployeeCost([FromQuery] int year, [FromQuery] int? month)
             => Ok(new { success = true, data = await _hr.GetEmployeeCostReportAsync(year, month) });
+
+        // ---- Planning integration & contract alerts (Round 1) ----
+        [HttpGet("leaves/active")]
+        public async Task<IActionResult> GetActiveLeaves([FromQuery] DateTime? date)
+            => Ok(new { success = true, data = await _hr.GetActiveLeavesAsync(date ?? DateTime.UtcNow.Date) });
+
+        [HttpGet("contracts/expiring")]
+        public async Task<IActionResult> GetExpiringContracts([FromQuery] int withinDays = 60)
+            => Ok(new { success = true, data = await _hr.GetExpiringContractsAsync(withinDays) });
 
         private int GetActorId()
         {
