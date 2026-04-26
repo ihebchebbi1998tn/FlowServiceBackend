@@ -11,7 +11,7 @@ using MyApi.Modules.Planning.Models;
 
 namespace MyApi.Modules.HR.Services
 {
-    public class HrService : IHrService
+    public partial class HrService : IHrService
     {
         private readonly ApplicationDbContext _db;
 

@@ -786,11 +786,13 @@ if (builder.Environment.IsDevelopment() || !string.IsNullOrEmpty(Environment.Get
     app.UseHttpsRedirection();
 }
 
-// Multi-tenant middleware: reads X-Tenant header and stores tenant in HttpContext
-app.UseMiddleware<TenantMiddleware>();
-
+// Authentication MUST run before TenantMiddleware so HttpContext.User claims
+// (e.g. UserType=MainAdminUser) are populated when the tenant gate evaluates them.
 app.UseAuthentication();
 app.UseAuthorization();
+
+// Multi-tenant middleware: reads X-Tenant header and stores tenant in HttpContext
+app.UseMiddleware<TenantMiddleware>();
 
 app.MapControllers();
 

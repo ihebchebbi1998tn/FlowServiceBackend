@@ -185,6 +185,138 @@ namespace MyApi.Modules.HR.Controllers
         public async Task<IActionResult> GetExpiringContracts([FromQuery] int withinDays = 60)
             => Ok(new { success = true, data = await _hr.GetExpiringContractsAsync(withinDays) });
 
+        // ====================================================================
+        // PERFORMANCE: Goals
+        // ====================================================================
+        [HttpGet("performance/goals")]
+        public async Task<IActionResult> GetGoals([FromQuery] int? userId, [FromQuery] int? cycleId, [FromQuery] string? status)
+            => Ok(new { success = true, data = await _hr.GetGoalsAsync(userId, cycleId, status) });
+
+        [HttpPost("performance/goals")]
+        public async Task<IActionResult> CreateGoal([FromBody] UpsertHrGoalDto dto)
+            => Ok(new { success = true, data = await _hr.CreateGoalAsync(dto, GetActorId()) });
+
+        [HttpPut("performance/goals/{id:int}")]
+        public async Task<IActionResult> UpdateGoal(int id, [FromBody] UpsertHrGoalDto dto)
+            => Ok(new { success = true, data = await _hr.UpdateGoalAsync(id, dto, GetActorId()) });
+
+        [HttpDelete("performance/goals/{id:int}")]
+        public async Task<IActionResult> DeleteGoal(int id) { await _hr.DeleteGoalAsync(id, GetActorId()); return Ok(new { success = true }); }
+
+        // ---- Review cycles ----
+        [HttpGet("performance/cycles")]
+        public async Task<IActionResult> GetCycles() => Ok(new { success = true, data = await _hr.GetReviewCyclesAsync() });
+
+        [HttpPost("performance/cycles")]
+        public async Task<IActionResult> CreateCycle([FromBody] UpsertHrReviewCycleDto dto)
+            => Ok(new { success = true, data = await _hr.CreateReviewCycleAsync(dto, GetActorId()) });
+
+        [HttpPut("performance/cycles/{id:int}")]
+        public async Task<IActionResult> UpdateCycle(int id, [FromBody] UpsertHrReviewCycleDto dto)
+            => Ok(new { success = true, data = await _hr.UpdateReviewCycleAsync(id, dto, GetActorId()) });
+
+        [HttpDelete("performance/cycles/{id:int}")]
+        public async Task<IActionResult> DeleteCycle(int id) { await _hr.DeleteReviewCycleAsync(id, GetActorId()); return Ok(new { success = true }); }
+
+        // ---- Reviews ----
+        [HttpGet("performance/reviews")]
+        public async Task<IActionResult> GetReviews([FromQuery] int? cycleId, [FromQuery] int? userId, [FromQuery] string? status)
+            => Ok(new { success = true, data = await _hr.GetReviewsAsync(cycleId, userId, status) });
+
+        [HttpGet("performance/reviews/{id:int}")]
+        public async Task<IActionResult> GetReview(int id) => Ok(new { success = true, data = await _hr.GetReviewAsync(id) });
+
+        [HttpPost("performance/reviews")]
+        public async Task<IActionResult> CreateReview([FromBody] UpsertHrPerformanceReviewDto dto)
+            => Ok(new { success = true, data = await _hr.CreateReviewAsync(dto, GetActorId()) });
+
+        [HttpPut("performance/reviews/{id:int}")]
+        public async Task<IActionResult> UpdateReview(int id, [FromBody] UpsertHrPerformanceReviewDto dto)
+            => Ok(new { success = true, data = await _hr.UpdateReviewAsync(id, dto, GetActorId()) });
+
+        [HttpDelete("performance/reviews/{id:int}")]
+        public async Task<IActionResult> DeleteReview(int id) { await _hr.DeleteReviewAsync(id, GetActorId()); return Ok(new { success = true }); }
+
+        // ====================================================================
+        // RECRUITMENT
+        // ====================================================================
+        [HttpGet("recruitment/dashboard")]
+        public async Task<IActionResult> RecruitmentDashboard()
+            => Ok(new { success = true, data = await _hr.GetRecruitmentDashboardAsync() });
+
+        // ---- Job openings ----
+        [HttpGet("recruitment/openings")]
+        public async Task<IActionResult> GetOpenings([FromQuery] string? status)
+            => Ok(new { success = true, data = await _hr.GetJobOpeningsAsync(status) });
+
+        [HttpGet("recruitment/openings/{id:int}")]
+        public async Task<IActionResult> GetOpening(int id) => Ok(new { success = true, data = await _hr.GetJobOpeningAsync(id) });
+
+        [HttpPost("recruitment/openings")]
+        public async Task<IActionResult> CreateOpening([FromBody] UpsertHrJobOpeningDto dto)
+            => Ok(new { success = true, data = await _hr.CreateJobOpeningAsync(dto, GetActorId()) });
+
+        [HttpPut("recruitment/openings/{id:int}")]
+        public async Task<IActionResult> UpdateOpening(int id, [FromBody] UpsertHrJobOpeningDto dto)
+            => Ok(new { success = true, data = await _hr.UpdateJobOpeningAsync(id, dto, GetActorId()) });
+
+        [HttpDelete("recruitment/openings/{id:int}")]
+        public async Task<IActionResult> DeleteOpening(int id) { await _hr.DeleteJobOpeningAsync(id, GetActorId()); return Ok(new { success = true }); }
+
+        // ---- Applicants ----
+        [HttpGet("recruitment/applicants")]
+        public async Task<IActionResult> GetApplicants([FromQuery] int? openingId, [FromQuery] string? stage)
+            => Ok(new { success = true, data = await _hr.GetApplicantsAsync(openingId, stage) });
+
+        [HttpGet("recruitment/applicants/{id:int}")]
+        public async Task<IActionResult> GetApplicant(int id) => Ok(new { success = true, data = await _hr.GetApplicantAsync(id) });
+
+        [HttpPost("recruitment/applicants")]
+        public async Task<IActionResult> CreateApplicant([FromBody] UpsertHrApplicantDto dto)
+            => Ok(new { success = true, data = await _hr.CreateApplicantAsync(dto, GetActorId()) });
+
+        [HttpPut("recruitment/applicants/{id:int}")]
+        public async Task<IActionResult> UpdateApplicant(int id, [FromBody] UpsertHrApplicantDto dto)
+            => Ok(new { success = true, data = await _hr.UpdateApplicantAsync(id, dto, GetActorId()) });
+
+        [HttpPost("recruitment/applicants/{id:int}/move")]
+        public async Task<IActionResult> MoveApplicant(int id, [FromBody] MoveApplicantStageDto dto)
+            => Ok(new { success = true, data = await _hr.MoveApplicantStageAsync(id, dto, GetActorId()) });
+
+        [HttpDelete("recruitment/applicants/{id:int}")]
+        public async Task<IActionResult> DeleteApplicant(int id) { await _hr.DeleteApplicantAsync(id, GetActorId()); return Ok(new { success = true }); }
+
+        // ---- Interviews ----
+        [HttpGet("recruitment/interviews")]
+        public async Task<IActionResult> GetInterviews([FromQuery] int? applicantId, [FromQuery] DateTime? from, [FromQuery] DateTime? to)
+            => Ok(new { success = true, data = await _hr.GetInterviewsAsync(applicantId, from, to) });
+
+        [HttpPost("recruitment/interviews")]
+        public async Task<IActionResult> CreateInterview([FromBody] UpsertHrInterviewDto dto)
+            => Ok(new { success = true, data = await _hr.CreateInterviewAsync(dto, GetActorId()) });
+
+        [HttpPut("recruitment/interviews/{id:int}")]
+        public async Task<IActionResult> UpdateInterview(int id, [FromBody] UpsertHrInterviewDto dto)
+            => Ok(new { success = true, data = await _hr.UpdateInterviewAsync(id, dto, GetActorId()) });
+
+        [HttpDelete("recruitment/interviews/{id:int}")]
+        public async Task<IActionResult> DeleteInterview(int id) { await _hr.DeleteInterviewAsync(id, GetActorId()); return Ok(new { success = true }); }
+
+        // ---- Applicant notes ----
+        [HttpGet("recruitment/applicants/{applicantId:int}/notes")]
+        public async Task<IActionResult> GetApplicantNotes(int applicantId)
+            => Ok(new { success = true, data = await _hr.GetApplicantNotesAsync(applicantId) });
+
+        [HttpPost("recruitment/applicants/{applicantId:int}/notes")]
+        public async Task<IActionResult> AddApplicantNote(int applicantId, [FromBody] UpsertHrApplicantNoteDto dto)
+        {
+            dto.ApplicantId = applicantId;
+            return Ok(new { success = true, data = await _hr.AddApplicantNoteAsync(dto, GetActorId()) });
+        }
+
+        [HttpDelete("recruitment/notes/{id:int}")]
+        public async Task<IActionResult> DeleteNote(int id) { await _hr.DeleteApplicantNoteAsync(id, GetActorId()); return Ok(new { success = true }); }
+
         private int GetActorId()
         {
             var raw = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("UserId") ?? "0";

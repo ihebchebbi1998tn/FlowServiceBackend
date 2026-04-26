@@ -70,5 +70,53 @@ namespace MyApi.Modules.HR.Services
         // ---- Planning integration & contract alerts (Round 1) ----
         Task<List<HrActiveLeaveDto>> GetActiveLeavesAsync(DateTime date);
         Task<List<HrContractExpiryDto>> GetExpiringContractsAsync(int withinDays = 60);
+
+        // ---- Performance: Goals ----
+        Task<List<HrGoalDto>> GetGoalsAsync(int? userId, int? cycleId, string? status);
+        Task<HrGoalDto> CreateGoalAsync(UpsertHrGoalDto dto, int actorUserId);
+        Task<HrGoalDto> UpdateGoalAsync(int id, UpsertHrGoalDto dto, int actorUserId);
+        Task DeleteGoalAsync(int id, int actorUserId);
+
+        // ---- Performance: Review cycles ----
+        Task<List<HrReviewCycleDto>> GetReviewCyclesAsync();
+        Task<HrReviewCycleDto> CreateReviewCycleAsync(UpsertHrReviewCycleDto dto, int actorUserId);
+        Task<HrReviewCycleDto> UpdateReviewCycleAsync(int id, UpsertHrReviewCycleDto dto, int actorUserId);
+        Task DeleteReviewCycleAsync(int id, int actorUserId);
+
+        // ---- Performance: Reviews ----
+        Task<List<HrPerformanceReviewDto>> GetReviewsAsync(int? cycleId, int? userId, string? status);
+        Task<HrPerformanceReviewDto> GetReviewAsync(int id);
+        Task<HrPerformanceReviewDto> CreateReviewAsync(UpsertHrPerformanceReviewDto dto, int actorUserId);
+        Task<HrPerformanceReviewDto> UpdateReviewAsync(int id, UpsertHrPerformanceReviewDto dto, int actorUserId);
+        Task DeleteReviewAsync(int id, int actorUserId);
+
+        // ---- Recruitment: Job openings ----
+        Task<List<HrJobOpeningDto>> GetJobOpeningsAsync(string? status);
+        Task<HrJobOpeningDto> GetJobOpeningAsync(int id);
+        Task<HrJobOpeningDto> CreateJobOpeningAsync(UpsertHrJobOpeningDto dto, int actorUserId);
+        Task<HrJobOpeningDto> UpdateJobOpeningAsync(int id, UpsertHrJobOpeningDto dto, int actorUserId);
+        Task DeleteJobOpeningAsync(int id, int actorUserId);
+
+        // ---- Recruitment: Applicants ----
+        Task<List<HrApplicantDto>> GetApplicantsAsync(int? openingId, string? stage);
+        Task<HrApplicantDto> GetApplicantAsync(int id);
+        Task<HrApplicantDto> CreateApplicantAsync(UpsertHrApplicantDto dto, int actorUserId);
+        Task<HrApplicantDto> UpdateApplicantAsync(int id, UpsertHrApplicantDto dto, int actorUserId);
+        Task<HrApplicantDto> MoveApplicantStageAsync(int id, MoveApplicantStageDto dto, int actorUserId);
+        Task DeleteApplicantAsync(int id, int actorUserId);
+
+        // ---- Recruitment: Interviews ----
+        Task<List<HrInterviewDto>> GetInterviewsAsync(int? applicantId, DateTime? from, DateTime? to);
+        Task<HrInterviewDto> CreateInterviewAsync(UpsertHrInterviewDto dto, int actorUserId);
+        Task<HrInterviewDto> UpdateInterviewAsync(int id, UpsertHrInterviewDto dto, int actorUserId);
+        Task DeleteInterviewAsync(int id, int actorUserId);
+
+        // ---- Recruitment: Notes ----
+        Task<List<HrApplicantNoteDto>> GetApplicantNotesAsync(int applicantId);
+        Task<HrApplicantNoteDto> AddApplicantNoteAsync(UpsertHrApplicantNoteDto dto, int actorUserId);
+        Task DeleteApplicantNoteAsync(int id, int actorUserId);
+
+        // ---- Recruitment: Dashboard ----
+        Task<RecruitmentDashboardDto> GetRecruitmentDashboardAsync();
     }
 }

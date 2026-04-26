@@ -183,6 +183,15 @@ namespace MyApi.Data
         public DbSet<HrEmployeeDocument> HrEmployeeDocuments { get; set; }
         public DbSet<HrSalaryHistory> HrSalaryHistory { get; set; }
 
+        // HR — Performance & Recruitment
+        public DbSet<HrReviewCycle> HrReviewCycles { get; set; }
+        public DbSet<HrGoal> HrGoals { get; set; }
+        public DbSet<HrPerformanceReview> HrPerformanceReviews { get; set; }
+        public DbSet<HrJobOpening> HrJobOpenings { get; set; }
+        public DbSet<HrApplicant> HrApplicants { get; set; }
+        public DbSet<HrInterview> HrInterviews { get; set; }
+        public DbSet<HrApplicantNote> HrApplicantNotes { get; set; }
+
         // Notifications Module
         public DbSet<Notification> Notifications { get; set; }
 
