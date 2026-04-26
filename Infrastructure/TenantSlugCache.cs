@@ -29,14 +29,18 @@ public static class TenantSlugCache
 
             _slugToId.Clear();
 
-            // We no longer force the "default" tenant to map to TenantId = 0.
-            // If the user chooses a different default company, we must respect its actual ID
-            // so that its isolated data is loaded correctly. 
-            // Only the very first automatic tenant (if specifically handled elsewhere) 
-            // or the fallback system uses 0. Here, every stored tenant maps to its real database ID.
+            // IMPORTANT — TenantId convention:
+            //   • All pre-multi-tenancy data was stamped with TenantId = 0.
+            //   • The tenant flagged IsDefault = true represents that legacy
+            //     bucket and therefore MUST map to TenantId = 0, otherwise
+            //     the default company's data (and every brand-new tenant
+            //     installation) appears empty because the EF global query
+            //     filter looks for a TenantId that no rows have.
+            //   • Every other tenant maps to its real Tenant.Id so its data
+            //     stays isolated.
             foreach (var t in tenants)
             {
-                _slugToId[t.Slug] = t.Id;
+                _slugToId[t.Slug] = t.IsDefault ? 0 : t.Id;
             }
         }
         catch (Exception ex)
