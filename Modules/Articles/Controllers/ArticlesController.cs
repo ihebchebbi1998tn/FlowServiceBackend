@@ -227,6 +227,18 @@ namespace MyApi.Modules.Articles.Controllers
             return Ok(transactions);
         }
 
+        /// <summary>
+        /// Get all inventory transactions across articles. Currently returns an
+        /// empty list as a placeholder so the offline hydration loop and the
+        /// articles UI don't 404. Replace with a real implementation when an
+        /// IArticleService.GetAllTransactionsAsync method exists.
+        /// </summary>
+        [HttpGet("transactions")]
+        public ActionResult GetAllTransactions()
+        {
+            return Ok(new { success = true, data = new object[0] });
+        }
+
         // =====================================================
         // Batch Operations
         // =====================================================

@@ -41,6 +41,7 @@ namespace MyApi.Modules.Dispatches.Services
         // Attachments & Notes
         Task<AttachmentUploadResponseDto> UploadAttachmentAsync(int dispatchId, Microsoft.AspNetCore.Http.IFormFile file, string category, string? description, double? latitude, double? longitude, string userId);
         Task<NoteDto> AddNoteAsync(int dispatchId, CreateNoteDto dto, string userId);
+        Task<System.Collections.Generic.List<NoteDto>> GetNotesAsync(int dispatchId);
 
         // Statistics
         Task<DispatchStatisticsDto> GetStatisticsAsync(StatisticsQueryParams query);

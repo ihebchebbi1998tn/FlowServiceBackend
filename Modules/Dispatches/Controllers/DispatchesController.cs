@@ -319,6 +319,31 @@ namespace MyApi.Modules.Dispatches.Controllers
             return CreatedAtAction(nameof(GetById), new { dispatchId }, result);
         }
 
+        // Read notes for a dispatch. Used by the field-tech notes timeline.
+        [HttpGet("{dispatchId:int}/notes")]
+        public async Task<IActionResult> GetNotes(int dispatchId)
+        {
+            var notes = await _service.GetNotesAsync(dispatchId);
+            return Ok(notes);
+        }
+
+        // Read activity/history log. Returns empty array until a real
+        // DispatchHistory model exists. Avoids the offline hydration 404.
+        [HttpGet("{dispatchId:int}/history")]
+        public IActionResult GetActivityLog(int dispatchId)
+        {
+            return Ok(new object[0]);
+        }
+
+        // Append a fire-and-forget activity log entry. Currently a no-op so the
+        // frontend's logActivity helper doesn't 405; persistence will land when
+        // the DispatchHistory entity is introduced.
+        [HttpPost("{dispatchId:int}/history")]
+        public IActionResult LogActivity(int dispatchId, [FromBody] System.Text.Json.JsonElement _)
+        {
+            return NoContent();
+        }
+
         [HttpGet("statistics")]
         public async Task<IActionResult> GetStatistics([FromQuery] StatisticsQueryParams query)
         {

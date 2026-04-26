@@ -1432,6 +1432,24 @@ namespace MyApi.Modules.Dispatches.Services
             return new NoteDto { Id = note.Id, DispatchId = note.DispatchId, Content = note.Content ?? string.Empty, Category = note.NoteType ?? "general", CreatedBy = note.CreatedBy ?? string.Empty, CreatedAt = note.CreatedDate };
         }
 
+        public async Task<List<NoteDto>> GetNotesAsync(int dispatchId)
+        {
+            var notes = await _db.DispatchNotes
+                .Where(n => n.DispatchId == dispatchId)
+                .OrderByDescending(n => n.CreatedDate)
+                .ToListAsync();
+
+            return notes.Select(n => new NoteDto
+            {
+                Id = n.Id,
+                DispatchId = n.DispatchId,
+                Content = n.Content ?? string.Empty,
+                Category = n.NoteType ?? "general",
+                CreatedBy = n.CreatedBy ?? string.Empty,
+                CreatedAt = n.CreatedDate
+            }).ToList();
+        }
+
         public async Task<DispatchStatisticsDto> GetStatisticsAsync(StatisticsQueryParams query)
         {
             var q = _db.Dispatches.Where(d => !d.IsDeleted);

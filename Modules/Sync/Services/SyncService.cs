@@ -490,16 +490,31 @@ namespace MyApi.Modules.Sync.Services
             long sinceId = 0;
             if (!string.IsNullOrWhiteSpace(cursor))
             {
+                // Tolerate malformed/legacy cursors instead of returning 400.
+                // Clients (especially the offline hydration loop) hit /api/sync/pull
+                // repeatedly; a single 400 would abort the whole hydration cycle.
+                // If we can't parse the cursor, log and start from the beginning.
+                var parsed = false;
                 if (cursor.Contains("|"))
                 {
                     var parts = cursor.Split('|', 2);
-                    if (!DateTime.TryParse(parts[0], null, DateTimeStyles.RoundtripKind, out since) || !long.TryParse(parts[1], out sinceId))
-                        throw new ArgumentException("Invalid sync cursor format");
+                    if (parts.Length == 2
+                        && DateTime.TryParse(parts[0], null, DateTimeStyles.RoundtripKind, out since)
+                        && long.TryParse(parts[1], out sinceId))
+                    {
+                        parsed = true;
+                    }
                 }
-                else
+                else if (DateTime.TryParse(cursor, null, DateTimeStyles.RoundtripKind, out since))
                 {
-                    if (!DateTime.TryParse(cursor, null, DateTimeStyles.RoundtripKind, out since))
-                        throw new ArgumentException("Invalid sync cursor format");
+                    parsed = true;
+                }
+
+                if (!parsed)
+                {
+                    _logger.LogWarning("Sync pull received unparseable cursor '{Cursor}', starting from beginning", cursor);
+                    since = DateTime.MinValue;
+                    sinceId = 0;
                 }
             }
 
