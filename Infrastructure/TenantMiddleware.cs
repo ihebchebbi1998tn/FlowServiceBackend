@@ -39,12 +39,24 @@ public class TenantMiddleware
 
         if (string.Equals(tenant, ViewAllSentinel, StringComparison.OrdinalIgnoreCase))
         {
-            var isMainAdmin = context.User?.Claims
-                .Any(c => c.Type == "user_type" && c.Value == "MainAdminUser") == true;
+            // Accept several historical spellings of the user-type claim. The token
+            // generator emits "UserType" + "login_type=admin"; older code/tests used
+            // "user_type". Be permissive so the gate keys off the JWT, not the header.
+            var claims = context.User?.Claims;
+            var isMainAdmin = claims != null && claims.Any(c =>
+                (string.Equals(c.Type, "UserType", StringComparison.OrdinalIgnoreCase) &&
+                 string.Equals(c.Value, "MainAdminUser", StringComparison.OrdinalIgnoreCase)) ||
+                (string.Equals(c.Type, "user_type", StringComparison.OrdinalIgnoreCase) &&
+                 string.Equals(c.Value, "MainAdminUser", StringComparison.OrdinalIgnoreCase)) ||
+                (string.Equals(c.Type, "login_type", StringComparison.OrdinalIgnoreCase) &&
+                 string.Equals(c.Value, "admin", StringComparison.OrdinalIgnoreCase)));
 
             if (!isMainAdmin)
             {
-                _logger.LogWarning("🚫 TENANT-MIDDLEWARE: Non-MainAdmin attempted __all__ mode");
+                _logger.LogWarning(
+                    "🚫 TENANT-MIDDLEWARE: Non-MainAdmin attempted __all__ mode (IsAuthenticated={Auth}, ClaimCount={Count})",
+                    context.User?.Identity?.IsAuthenticated ?? false,
+                    claims?.Count() ?? 0);
                 context.Response.StatusCode = 403;
                 await context.Response.WriteAsJsonAsync(new { error = "Only MainAdminUser can use view-all mode" });
                 return;
