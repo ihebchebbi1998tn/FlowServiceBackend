@@ -141,6 +141,10 @@ namespace MyApi.Modules.ExternalEndpoints.Controllers
             try
             {
                 var endpoint = await _service.RegenerateKeyAsync(id, GetUserId());
+                await _systemLogService.LogSuccessAsync(
+                    $"External endpoint API key regenerated: {id}",
+                    "ExternalEndpoints", "update", GetUserId(), GetUserName(),
+                    "ExternalEndpoint", id.ToString());
                 return Ok(new { success = true, data = endpoint });
             }
             catch (KeyNotFoundException)
@@ -149,8 +153,17 @@ namespace MyApi.Modules.ExternalEndpoints.Controllers
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error regenerating key for endpoint {Id}", id);
-                return StatusCode(500, new { success = false, error = new { code = "INTERNAL_ERROR", message = "Failed to regenerate key" } });
+                // Include inner-exception chain in the log so the root cause
+                // (e.g. Npgsql column overflow, tenant filter, audit hook)
+                // is visible without needing a debugger attach.
+                _logger.LogError(ex,
+                    "Error regenerating key for endpoint {Id}. Inner: {Inner}",
+                    id, ex.InnerException?.Message);
+                return StatusCode(500, new { success = false, error = new {
+                    code = "INTERNAL_ERROR",
+                    message = "Failed to regenerate key",
+                    detail = ex.InnerException?.Message ?? ex.Message
+                }});
             }
         }
 

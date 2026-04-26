@@ -292,9 +292,39 @@ namespace MyApi.Modules.ExternalEndpoints.Services
             entity.ApiKey = HashApiKey(plainKey);
             entity.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
-            var stats = await GetEndpointByIdAsync(id) ?? MapToDto(entity);
-            stats.ApiKey = plainKey;
-            return stats;
+
+            // Build the response WITHOUT re-querying via GetEndpointByIdAsync.
+            // The re-query was the most fragile part of this path: an EF
+            // tracking conflict, a tenant query-filter mismatch, or a
+            // GroupBy translation issue on empty log sets could throw and
+            // surface to the controller as a generic 500 — even though the
+            // key was already rotated and persisted successfully. Compute
+            // the lightweight log stats inline and detach the entity to
+            // guarantee a clean DTO containing the freshly-minted plain key.
+            var today = DateTime.UtcNow.Date;
+            int totalReceived = 0, receivedToday = 0;
+            DateTime? lastReceived = null;
+            try
+            {
+                totalReceived = await _context.ExternalEndpointLogs
+                    .AsNoTracking().CountAsync(l => l.EndpointId == id);
+                receivedToday = await _context.ExternalEndpointLogs
+                    .AsNoTracking().CountAsync(l => l.EndpointId == id && l.ReceivedAt >= today);
+                lastReceived = await _context.ExternalEndpointLogs
+                    .AsNoTracking().Where(l => l.EndpointId == id)
+                    .OrderByDescending(l => l.ReceivedAt)
+                    .Select(l => (DateTime?)l.ReceivedAt)
+                    .FirstOrDefaultAsync();
+            }
+            catch (Exception ex)
+            {
+                // Stats are best-effort; never let them break key rotation.
+                _logger.LogWarning(ex, "RegenerateKeyAsync: failed to load log stats for endpoint {Id}", id);
+            }
+
+            var dto = MapToDto(entity, totalReceived, receivedToday, lastReceived);
+            dto.ApiKey = plainKey; // reveal ONCE
+            return dto;
         }
 
         // Keys are hashed at rest. For legacy plaintext rows we still return the value
