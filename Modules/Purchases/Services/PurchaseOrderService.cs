@@ -102,45 +102,54 @@ namespace MyApi.Modules.Purchases.Services
                 CreatedDate = DateTime.UtcNow
             };
 
-            using var tx = await _context.Database.BeginTransactionAsync();
-            try
+            // EnableRetryOnFailure is on for the Npgsql provider, so user-initiated
+            // transactions MUST go through an execution strategy. Calling
+            // BeginTransactionAsync directly throws InvalidOperationException
+            // ("The configured execution strategy ... does not support user initiated
+            // transactions") on the very first POST.
+            var strategy = _context.Database.CreateExecutionStrategy();
+            await strategy.ExecuteAsync(async () =>
             {
-                _context.PurchaseOrders.Add(order);
-                await _context.SaveChangesAsync();
-
-                if (dto.Items?.Any() == true)
+                using var tx = await _context.Database.BeginTransactionAsync();
+                try
                 {
-                    var items = dto.Items.Select((item, idx) => new PurchaseOrderItem
-                    {
-                        PurchaseOrderId = order.Id,
-                        ArticleId = item.ArticleId,
-                        ArticleName = item.ArticleName,
-                        ArticleNumber = item.ArticleNumber,
-                        SupplierRef = item.SupplierRef,
-                        Description = item.Description,
-                        Quantity = item.Quantity,
-                        UnitPrice = item.UnitPrice,
-                        TaxRate = item.TaxRate,
-                        Discount = item.Discount,
-                        DiscountType = item.DiscountType,
-                        Unit = item.Unit,
-                        DisplayOrder = idx,
-                        LineTotal = CalculateLineTotal(item.Quantity, item.UnitPrice, item.Discount, item.DiscountType, item.TaxRate)
-                    }).ToList();
-                    _context.PurchaseOrderItems.AddRange(items);
-                    RecalculateTotals(order, items);
+                    _context.PurchaseOrders.Add(order);
                     await _context.SaveChangesAsync();
-                }
 
-                LogActivity("purchase_order", order.Id, "created", $"Purchase order {orderNumber} created", userId);
-                await _context.SaveChangesAsync();
-                await tx.CommitAsync();
-            }
-            catch
-            {
-                await tx.RollbackAsync();
-                throw;
-            }
+                    if (dto.Items?.Any() == true)
+                    {
+                        var items = dto.Items.Select((item, idx) => new PurchaseOrderItem
+                        {
+                            PurchaseOrderId = order.Id,
+                            ArticleId = item.ArticleId,
+                            ArticleName = item.ArticleName,
+                            ArticleNumber = item.ArticleNumber,
+                            SupplierRef = item.SupplierRef,
+                            Description = item.Description,
+                            Quantity = item.Quantity,
+                            UnitPrice = item.UnitPrice,
+                            TaxRate = item.TaxRate,
+                            Discount = item.Discount,
+                            DiscountType = item.DiscountType,
+                            Unit = item.Unit,
+                            DisplayOrder = idx,
+                            LineTotal = CalculateLineTotal(item.Quantity, item.UnitPrice, item.Discount, item.DiscountType, item.TaxRate)
+                        }).ToList();
+                        _context.PurchaseOrderItems.AddRange(items);
+                        RecalculateTotals(order, items);
+                        await _context.SaveChangesAsync();
+                    }
+
+                    LogActivity("purchase_order", order.Id, "created", $"Purchase order {orderNumber} created", userId);
+                    await _context.SaveChangesAsync();
+                    await tx.CommitAsync();
+                }
+                catch
+                {
+                    await tx.RollbackAsync();
+                    throw;
+                }
+            });
 
             return (await GetOrderByIdAsync(order.Id))!;
         }

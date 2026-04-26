@@ -522,29 +522,34 @@ namespace MyApi.Modules.Projects.Services
 
         public async Task<bool> BulkMoveTaskStatusesAsync(BulkMoveTasksRequestDto bulkMoveDto, string movedByUser)
         {
-            using var transaction = await _context.Database.BeginTransactionAsync();
-            try
+            // Wrap in execution strategy to be compatible with EnableRetryOnFailure
+            var strategy = _context.Database.CreateExecutionStrategy();
+            return await strategy.ExecuteAsync(async () =>
             {
-                foreach (var taskMove in bulkMoveDto.Tasks)
+                using var transaction = await _context.Database.BeginTransactionAsync();
+                try
                 {
-                    var moveDto = new MoveTaskRequestDto
+                    foreach (var taskMove in bulkMoveDto.Tasks)
                     {
-                        Status = taskMove.Status
-                    };
+                        var moveDto = new MoveTaskRequestDto
+                        {
+                            Status = taskMove.Status
+                        };
 
-                    await MoveTaskStatusAsync(taskMove.Id, moveDto, movedByUser);
+                        await MoveTaskStatusAsync(taskMove.Id, moveDto, movedByUser);
+                    }
+
+                    await transaction.CommitAsync();
+                    _logger.LogInformation("Bulk moved status for {Count} tasks", bulkMoveDto.Tasks.Count);
+                    return true;
                 }
-
-                await transaction.CommitAsync();
-                _logger.LogInformation("Bulk moved status for {Count} tasks", bulkMoveDto.Tasks.Count);
-                return true;
-            }
-            catch (Exception ex)
-            {
-                await transaction.RollbackAsync();
-                _logger.LogError(ex, "Error during bulk task status move");
-                throw;
-            }
+                catch (Exception ex)
+                {
+                    await transaction.RollbackAsync();
+                    _logger.LogError(ex, "Error during bulk task status move");
+                    throw;
+                }
+            });
         }
 
         #endregion

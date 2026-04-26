@@ -116,104 +116,109 @@ namespace MyApi.Modules.Articles.Services
                 throw new ArgumentException("Quantity must be greater than zero");
             }
 
-            // Use a transaction with row-level locking to prevent race conditions
-            using var dbTransaction = await _context.Database.BeginTransactionAsync();
-            
-            try
+            // Wrap in execution strategy to be compatible with EnableRetryOnFailure
+            var strategy = _context.Database.CreateExecutionStrategy();
+            return await strategy.ExecuteAsync(async () =>
             {
-                // Lock the article row for update (prevents concurrent modifications)
-                var article = await _context.Set<Article>()
-                    .FromSqlRaw("SELECT * FROM \"Articles\" WHERE \"Id\" = {0} AND \"TenantId\" = {1} FOR UPDATE", dto.ArticleId, _context.GetTenantId())
-                    .FirstOrDefaultAsync();
+                // Use a transaction with row-level locking to prevent race conditions
+                using var dbTransaction = await _context.Database.BeginTransactionAsync();
 
-                if (article == null)
-                    throw new KeyNotFoundException($"Article with ID {dto.ArticleId} not found");
-
-                var previousStock = article.StockQuantity;
-                decimal newStock;
-
-                // Calculate new stock based on transaction type
-                if (dto.TransactionType == "add" || dto.TransactionType == "transfer_in" || dto.TransactionType == "return")
+                try
                 {
-                    newStock = previousStock + dto.Quantity;
-                }
-                else if (dto.TransactionType == "remove" || dto.TransactionType == "sale_deduction" || 
-                         dto.TransactionType == "transfer_out" || dto.TransactionType == "damaged" || dto.TransactionType == "lost")
-                {
-                    newStock = previousStock - dto.Quantity;
-                    
-                    // Validate stock won't go negative
-                    if (newStock < 0)
+                    // Lock the article row for update (prevents concurrent modifications)
+                    var article = await _context.Set<Article>()
+                        .FromSqlRaw("SELECT * FROM \"Articles\" WHERE \"Id\" = {0} AND \"TenantId\" = {1} FOR UPDATE", dto.ArticleId, _context.GetTenantId())
+                        .FirstOrDefaultAsync();
+
+                    if (article == null)
+                        throw new KeyNotFoundException($"Article with ID {dto.ArticleId} not found");
+
+                    var previousStock = article.StockQuantity;
+                    decimal newStock;
+
+                    // Calculate new stock based on transaction type
+                    if (dto.TransactionType == "add" || dto.TransactionType == "transfer_in" || dto.TransactionType == "return")
                     {
-                        throw new InvalidOperationException(
-                            $"Insufficient stock. Current: {previousStock}, Requested: {dto.Quantity}, Would result in: {newStock}");
+                        newStock = previousStock + dto.Quantity;
                     }
-                }
-                else if (dto.TransactionType == "adjustment")
-                {
-                    // Adjustment sets to absolute value - allow any value including negative for corrections
-                    if (dto.Quantity < 0)
+                    else if (dto.TransactionType == "remove" || dto.TransactionType == "sale_deduction" ||
+                             dto.TransactionType == "transfer_out" || dto.TransactionType == "damaged" || dto.TransactionType == "lost")
                     {
-                        throw new ArgumentException("Adjustment quantity cannot be negative. Use the actual stock count.");
+                        newStock = previousStock - dto.Quantity;
+
+                        // Validate stock won't go negative
+                        if (newStock < 0)
+                        {
+                            throw new InvalidOperationException(
+                                $"Insufficient stock. Current: {previousStock}, Requested: {dto.Quantity}, Would result in: {newStock}");
+                        }
                     }
-                    newStock = dto.Quantity;
-                }
-                else if (dto.TransactionType == "offer_added")
-                {
-                    // Offer tracking only - no stock change
-                    newStock = previousStock;
-                }
-                else
-                {
-                    throw new ArgumentException($"Unknown transaction type: {dto.TransactionType}");
-                }
+                    else if (dto.TransactionType == "adjustment")
+                    {
+                        // Adjustment sets to absolute value - allow any value including negative for corrections
+                        if (dto.Quantity < 0)
+                        {
+                            throw new ArgumentException("Adjustment quantity cannot be negative. Use the actual stock count.");
+                        }
+                        newStock = dto.Quantity;
+                    }
+                    else if (dto.TransactionType == "offer_added")
+                    {
+                        // Offer tracking only - no stock change
+                        newStock = previousStock;
+                    }
+                    else
+                    {
+                        throw new ArgumentException($"Unknown transaction type: {dto.TransactionType}");
+                    }
 
-                // Resolve user name if not provided
-                if (string.IsNullOrEmpty(userName))
-                {
-                    userName = await ResolveUserNameAsync(userId);
+                    // Resolve user name if not provided
+                    if (string.IsNullOrEmpty(userName))
+                    {
+                        userName = await ResolveUserNameAsync(userId);
+                    }
+
+                    var transaction = new StockTransaction
+                    {
+                        ArticleId = dto.ArticleId,
+                        TransactionType = dto.TransactionType,
+                        Quantity = dto.Quantity,
+                        PreviousStock = previousStock,
+                        NewStock = newStock,
+                        Reason = dto.Reason,
+                        ReferenceType = dto.ReferenceType,
+                        ReferenceId = dto.ReferenceId,
+                        ReferenceNumber = dto.ReferenceNumber,
+                        Notes = dto.Notes,
+                        PerformedBy = userId,
+                        PerformedByName = userName,
+                        IpAddress = ipAddress,
+                        CreatedAt = DateTime.UtcNow
+                    };
+
+                    // Update article stock (except for offer tracking) - use decimal precision
+                    if (dto.TransactionType != "offer_added")
+                    {
+                        article.StockQuantity = newStock;  // Fixed: no longer casting to int
+                        article.ModifiedDate = DateTime.UtcNow;
+                        article.ModifiedBy = userId;
+                    }
+
+                    _context.Set<StockTransaction>().Add(transaction);
+                    await _context.SaveChangesAsync();
+
+                    // Commit the transaction
+                    await dbTransaction.CommitAsync();
+
+                    transaction.Article = article;
+                    return MapToDto(transaction);
                 }
-
-                var transaction = new StockTransaction
+                catch
                 {
-                    ArticleId = dto.ArticleId,
-                    TransactionType = dto.TransactionType,
-                    Quantity = dto.Quantity,
-                    PreviousStock = previousStock,
-                    NewStock = newStock,
-                    Reason = dto.Reason,
-                    ReferenceType = dto.ReferenceType,
-                    ReferenceId = dto.ReferenceId,
-                    ReferenceNumber = dto.ReferenceNumber,
-                    Notes = dto.Notes,
-                    PerformedBy = userId,
-                    PerformedByName = userName,
-                    IpAddress = ipAddress,
-                    CreatedAt = DateTime.UtcNow
-                };
-
-                // Update article stock (except for offer tracking) - use decimal precision
-                if (dto.TransactionType != "offer_added")
-                {
-                    article.StockQuantity = newStock;  // Fixed: no longer casting to int
-                    article.ModifiedDate = DateTime.UtcNow;
-                    article.ModifiedBy = userId;
+                    await dbTransaction.RollbackAsync();
+                    throw;
                 }
-
-                _context.Set<StockTransaction>().Add(transaction);
-                await _context.SaveChangesAsync();
-                
-                // Commit the transaction
-                await dbTransaction.CommitAsync();
-
-                transaction.Article = article;
-                return MapToDto(transaction);
-            }
-            catch
-            {
-                await dbTransaction.RollbackAsync();
-                throw;
-            }
+            });
         }
 
         public async Task<StockTransactionDto> AddStockAsync(

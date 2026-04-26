@@ -502,89 +502,94 @@ namespace MyApi.Modules.Sales.Services
 
         public async Task<bool> DeleteSaleAsync(int id, string userId = "system")
         {
-            using var transaction = await _context.Database.BeginTransactionAsync();
-            try
+            // Wrap in execution strategy to be compatible with EnableRetryOnFailure
+            var strategy = _context.Database.CreateExecutionStrategy();
+            return await strategy.ExecuteAsync(async () =>
             {
-                var sale = await _context.Sales
-                    .Include(s => s.Items)
-                    .FirstOrDefaultAsync(s => s.Id == id);
-                    
-                if (sale == null || sale.IsDeleted)
-                    return false;
+                using var transaction = await _context.Database.BeginTransactionAsync();
+                try
+                {
+                    var sale = await _context.Sales
+                        .Include(s => s.Items)
+                        .FirstOrDefaultAsync(s => s.Id == id);
 
-                // Get user name for activity logging
-                string deletedByName = userId;
-                var adminUser = await _context.MainAdminUsers.FirstOrDefaultAsync(u => u.Id.ToString() == userId);
-                if (adminUser != null)
-                {
-                    deletedByName = $"{adminUser.FirstName} {adminUser.LastName}".Trim();
-                }
-                else
-                {
-                    var regularUser = await _context.Users.FirstOrDefaultAsync(u => u.Id.ToString() == userId);
-                    if (regularUser != null)
+                    if (sale == null || sale.IsDeleted)
+                        return false;
+
+                    // Get user name for activity logging
+                    string deletedByName = userId;
+                    var adminUser = await _context.MainAdminUsers.FirstOrDefaultAsync(u => u.Id.ToString() == userId);
+                    if (adminUser != null)
                     {
-                        deletedByName = $"{regularUser.FirstName} {regularUser.LastName}".Trim();
+                        deletedByName = $"{adminUser.FirstName} {adminUser.LastName}".Trim();
                     }
-                }
-
-                // Get sale item IDs before deletion
-                var saleItemIds = sale.Items?.Select(i => i.Id).ToList() ?? new List<int>();
-
-                // Nullify SaleItemId references in ServiceOrderJobs
-                if (saleItemIds.Any())
-                {
-                    // Parameterized update for each sale item ID to prevent SQL injection
-                    foreach (var saleItemId in saleItemIds)
+                    else
                     {
-                        await _context.Database.ExecuteSqlAsync(
-                            $@"UPDATE ""ServiceOrderJobs"" SET ""SaleItemId"" = NULL WHERE ""SaleItemId"" = {saleItemId.ToString()}");
-                    }
-                }
-
-                // Nullify SaleId reference in ServiceOrders (cast int to string for VARCHAR column)
-                await _context.Database.ExecuteSqlRawAsync(
-                    @"UPDATE ""ServiceOrders"" SET ""SaleId"" = NULL WHERE ""SaleId"" = @p0 AND ""TenantId"" = @p1",
-                    id.ToString(), _context.GetTenantId());
-
-                // If sale was converted from an offer, reset the offer and log activity
-                if (!string.IsNullOrEmpty(sale.OfferId) && int.TryParse(sale.OfferId, out int offerId))
-                {
-                    var offer = await _context.Offers.FindAsync(offerId);
-                    if (offer != null)
-                    {
-                        // Reset offer so it can be converted again
-                        offer.ConvertedToSaleId = null;
-                        offer.ConvertedAt = null;
-                        offer.Status = "sent"; // Reset to sent status
-                        offer.UpdatedAt = DateTime.UtcNow;
-
-                        // Create activity on the offer
-                        var offerActivity = new MyApi.Modules.Offers.Models.OfferActivity
+                        var regularUser = await _context.Users.FirstOrDefaultAsync(u => u.Id.ToString() == userId);
+                        if (regularUser != null)
                         {
-                            OfferId = offerId,
-                            Type = "sale_deleted",
-                            Description = $"Sale #{sale.SaleNumber} was deleted by {deletedByName}. The offer can now be converted to a new sale.",
-                            CreatedAt = DateTime.UtcNow,
-                            CreatedByName = deletedByName
-                        };
-                        _context.OfferActivities.Add(offerActivity);
+                            deletedByName = $"{regularUser.FirstName} {regularUser.LastName}".Trim();
+                        }
                     }
-                }
 
-                sale.IsDeleted = true;
-                sale.DeletedAt = DateTime.UtcNow;
-                sale.DeletedBy = userId;
-                await _context.SaveChangesAsync();
-                await transaction.CommitAsync();
-                return true;
-            }
-            catch (Exception ex)
-            {
-                await transaction.RollbackAsync();
-                _logger.LogError(ex, "Error deleting sale {SaleId}", id);
-                throw;
-            }
+                    // Get sale item IDs before deletion
+                    var saleItemIds = sale.Items?.Select(i => i.Id).ToList() ?? new List<int>();
+
+                    // Nullify SaleItemId references in ServiceOrderJobs
+                    if (saleItemIds.Any())
+                    {
+                        // Parameterized update for each sale item ID to prevent SQL injection
+                        foreach (var saleItemId in saleItemIds)
+                        {
+                            await _context.Database.ExecuteSqlAsync(
+                                $@"UPDATE ""ServiceOrderJobs"" SET ""SaleItemId"" = NULL WHERE ""SaleItemId"" = {saleItemId.ToString()}");
+                        }
+                    }
+
+                    // Nullify SaleId reference in ServiceOrders (cast int to string for VARCHAR column)
+                    await _context.Database.ExecuteSqlRawAsync(
+                        @"UPDATE ""ServiceOrders"" SET ""SaleId"" = NULL WHERE ""SaleId"" = @p0 AND ""TenantId"" = @p1",
+                        id.ToString(), _context.GetTenantId());
+
+                    // If sale was converted from an offer, reset the offer and log activity
+                    if (!string.IsNullOrEmpty(sale.OfferId) && int.TryParse(sale.OfferId, out int offerId))
+                    {
+                        var offer = await _context.Offers.FindAsync(offerId);
+                        if (offer != null)
+                        {
+                            // Reset offer so it can be converted again
+                            offer.ConvertedToSaleId = null;
+                            offer.ConvertedAt = null;
+                            offer.Status = "sent"; // Reset to sent status
+                            offer.UpdatedAt = DateTime.UtcNow;
+
+                            // Create activity on the offer
+                            var offerActivity = new MyApi.Modules.Offers.Models.OfferActivity
+                            {
+                                OfferId = offerId,
+                                Type = "sale_deleted",
+                                Description = $"Sale #{sale.SaleNumber} was deleted by {deletedByName}. The offer can now be converted to a new sale.",
+                                CreatedAt = DateTime.UtcNow,
+                                CreatedByName = deletedByName
+                            };
+                            _context.OfferActivities.Add(offerActivity);
+                        }
+                    }
+
+                    sale.IsDeleted = true;
+                    sale.DeletedAt = DateTime.UtcNow;
+                    sale.DeletedBy = userId;
+                    await _context.SaveChangesAsync();
+                    await transaction.CommitAsync();
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    await transaction.RollbackAsync();
+                    _logger.LogError(ex, "Error deleting sale {SaleId}", id);
+                    throw;
+                }
+            });
         }
 
         public async Task<SaleStatsDto> GetSaleStatsAsync(DateTime? dateFrom = null, DateTime? dateTo = null)
