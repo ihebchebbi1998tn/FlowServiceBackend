@@ -880,10 +880,29 @@ namespace MyApi.Modules.Sync.Services
             if (payload is null || payload.Value.ValueKind != JsonValueKind.Object) return null;
             if (payload.Value.TryGetProperty(key, out var val))
             {
+                if (val.ValueKind == JsonValueKind.Null) return null;
                 if (val.ValueKind == JsonValueKind.Number && val.TryGetDecimal(out var d)) return d;
-                if (val.ValueKind == JsonValueKind.String && decimal.TryParse(val.GetString(), out var s)) return s;
+                if (val.ValueKind == JsonValueKind.String)
+                {
+                    var raw = val.GetString();
+                    if (string.IsNullOrWhiteSpace(raw)) return null;
+                    if (decimal.TryParse(raw, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var s)) return s;
+                    if (decimal.TryParse(raw, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.CurrentCulture, out var s2)) return s2;
+                }
             }
             return null;
+        }
+
+        /// <summary>
+        /// Reads a decimal from payload with a safe fallback. Never returns null.
+        /// Used for HR fields where the database column is non-nullable.
+        /// </summary>
+        private static decimal ReadDecimalSafe(JsonElement? payload, string camelKey, string pascalKey, decimal fallback = 0m, decimal? min = null, decimal? max = null)
+        {
+            var value = ReadDecimal(payload, camelKey) ?? ReadDecimal(payload, pascalKey) ?? fallback;
+            if (min.HasValue && value < min.Value) value = min.Value;
+            if (max.HasValue && value > max.Value) value = max.Value;
+            return value;
         }
 
         private static TimeSpan? ReadTimeSpan(JsonElement? payload, string key)
@@ -1155,32 +1174,56 @@ namespace MyApi.Modules.Sync.Services
             var dateVal = ReadDate(op.Payload, "date") ?? ReadDate(op.Payload, "Date");
             if (userIdVal <= 0 || !dateVal.HasValue) throw new InvalidOperationException("userId and date are required for attendance");
             var date = dateVal.Value.Date;
+
+            // ---- Validation guards (defensive) ----
+            // Hours: clamp to a sane physical range [0, 24].
+            // Break minutes: clamp to [0, 24*60].
+            // OvertimeHours must never exceed TotalHours.
+            const decimal HoursMin = 0m;
+            const decimal HoursMax = 24m;
+            const int BreakMin = 0;
+            const int BreakMax = 24 * 60;
+            var allowedStatuses = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "present", "absent", "late", "half_day", "leave", "holiday" };
+
             var existing = await _context.Set<HrAttendance>().FirstOrDefaultAsync(x => x.UserId == userIdVal && x.Date == date);
             if (existing != null)
             {
                 existing.CheckIn = ReadDate(op.Payload, "checkIn") ?? ReadDate(op.Payload, "CheckIn") ?? existing.CheckIn;
                 existing.CheckOut = ReadDate(op.Payload, "checkOut") ?? ReadDate(op.Payload, "CheckOut") ?? existing.CheckOut;
-                existing.BreakMinutes = ReadInt(op.Payload, "breakMinutes") ?? ReadInt(op.Payload, "BreakMinutes") ?? existing.BreakMinutes;
+                var breakMin = ReadInt(op.Payload, "breakMinutes") ?? ReadInt(op.Payload, "BreakMinutes") ?? existing.BreakMinutes;
+                existing.BreakMinutes = Math.Clamp(breakMin, BreakMin, BreakMax);
                 existing.Source = ReadString(op.Payload, "source") ?? ReadString(op.Payload, "Source") ?? existing.Source;
-                existing.TotalHours = ReadDecimal(op.Payload, "totalHours") ?? ReadDecimal(op.Payload, "TotalHours") ?? existing.TotalHours;
-                existing.OvertimeHours = ReadDecimal(op.Payload, "overtimeHours") ?? ReadDecimal(op.Payload, "OvertimeHours") ?? existing.OvertimeHours;
-                existing.Status = ReadString(op.Payload, "status") ?? ReadString(op.Payload, "Status") ?? existing.Status;
+                existing.TotalHours = ReadDecimalSafe(op.Payload, "totalHours", "TotalHours", existing.TotalHours, HoursMin, HoursMax);
+                existing.OvertimeHours = ReadDecimalSafe(op.Payload, "overtimeHours", "OvertimeHours", existing.OvertimeHours, HoursMin, HoursMax);
+                if (existing.OvertimeHours > existing.TotalHours) existing.OvertimeHours = existing.TotalHours;
+                var newStatus = ReadString(op.Payload, "status") ?? ReadString(op.Payload, "Status");
+                if (!string.IsNullOrWhiteSpace(newStatus) && allowedStatuses.Contains(newStatus.Trim()))
+                    existing.Status = newStatus.Trim();
                 existing.Notes = ReadString(op.Payload, "notes") ?? ReadString(op.Payload, "Notes") ?? existing.Notes;
                 existing.UpdatedAt = DateTime.UtcNow;
             }
             else
             {
+                var breakMin = ReadInt(op.Payload, "breakMinutes") ?? ReadInt(op.Payload, "BreakMinutes") ?? 0;
+                var totalHours = ReadDecimalSafe(op.Payload, "totalHours", "TotalHours", 0m, HoursMin, HoursMax);
+                var overtimeHours = ReadDecimalSafe(op.Payload, "overtimeHours", "OvertimeHours", 0m, HoursMin, HoursMax);
+                if (overtimeHours > totalHours) overtimeHours = totalHours;
+                var statusIn = ReadString(op.Payload, "status") ?? ReadString(op.Payload, "Status");
+                var status = !string.IsNullOrWhiteSpace(statusIn) && allowedStatuses.Contains(statusIn!.Trim())
+                    ? statusIn.Trim()
+                    : "present";
+
                 var rec = new HrAttendance
                 {
                     UserId = userIdVal,
                     Date = date,
                     CheckIn = ReadDate(op.Payload, "checkIn") ?? ReadDate(op.Payload, "CheckIn"),
                     CheckOut = ReadDate(op.Payload, "checkOut") ?? ReadDate(op.Payload, "CheckOut"),
-                    BreakMinutes = ReadInt(op.Payload, "breakMinutes") ?? ReadInt(op.Payload, "BreakMinutes") ?? 0,
+                    BreakMinutes = Math.Clamp(breakMin, BreakMin, BreakMax),
                     Source = ReadString(op.Payload, "source") ?? ReadString(op.Payload, "Source") ?? "manual",
-                    TotalHours = ReadDecimal(op.Payload, "totalHours") ?? ReadDecimal(op.Payload, "TotalHours") ?? 0m,
-                    OvertimeHours = ReadDecimal(op.Payload, "overtimeHours") ?? ReadDecimal(op.Payload, "OvertimeHours"),
-                    Status = ReadString(op.Payload, "status") ?? ReadString(op.Payload, "Status") ?? "present",
+                    TotalHours = totalHours,
+                    OvertimeHours = overtimeHours,
+                    Status = status,
                     Notes = ReadString(op.Payload, "notes") ?? ReadString(op.Payload, "Notes")
                 };
                 _context.Set<HrAttendance>().Add(rec);

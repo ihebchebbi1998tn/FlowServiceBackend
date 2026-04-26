@@ -21,6 +21,31 @@ namespace MyApi.Modules.HR.Services
         }
 
         // ===========================================================================
+        // VALIDATION HELPERS — safe handling of nullable / out-of-range decimals.
+        // Keeps non-nullable DB columns from receiving NaN-like, negative, or absurd values.
+        // ===========================================================================
+        private const decimal HoursMin = 0m;
+        private const decimal HoursMax = 24m;
+        private const decimal SalaryMax = 10_000_000m;
+
+        /// <summary>Safely resolves a nullable decimal to a finite, in-range value.</summary>
+        private static decimal SafeDecimal(decimal? value, decimal fallback = 0m, decimal? min = null, decimal? max = null)
+        {
+            var v = value ?? fallback;
+            if (min.HasValue && v < min.Value) v = min.Value;
+            if (max.HasValue && v > max.Value) v = max.Value;
+            return v;
+        }
+
+        /// <summary>Safely resolves an hours value (0..24, rounded to 2 decimals).</summary>
+        private static decimal SafeHours(decimal? value, decimal fallback = 0m)
+            => Math.Round(SafeDecimal(value, fallback, HoursMin, HoursMax), 2);
+
+        /// <summary>Safely resolves a salary value (>=0, capped, rounded to 3 decimals for TND).</summary>
+        private static decimal SafeSalary(decimal? value, decimal fallback = 0m)
+            => Math.Round(SafeDecimal(value, fallback, 0m, SalaryMax), 3);
+
+        // ===========================================================================
         // EMPLOYEES
         // ===========================================================================
         public async Task<List<object>> GetEmployeesAsync()
@@ -102,10 +127,10 @@ namespace MyApi.Modules.HR.Services
                 _db.Set<HrEmployeeSalaryConfig>().Add(entity);
             }
 
-            entity.GrossSalary = dto.GrossSalary ?? entity.GrossSalary;
+            entity.GrossSalary = dto.GrossSalary.HasValue ? SafeSalary(dto.GrossSalary, entity.GrossSalary) : entity.GrossSalary;
             entity.IsHeadOfFamily = dto.IsHeadOfFamily ?? entity.IsHeadOfFamily;
             entity.ChildrenCount = dto.ChildrenCount ?? entity.ChildrenCount;
-            entity.CustomDeductions = dto.CustomDeductions ?? entity.CustomDeductions;
+            entity.CustomDeductions = dto.CustomDeductions.HasValue ? SafeSalary(dto.CustomDeductions, entity.CustomDeductions ?? 0m) : entity.CustomDeductions;
             entity.BankAccount = dto.BankAccount ?? entity.BankAccount;
             entity.CnssNumber = dto.CnssNumber ?? entity.CnssNumber;
             entity.HireDate = dto.HireDate ?? entity.HireDate;
@@ -278,8 +303,9 @@ namespace MyApi.Modules.HR.Services
             row.Notes = dto.Notes;
             row.Source = string.IsNullOrWhiteSpace(dto.Source) ? row.Source : dto.Source.Trim();
             var computed = ComputeAttendanceHours(checkIn, checkOut, row.BreakMinutes, settings);
-            row.TotalHours = Math.Round(dto.TotalHours ?? computed.totalHours, 2);
-            row.OvertimeHours = Math.Round(dto.OvertimeHours ?? computed.overtimeHours, 2);
+            row.TotalHours = SafeHours(dto.TotalHours ?? computed.totalHours);
+            row.OvertimeHours = SafeHours(dto.OvertimeHours ?? computed.overtimeHours);
+            if (row.OvertimeHours > row.TotalHours) row.OvertimeHours = row.TotalHours;
             row.UpdatedAt = DateTime.UtcNow;
 
             await _db.SaveChangesAsync();
@@ -371,8 +397,9 @@ namespace MyApi.Modules.HR.Services
                 row.Notes = dto.Notes;
                 row.Source = string.IsNullOrWhiteSpace(dto.Source) ? "csv_import" : dto.Source.Trim();
                 var computed = ComputeAttendanceHours(checkIn, checkOut, row.BreakMinutes, settings);
-                row.TotalHours = Math.Round(dto.TotalHours ?? computed.totalHours, 2);
-                row.OvertimeHours = Math.Round(dto.OvertimeHours ?? computed.overtimeHours, 2);
+                row.TotalHours = SafeHours(dto.TotalHours ?? computed.totalHours);
+                row.OvertimeHours = SafeHours(dto.OvertimeHours ?? computed.overtimeHours);
+                if (row.OvertimeHours > row.TotalHours) row.OvertimeHours = row.TotalHours;
                 row.UpdatedAt = DateTime.UtcNow;
                 result.Imported++;
             }
