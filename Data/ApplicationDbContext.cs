@@ -289,6 +289,9 @@ namespace MyApi.Data
         public DbSet<MyApi.Modules.Purchases.Models.ArticleSupplierPriceHistory> ArticleSupplierPriceHistory { get; set; }
         public DbSet<MyApi.Modules.Purchases.Models.PurchaseActivity> PurchaseActivities { get; set; }
 
+        // Plugin Registry — per-tenant module enable/disable overrides
+        public DbSet<MyApi.Modules.Plugins.Models.ActivatedModule> ActivatedModules { get; set; }
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);

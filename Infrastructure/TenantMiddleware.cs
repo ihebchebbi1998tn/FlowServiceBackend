@@ -68,7 +68,15 @@ public class TenantMiddleware
             if (isMutation)
             {
                 var path = context.Request.Path.Value?.ToLowerInvariant() ?? "";
-                var isSafeEndpoint = path.Contains("/api/tenants") || path.Contains("/api/auth");
+                // System-level endpoints that don't require a target tenant in view-all mode:
+                //  • /api/tenants — managing the tenants themselves
+                //  • /api/auth   — login/logout/refresh
+                //  • /api/systemlogs — global audit/error stream (no tenant scoping)
+                //  • /api/logs   — alias for system logs
+                var isSafeEndpoint = path.Contains("/api/tenants")
+                    || path.Contains("/api/auth")
+                    || path.Contains("/api/systemlogs")
+                    || path.Contains("/api/logs");
 
                 if (!isSafeEndpoint)
                 {
@@ -91,12 +99,16 @@ public class TenantMiddleware
                         return;
                     }
 
+                    // Translate the real Tenant.Id sent by the frontend into
+                    // the data-table TenantId used by EF global query filters
+                    // (default tenant collapses to 0; all others pass through).
+                    var dataTenantId = TenantSlugCache.ToDataTenantId(targetTenantId);
                     context.Items["Tenant"] = ViewAllSentinel;
-                    context.Items["TenantId"] = targetTenantId;
+                    context.Items["TenantId"] = dataTenantId;
                     context.Items["TenantViewAll"] = true;
                     context.Items["TenantTargetOverride"] = true;
-                    _logger.LogDebug("🏢 TENANT-MIDDLEWARE: {Method} {Path} → VIEW-ALL mutation scoped to TenantId={TenantId}",
-                        method, context.Request.Path, targetTenantId);
+                    _logger.LogDebug("🏢 TENANT-MIDDLEWARE: {Method} {Path} → VIEW-ALL mutation scoped to TenantId={TenantId} (header={Header})",
+                        method, context.Request.Path, dataTenantId, targetTenantId);
 
                     await _next(context);
                     return;

@@ -16,6 +16,11 @@ namespace MyApi.Infrastructure;
 public static class TenantSlugCache
 {
     private static readonly ConcurrentDictionary<string, int> _slugToId = new(StringComparer.OrdinalIgnoreCase);
+    // Real Tenant.Id values for every active tenant (independent of the
+    // data-table TenantId remap that turns the default tenant into 0).
+    // Used to validate X-Target-Tenant headers from the frontend, which
+    // sends the real Tenant.Id from /api/Tenants.
+    private static readonly HashSet<int> _realTenantIds = new();
 
     public static void Initialize(ApplicationDbContext db)
     {
@@ -28,6 +33,7 @@ public static class TenantSlugCache
                 .ToList();
 
             _slugToId.Clear();
+            _realTenantIds.Clear();
 
             // IMPORTANT — TenantId convention:
             //   • All pre-multi-tenancy data was stamped with TenantId = 0.
@@ -41,6 +47,7 @@ public static class TenantSlugCache
             foreach (var t in tenants)
             {
                 _slugToId[t.Slug] = t.IsDefault ? 0 : t.Id;
+                _realTenantIds.Add(t.Id);
             }
         }
         catch (Exception ex)
@@ -97,8 +104,27 @@ public static class TenantSlugCache
     public static bool HasTenant(string slug) => _slugToId.ContainsKey(slug);
 
     /// <summary>
-    /// Check if a numeric tenant ID exists and is active in the cache.
-    /// Used by TenantMiddleware to validate X-Target-Tenant header.
+    /// Check if a numeric tenant ID exists and is active.
+    /// Accepts BOTH the real Tenant.Id (sent by the frontend, e.g. id=1 for
+    /// the default Krossier tenant) AND the data-table TenantId (0 for the
+    /// default bucket, real id for the rest).
     /// </summary>
-    public static bool IsValidTenantId(int tenantId) => _slugToId.Values.Contains(tenantId) || tenantId == 0;
+    public static bool IsValidTenantId(int tenantId) =>
+        tenantId == 0 || _realTenantIds.Contains(tenantId) || _slugToId.Values.Contains(tenantId);
+
+    /// <summary>
+    /// Translate a real Tenant.Id (as sent by the frontend) into the
+    /// data-table TenantId used by EF global query filters.
+    /// The default tenant's real id resolves to 0; every other id passes
+    /// through unchanged. Unknown ids also resolve to 0 (safe default).
+    /// </summary>
+    public static int ToDataTenantId(int realTenantId)
+    {
+        if (realTenantId == 0) return 0;
+        // _slugToId.Values contains 0 (for the default tenant) plus the real
+        // id of every non-default tenant. If realTenantId appears there it's
+        // a non-default tenant — pass through. Otherwise it must be the
+        // default tenant's real id (or unknown) — collapse to 0.
+        return _slugToId.Values.Contains(realTenantId) ? realTenantId : 0;
+    }
 }

@@ -399,6 +399,9 @@ builder.Services.AddScoped<MyApi.Modules.Payments.Services.IPaymentEmailService,
 // Retenue à la Source Module Services
 builder.Services.AddScoped<MyApi.Modules.RetenueSource.Services.IRSService, MyApi.Modules.RetenueSource.Services.RSService>();
 
+// Plugin Registry Module Services
+builder.Services.AddScoped<MyApi.Modules.Plugins.Services.IPluginService, MyApi.Modules.Plugins.Services.PluginService>();
+
 // Workflow Polling Background Service (state-based triggers every 5 minutes)
 builder.Services.AddHostedService<WorkflowPollingService>();
 
