@@ -7,7 +7,7 @@ using MyApi.Infrastructure;
 namespace MyApi.Modules.Purchases.Models
 {
     [Table("GoodsReceipts")]
-    public class GoodsReceipt : ITenantEntity
+    public class GoodsReceipt : ITenantEntity, MyApi.Modules.Shared.Models.ISoftDeletable
     {
         public int TenantId { get; set; }
 
@@ -73,6 +73,18 @@ namespace MyApi.Modules.Purchases.Models
         [Column("ModifiedBy")]
         [MaxLength(100)]
         public string? ModifiedBy { get; set; }
+
+        // Soft-delete (preserves audit trail; receipts are referenced by SupplierInvoices
+        // and stock transactions, so a hard-delete would break historical lookups).
+        [Column("IsDeleted")]
+        public bool IsDeleted { get; set; } = false;
+
+        [Column("DeletedAt")]
+        public DateTime? DeletedAt { get; set; }
+
+        [Column("DeletedBy")]
+        [MaxLength(100)]
+        public string? DeletedBy { get; set; }
 
         // Navigation
         [ForeignKey("PurchaseOrderId")]

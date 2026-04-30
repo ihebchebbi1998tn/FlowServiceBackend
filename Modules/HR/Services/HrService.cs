@@ -953,8 +953,11 @@ namespace MyApi.Modules.HR.Services
             var users = await _db.Users.Where(u => u.IsActive && !u.IsDeleted).ToListAsync();
             var userIds = users.Select(u => u.Id).ToList();
             var configs = await _db.Set<HrEmployeeSalaryConfig>().Where(x => userIds.Contains(x.UserId)).ToListAsync();
-            var bonuses = await _db.Set<HrBonusCost>()
-                .Where(x => !x.IsDeleted && x.Year == year && x.Month == month && x.SubjectToCnss)
+            // Pull ALL bonuses for the period (not only CNSS-subject ones) — the
+            // payroll engine includes non-CNSS allowances/bonuses in the CSS taxable
+            // gross, so the declaration must do the same to stay reconciled.
+            var allBonuses = await _db.Set<HrBonusCost>()
+                .Where(x => !x.IsDeleted && x.Year == year && x.Month == month)
                 .ToListAsync();
 
             var lines = new List<HrCnssEmployeeLineDto>();
@@ -964,12 +967,22 @@ namespace MyApi.Modules.HR.Services
             {
                 var cfg = configs.FirstOrDefault(c => c.UserId == u.Id);
                 if (cfg == null) continue;
-                var extra = bonuses.Where(b => b.UserId == u.Id).Sum(b => b.Amount);
-                var subject = cfg.GrossSalary + extra;
+                var userBonuses = allBonuses.Where(b => b.UserId == u.Id).ToList();
+                var subjectExtra = userBonuses.Where(b => b.SubjectToCnss).Sum(b => b.Amount);
+                var nonSubjectExtra = userBonuses.Where(b => !b.SubjectToCnss).Sum(b => b.Amount);
+
+                // CNSS base: only CNSS-subject earnings, capped by ceiling if any.
+                var subject = cfg.GrossSalary + subjectExtra;
                 var capped = rate.SalaryCeiling > 0 ? Math.Min(subject, rate.SalaryCeiling) : subject;
                 var emp = Math.Round(capped * rate.EmployeeRate, 3);
                 var er = Math.Round(capped * rate.EmployerRate, 3);
-                var css = Math.Round((capped - emp) * rate.CssRate, 3);
+
+                // CSS base: same as payroll engine — full gross (incl. non-CNSS items)
+                // minus the employee CNSS contribution. Keeps declaration reconciled
+                // with HrPayrollEntry.Css produced by RunPayrollAsync.
+                var grossTotal = cfg.GrossSalary + subjectExtra + nonSubjectExtra;
+                var taxableGross = grossTotal - emp;
+                var css = Math.Round(taxableGross * rate.CssRate, 3);
 
                 lines.Add(new HrCnssEmployeeLineDto
                 {

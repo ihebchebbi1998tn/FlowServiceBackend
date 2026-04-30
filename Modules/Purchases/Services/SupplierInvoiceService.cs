@@ -115,55 +115,75 @@ namespace MyApi.Modules.Purchases.Services
                 CreatedDate = DateTime.UtcNow
             };
 
-            _context.SupplierInvoices.Add(invoice);
-            await _context.SaveChangesAsync();
-
+            // Validate PO-item linkage BEFORE inserting anything so a bad batch doesn't
+            // leave an orphan invoice header. Was: header was saved, items validated,
+            // throw → empty invoice persisted forever.
             if (dto.Items?.Any() == true)
             {
-                // If any line is linked to a PO item, validate it belongs to THIS invoice's PO.
-                // Same guard the AddItemAsync path uses — apply it here to catch bad batches at creation.
                 var linkedPoItemIds = dto.Items.Where(i => i.PurchaseOrderItemId.HasValue)
                                                .Select(i => i.PurchaseOrderItemId!.Value)
                                                .Distinct().ToList();
                 if (linkedPoItemIds.Count > 0)
                 {
-                    if (!invoice.PurchaseOrderId.HasValue)
+                    if (!dto.PurchaseOrderId.HasValue)
                         throw new InvalidOperationException("Cannot link PO items to an invoice that has no PurchaseOrderId");
                     var validIds = await _context.PurchaseOrderItems
-                        .Where(p => linkedPoItemIds.Contains(p.Id) && p.PurchaseOrderId == invoice.PurchaseOrderId.Value)
+                        .Where(p => linkedPoItemIds.Contains(p.Id) && p.PurchaseOrderId == dto.PurchaseOrderId.Value)
                         .Select(p => p.Id).ToListAsync();
                     var orphans = linkedPoItemIds.Except(validIds).ToList();
                     if (orphans.Count > 0)
-                        throw new InvalidOperationException($"PurchaseOrderItem(s) [{string.Join(",", orphans)}] do not belong to PO {invoice.PurchaseOrderId}");
+                        throw new InvalidOperationException($"PurchaseOrderItem(s) [{string.Join(",", orphans)}] do not belong to PO {dto.PurchaseOrderId}");
                 }
-
-                var items = dto.Items.Select((item, idx) => new SupplierInvoiceItem
-                {
-                    SupplierInvoiceId = invoice.Id,
-                    PurchaseOrderItemId = item.PurchaseOrderItemId,
-                    ArticleId = item.ArticleId,
-                    ArticleName = item.ArticleName,
-                    Description = item.Description,
-                    Quantity = item.Quantity,
-                    UnitPrice = item.UnitPrice,
-                    TaxRate = item.TaxRate,
-                    // LineTotal is tax-EXCLUSIVE so Sum(LineTotal) reconciles to SubTotal.
-                    LineTotal = item.Quantity * item.UnitPrice,
-                    DisplayOrder = idx
-                }).ToList();
-                _context.SupplierInvoiceItems.AddRange(items);
-                await _context.SaveChangesAsync();
-
-                // Single source of truth for totals.
-                await RecalculateInvoiceTotalsAsync(invoice.Id);
             }
 
-            _context.PurchaseActivities.Add(new PurchaseActivity
+            // EnableRetryOnFailure requires user-initiated transactions to go through
+            // an execution strategy (same fix as PurchaseOrderService.CreateOrderAsync).
+            var strategy = _context.Database.CreateExecutionStrategy();
+            await strategy.ExecuteAsync(async () =>
             {
-                EntityType = "supplier_invoice", EntityId = invoice.Id, ActivityType = "created",
-                Description = $"Supplier invoice {invoiceNumber} created", PerformedBy = userId, PerformedAt = DateTime.UtcNow
+                using var tx = await _context.Database.BeginTransactionAsync();
+                try
+                {
+                    _context.SupplierInvoices.Add(invoice);
+                    await _context.SaveChangesAsync();
+
+                    if (dto.Items?.Any() == true)
+                    {
+                        var items = dto.Items.Select((item, idx) => new SupplierInvoiceItem
+                        {
+                            SupplierInvoiceId = invoice.Id,
+                            PurchaseOrderItemId = item.PurchaseOrderItemId,
+                            ArticleId = item.ArticleId,
+                            ArticleName = item.ArticleName,
+                            Description = item.Description,
+                            Quantity = item.Quantity,
+                            UnitPrice = item.UnitPrice,
+                            TaxRate = item.TaxRate,
+                            // LineTotal is tax-EXCLUSIVE so Sum(LineTotal) reconciles to SubTotal.
+                            LineTotal = item.Quantity * item.UnitPrice,
+                            DisplayOrder = idx
+                        }).ToList();
+                        _context.SupplierInvoiceItems.AddRange(items);
+                        await _context.SaveChangesAsync();
+
+                        // Single source of truth for totals.
+                        await RecalculateInvoiceTotalsAsync(invoice.Id);
+                    }
+
+                    _context.PurchaseActivities.Add(new PurchaseActivity
+                    {
+                        EntityType = "supplier_invoice", EntityId = invoice.Id, ActivityType = "created",
+                        Description = $"Supplier invoice {invoiceNumber} created", PerformedBy = userId, PerformedAt = DateTime.UtcNow
+                    });
+                    await _context.SaveChangesAsync();
+                    await tx.CommitAsync();
+                }
+                catch
+                {
+                    await tx.RollbackAsync();
+                    throw;
+                }
             });
-            await _context.SaveChangesAsync();
 
             return (await GetInvoiceByIdAsync(invoice.Id))!;
         }

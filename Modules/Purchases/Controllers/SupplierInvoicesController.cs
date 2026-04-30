@@ -76,6 +76,13 @@ namespace MyApi.Modules.Purchases.Controllers
             {
                 return NotFound(new { success = false, error = new { code = "NOT_FOUND", message = ex.Message } });
             }
+            // Cross-supplier mismatch / orphan PO-item linkage / missing PO ref — these are
+            // user-correctable validation errors thrown by the service. Surface them as 400
+            // with the actual message instead of a generic 500.
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { success = false, error = new { code = "VALIDATION_ERROR", message = ex.Message } });
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error creating supplier invoice");

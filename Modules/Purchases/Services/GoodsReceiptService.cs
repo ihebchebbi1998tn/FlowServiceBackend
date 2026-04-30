@@ -28,7 +28,7 @@ namespace MyApi.Modules.Purchases.Services
             DateTime? dateFrom, DateTime? dateTo, string? search,
             int page, int limit, string sortBy, string sortOrder)
         {
-            var query = _context.GoodsReceipts.AsNoTracking().AsQueryable();
+            var query = _context.GoodsReceipts.AsNoTracking().Where(r => !r.IsDeleted).AsQueryable();
             if (purchaseOrderId.HasValue) query = query.Where(r => r.PurchaseOrderId == purchaseOrderId.Value);
             if (!string.IsNullOrEmpty(supplierId) && int.TryParse(supplierId, out int sid))
                 query = query.Where(r => r.SupplierId == sid);
@@ -58,7 +58,7 @@ namespace MyApi.Modules.Purchases.Services
 
         public async Task<GoodsReceiptDto?> GetReceiptByIdAsync(int id)
         {
-            var receipt = await _context.GoodsReceipts.AsNoTracking().Include(r => r.Items).FirstOrDefaultAsync(r => r.Id == id);
+            var receipt = await _context.GoodsReceipts.AsNoTracking().Include(r => r.Items).FirstOrDefaultAsync(r => r.Id == id && !r.IsDeleted);
             if (receipt == null) return null;
             var poNumber = await _context.PurchaseOrders.AsNoTracking().Where(p => p.Id == receipt.PurchaseOrderId).Select(p => p.OrderNumber).FirstOrDefaultAsync();
             return MapToDto(receipt, poNumber);
@@ -203,7 +203,7 @@ namespace MyApi.Modules.Purchases.Services
 
         public async Task<bool> DeleteReceiptAsync(int id, string userId)
         {
-            var receipt = await _context.GoodsReceipts.Include(r => r.Items).FirstOrDefaultAsync(r => r.Id == id);
+            var receipt = await _context.GoodsReceipts.Include(r => r.Items).FirstOrDefaultAsync(r => r.Id == id && !r.IsDeleted);
             if (receipt == null) return false;
 
             // Block deletion if any non-deleted SupplierInvoice references this receipt.
@@ -248,13 +248,20 @@ namespace MyApi.Modules.Purchases.Services
                         else { po.Status = "ordered"; po.ActualDelivery = null; }
                     }
 
-                    _context.GoodsReceiptItems.RemoveRange(receipt.Items ?? Enumerable.Empty<GoodsReceiptItem>());
-                    _context.GoodsReceipts.Remove(receipt);
+                    // SOFT-DELETE: preserve receipt + items rows for audit. The receipt
+                    // disappears from list/detail queries (filtered by !IsDeleted) but
+                    // remains queryable for historical reports, stock-transaction
+                    // traceability, and supplier-invoice reconciliation.
+                    receipt.IsDeleted = true;
+                    receipt.DeletedAt = DateTime.UtcNow;
+                    receipt.DeletedBy = userId;
+                    receipt.ModifiedDate = DateTime.UtcNow;
+                    receipt.ModifiedBy = userId;
 
                     _context.PurchaseActivities.Add(new PurchaseActivity
                     {
                         EntityType = "goods_receipt", EntityId = id, ActivityType = "deleted",
-                        Description = $"Goods receipt {receipt.ReceiptNumber} deleted, received quantities reversed",
+                        Description = $"Goods receipt {receipt.ReceiptNumber} soft-deleted, received quantities reversed",
                         PerformedBy = userId, PerformedAt = DateTime.UtcNow
                     });
 

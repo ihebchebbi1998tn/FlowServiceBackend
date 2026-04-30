@@ -227,6 +227,24 @@ namespace MyApi.Modules.Purchases.Services
         {
             var order = await _context.PurchaseOrders.FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted);
             if (order == null) return false;
+
+            // Block deletion when any non-deleted SupplierInvoice references this PO.
+            // Soft-deleting an order that's still invoiced would orphan accounting
+            // records (SupplierInvoice.PurchaseOrderId would point at a hidden row),
+            // break supplier statements, and let users escape audit on paid POs.
+            var linkedInvoiceExists = await _context.SupplierInvoices
+                .AnyAsync(i => i.PurchaseOrderId == id && !i.IsDeleted);
+            if (linkedInvoiceExists)
+                throw new InvalidOperationException($"Cannot delete purchase order {order.OrderNumber}: it is referenced by one or more supplier invoices");
+
+            // Block deletion when there are still non-deleted goods receipts. The
+            // receipts reversed stock when deleted; deleting the PO under live
+            // receipts would lose the link between received stock and its source.
+            var linkedReceiptExists = await _context.GoodsReceipts
+                .AnyAsync(r => r.PurchaseOrderId == id && !r.IsDeleted);
+            if (linkedReceiptExists)
+                throw new InvalidOperationException($"Cannot delete purchase order {order.OrderNumber}: it has goods receipts. Delete the receipts first.");
+
             order.IsDeleted = true; order.DeletedAt = DateTime.UtcNow; order.DeletedBy = userId;
             LogActivity("purchase_order", id, "deleted", $"Purchase order {order.OrderNumber} deleted", userId);
             await _context.SaveChangesAsync();

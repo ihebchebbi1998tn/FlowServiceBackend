@@ -485,6 +485,23 @@ namespace MyApi.Data
             modelBuilder.ApplyConfiguration(new MyApi.Modules.ExternalEndpoints.Database.ExternalEndpointConfiguration());
             modelBuilder.ApplyConfiguration(new MyApi.Modules.ExternalEndpoints.Database.ExternalEndpointLogConfiguration());
             modelBuilder.ApplyConfiguration(new MyApi.Modules.ExternalEndpoints.Database.WebhookForwardJobConfiguration());
+
+            // Plugin Registry — SQL script creates snake_case table/columns.
+            // Keep EF mapping explicit so production does not query "ActivatedModules".
+            modelBuilder.Entity<MyApi.Modules.Plugins.Models.ActivatedModule>(entity =>
+            {
+                entity.ToTable("activated_modules");
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Id).HasColumnName("id");
+                entity.Property(e => e.TenantId).HasColumnName("TenantId").HasDefaultValue(0);
+                entity.Property(e => e.PluginCode).HasColumnName("plugin_code").HasMaxLength(40).IsRequired();
+                entity.Property(e => e.IsEnabled).HasColumnName("is_enabled").HasDefaultValue(true);
+                entity.Property(e => e.CreatedAt).HasColumnName("created_at");
+                entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
+                entity.Property(e => e.UpdatedBy).HasColumnName("updated_by");
+                entity.HasIndex(e => new { e.TenantId, e.PluginCode }).IsUnique();
+                entity.HasIndex(e => e.TenantId);
+            });
         }
 
         private void ConfigureArticleEntities(ModelBuilder modelBuilder)

@@ -547,6 +547,58 @@ using (var scope = app.Services.CreateScope())
                     "✅ DB OK → database='{Db}' user='{User}' server='{Version}'",
                     reader.GetString(0), reader.GetString(1), reader.GetString(2));
             }
+
+            reader.Close();
+            using var pluginActivationCmd = probe.CreateCommand();
+            pluginActivationCmd.CommandText = @"
+CREATE TABLE IF NOT EXISTS activated_modules (
+    id           SERIAL PRIMARY KEY,
+    ""TenantId""   INT          NOT NULL DEFAULT 0,
+    plugin_code  VARCHAR(40)  NOT NULL,
+    is_enabled   BOOLEAN      NOT NULL DEFAULT TRUE,
+    created_at   TIMESTAMP    NOT NULL DEFAULT NOW(),
+    updated_at   TIMESTAMP    NOT NULL DEFAULT NOW(),
+    updated_by   INT          NULL
+);
+
+DO $$
+BEGIN
+    IF to_regclass('public.""ActivatedModules""') IS NOT NULL THEN
+        INSERT INTO activated_modules (id, ""TenantId"", plugin_code, is_enabled, created_at, updated_at, updated_by)
+        SELECT ""Id"", ""TenantId"", ""PluginCode"", ""IsEnabled"", ""CreatedAt"", ""UpdatedAt"", ""UpdatedBy""
+        FROM ""ActivatedModules""
+        ON CONFLICT DO NOTHING;
+    END IF;
+END $$;
+
+SELECT setval(
+    pg_get_serial_sequence('activated_modules', 'id'),
+    GREATEST(COALESCE((SELECT MAX(id) FROM activated_modules), 0), 1),
+    (SELECT COUNT(*) > 0 FROM activated_modules)
+);
+
+DO $$
+BEGIN
+    IF to_regclass('public.""ActivatedModules""') IS NULL THEN
+        CREATE VIEW ""ActivatedModules"" AS
+        SELECT
+            id AS ""Id"",
+            ""TenantId"",
+            plugin_code AS ""PluginCode"",
+            is_enabled AS ""IsEnabled"",
+            created_at AS ""CreatedAt"",
+            updated_at AS ""UpdatedAt"",
+            updated_by AS ""UpdatedBy""
+        FROM activated_modules;
+    END IF;
+END $$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_activated_modules_tenant_code
+    ON activated_modules (""TenantId"", plugin_code);
+CREATE INDEX IF NOT EXISTS ix_activated_modules_tenant
+    ON activated_modules (""TenantId"");";
+            pluginActivationCmd.ExecuteNonQuery();
+            migrationLogger.LogInformation("✅ Plugin activation schema verified");
         }
         catch (PostgresException pgEx)
         {
@@ -632,6 +684,8 @@ using (var scope = app.Services.CreateScope())
             "TaskChecklists",
             "TaskChecklistItems",
             "DailyTasks",
+            // Plugin Registry
+            "activated_modules",
             // Dispatches
             "Dispatches",
             "DispatchTechnicians",
