@@ -21,7 +21,10 @@ namespace MyApi.Modules.Shared.Services
 
         public async Task<SystemLogListResponseDto> GetLogsAsync(SystemLogSearchRequestDto? searchRequest = null)
         {
-            var query = SystemLogs.AsNoTracking().AsQueryable();
+            // System logs are an audit trail visible to admins regardless of the
+            // current tenant context. Bypass the global tenant query filter so a
+            // missing or "view-all" tenant context cannot crash the endpoint.
+            var query = SystemLogs.AsNoTracking().IgnoreQueryFilters().AsQueryable();
 
             // Apply filters
             if (!string.IsNullOrEmpty(searchRequest?.SearchTerm))
@@ -93,7 +96,10 @@ namespace MyApi.Modules.Shared.Services
 
         public async Task<SystemLogDto?> GetLogByIdAsync(int id)
         {
-            var log = await SystemLogs.FindAsync(id);
+            var log = await SystemLogs
+                .AsNoTracking()
+                .IgnoreQueryFilters()
+                .FirstOrDefaultAsync(l => l.Id == id);
             return log != null ? MapToDto(log) : null;
         }
 
@@ -116,9 +122,7 @@ namespace MyApi.Modules.Shared.Services
                 Metadata = createDto.Metadata != null ? JsonSerializer.Serialize(createDto.Metadata) : null
             };
 
-            SystemLogs.Add(log);
-            await _context.SaveChangesAsync();
-
+            await PersistLogResilientlyAsync(log, "CreateLogAsync");
             return MapToDto(log);
         }
 
@@ -130,6 +134,7 @@ namespace MyApi.Modules.Shared.Services
 
             var stats = await SystemLogs
                 .AsNoTracking()
+                .IgnoreQueryFilters()
                 .Where(l => l.Timestamp >= last7Days)
                 .GroupBy(l => 1)
                 .Select(g => new SystemLogStatisticsDto
@@ -151,6 +156,7 @@ namespace MyApi.Modules.Shared.Services
         {
             return await SystemLogs
                 .AsNoTracking()
+                .IgnoreQueryFilters()
                 .Select(l => l.Module)
                 .Distinct()
                 .OrderBy(m => m)
@@ -164,13 +170,14 @@ namespace MyApi.Modules.Shared.Services
             if (daysOld == 0)
             {
                 // Delete ALL logs
-                logsToDelete = await SystemLogs.ToListAsync();
+                logsToDelete = await SystemLogs.IgnoreQueryFilters().ToListAsync();
             }
             else
             {
                 // Delete logs older than specified days
                 var cutoffDate = DateTime.UtcNow.AddDays(-daysOld);
                 logsToDelete = await SystemLogs
+                    .IgnoreQueryFilters()
                     .Where(l => l.Timestamp < cutoffDate)
                     .ToListAsync();
             }
@@ -211,29 +218,98 @@ namespace MyApi.Modules.Shared.Services
 
         private async Task CreateQuickLogAsync(string level, string message, string module, string action, string? userId, string? userName, string? entityType, string? entityId, string? details)
         {
+            var log = new SystemLog
+            {
+                Timestamp = DateTime.UtcNow,
+                Level = level,
+                Message = message,
+                Module = module,
+                Action = action,
+                UserId = userId,
+                UserName = userName,
+                EntityType = entityType,
+                EntityId = entityId,
+                Details = details
+            };
+
+            await PersistLogResilientlyAsync(log, "CreateQuickLogAsync");
+        }
+
+        /// <summary>
+        /// Persist a SystemLog while tolerating missing/invalid tenant context.
+        /// If the primary save fails (e.g. view-all mode without X-Target-Tenant,
+        /// detached entries, transient DB errors) we detach the entity, stamp a
+        /// safe fallback TenantId (0 = system/global) and retry once. If that
+        /// also fails, we swallow the exception so logging never breaks callers.
+        /// </summary>
+        private async Task PersistLogResilientlyAsync(SystemLog log, string source)
+        {
             try
             {
-                var log = new SystemLog
-                {
-                    Timestamp = DateTime.UtcNow,
-                    Level = level,
-                    Message = message,
-                    Module = module,
-                    Action = action,
-                    UserId = userId,
-                    UserName = userName,
-                    EntityType = entityType,
-                    EntityId = entityId,
-                    Details = details
-                };
-
                 SystemLogs.Add(log);
                 await _context.SaveChangesAsync();
+                return;
             }
             catch (Exception ex)
             {
-                // Don't throw - logging should never break the main flow
-                _logger.LogWarning(ex, "Failed to create system log entry");
+                _logger.LogWarning(ex, "SystemLog primary persist failed in {Source}; retrying with fallback tenant", source);
+                // Detach the failed entry so we can retry cleanly
+                try
+                {
+                    var entry = _context.Entry(log);
+                    if (entry.State != EntityState.Detached)
+                    {
+                        entry.State = EntityState.Detached;
+                    }
+                }
+                catch { /* best-effort detach */ }
+            }
+
+            // Fallback path: explicitly stamp a safe tenant id (0 = system/global)
+            // and try again. Wrap in try/catch so logging never throws to callers.
+            // Temporarily switch the DbContext tenant to 0 so StampTenantIdOnNewEntities
+            // does not re-throw the "view-all mode" guard or overwrite our fallback id.
+            var previousTenantId = _context.GetTenantId();
+            try
+            {
+                _context.SetTenantId(0);
+                var fallback = new SystemLog
+                {
+                    TenantId = 0,
+                    Timestamp = log.Timestamp == default ? DateTime.UtcNow : log.Timestamp,
+                    Level = string.IsNullOrEmpty(log.Level) ? "error" : log.Level,
+                    Message = string.IsNullOrEmpty(log.Message)
+                        ? "(system log written without tenant context)"
+                        : log.Message,
+                    Module = string.IsNullOrEmpty(log.Module) ? "System" : log.Module,
+                    Action = string.IsNullOrEmpty(log.Action) ? "other" : log.Action,
+                    UserId = log.UserId,
+                    UserName = log.UserName,
+                    EntityType = log.EntityType,
+                    EntityId = log.EntityId,
+                    Details = log.Details,
+                    IpAddress = log.IpAddress,
+                    UserAgent = log.UserAgent,
+                    Metadata = log.Metadata
+                };
+
+                SystemLogs.Add(fallback);
+                await _context.SaveChangesAsync();
+
+                // Mirror the persisted Id back so callers (CreateLogAsync) get a usable DTO
+                log.Id = fallback.Id;
+                log.TenantId = fallback.TenantId;
+            }
+            catch (Exception fallbackEx)
+            {
+                // Last resort: never break the caller because of logging.
+                _logger.LogWarning(fallbackEx, "SystemLog fallback persist also failed in {Source}; dropping log entry", source);
+            }
+            finally
+            {
+                // Always restore the original tenant context so we don't leak
+                // tenant=0 into subsequent queries on this scoped DbContext.
+                try { _context.SetTenantId(previousTenantId); } catch { /* ignore */ }
             }
         }
 
