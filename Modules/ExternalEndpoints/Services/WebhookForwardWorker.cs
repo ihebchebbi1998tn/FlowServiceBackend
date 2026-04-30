@@ -1,4 +1,6 @@
 using System.Net;
+using System.Net.Http.Headers;
+using System.Security.Cryptography;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -195,7 +197,25 @@ namespace MyApi.Modules.ExternalEndpoints.Services
             {
                 var client = _httpClientFactory.CreateClient(HttpClientName);
                 client.Timeout = TimeSpan.FromSeconds(15);
-                using var content = new StringContent(job.Body ?? string.Empty, Encoding.UTF8, "application/json");
+                var body = job.Body ?? string.Empty;
+                using var content = new StringContent(body, Encoding.UTF8, "application/json");
+
+                // HMAC-SHA256 signature so downstream systems can verify the
+                // forward originated from us. Snapshot secret is on the job
+                // (immune to later endpoint rotation). Format mirrors GitHub /
+                // Stripe conventions: `sha256=<hex>` plus a unix timestamp
+                // header to enable replay-window enforcement on the receiver.
+                if (!string.IsNullOrEmpty(job.Secret))
+                {
+                    var ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
+                    var signed = $"{ts}.{body}";
+                    using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(job.Secret));
+                    var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(signed));
+                    var hex = Convert.ToHexString(hash).ToLowerInvariant();
+                    content.Headers.TryAddWithoutValidation("X-Signature", $"sha256={hex}");
+                    content.Headers.TryAddWithoutValidation("X-Signature-Timestamp", ts);
+                }
+
                 using var resp = await client.PostAsync(job.ForwardUrl, content, ct);
                 statusCode = (int)resp.StatusCode;
 

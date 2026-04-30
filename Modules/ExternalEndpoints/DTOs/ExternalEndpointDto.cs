@@ -13,6 +13,8 @@ namespace MyApi.Modules.ExternalEndpoints.DTOs
         public string? ExpectedSchema { get; set; }
         public string? ResponseTemplate { get; set; }
         public string? WebhookForwardUrl { get; set; }
+        /// <summary>Days to retain inbound logs (0 = forever). Pruned by background sweep.</summary>
+        public int LogRetentionDays { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime? UpdatedAt { get; set; }
         public string CreatedBy { get; set; } = string.Empty;
@@ -32,6 +34,7 @@ namespace MyApi.Modules.ExternalEndpoints.DTOs
         public string? ExpectedSchema { get; set; }
         public string? ResponseTemplate { get; set; }
         public string? WebhookForwardUrl { get; set; }
+        public int LogRetentionDays { get; set; } = 30;
     }
 
     public class UpdateExternalEndpointDto
@@ -44,6 +47,40 @@ namespace MyApi.Modules.ExternalEndpoints.DTOs
         public string? ExpectedSchema { get; set; }
         public string? ResponseTemplate { get; set; }
         public string? WebhookForwardUrl { get; set; }
+        public int? LogRetentionDays { get; set; }
+    }
+
+    /// <summary>Preview of how an inbound log payload maps onto offer/sale fields.
+    /// Field names mirror the frontend create-form contract so the UI can
+    /// pre-fill without an additional mapping layer. The <see cref="Confidence"/>
+    /// dictionary tells the UI whether each value was extracted verbatim from
+    /// a known key ("exact"), derived/guessed ("inferred"), or absent ("none").
+    /// </summary>
+    public class ConvertLogPreviewDto
+    {
+        public int LogId { get; set; }
+        public string? ContactName { get; set; }
+        public string? Email { get; set; }
+        public string? Phone { get; set; }
+        public string? Address { get; set; }
+        public string? Currency { get; set; }
+        public string? Notes { get; set; }
+        public decimal? TotalAmount { get; set; }
+        public List<ConvertLogItemDto> Items { get; set; } = new();
+        /// <summary>Per-field confidence: "exact" | "inferred" | "none".</summary>
+        public Dictionary<string, string> Confidence { get; set; } = new();
+        /// <summary>Raw parsed JSON object for the UI to inspect.</summary>
+        public object? RawJson { get; set; }
+    }
+
+    public class ConvertLogItemDto
+    {
+        public string? Description { get; set; }
+        public decimal? Quantity { get; set; } = 1;
+        public decimal? UnitPrice { get; set; }
+        public decimal? TotalPrice { get; set; }
+        /// <summary>"exact" if all of description+qty+price were direct keys; "inferred" otherwise.</summary>
+        public string Confidence { get; set; } = "inferred";
     }
 
     public class ExternalEndpointLogDto

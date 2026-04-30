@@ -55,6 +55,16 @@ namespace MyApi.Modules.ExternalEndpoints.Models
         [Column("WebhookForwardUrl")]
         public string? WebhookForwardUrl { get; set; }
 
+        /// <summary>HMAC-SHA256 secret used to sign outbound webhook forwards
+        /// (X-Signature header). Auto-generated on create.</summary>
+        [Column("ForwardSecret")]
+        [MaxLength(128)]
+        public string? ForwardSecret { get; set; }
+
+        /// <summary>Days to retain inbound logs (0 = forever).</summary>
+        [Column("LogRetentionDays")]
+        public int LogRetentionDays { get; set; } = 30;
+
         [Required]
         [Column("CreatedAt")]
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

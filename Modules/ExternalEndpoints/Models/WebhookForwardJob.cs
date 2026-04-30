@@ -42,6 +42,13 @@ namespace MyApi.Modules.ExternalEndpoints.Models
         [Column("Body")]
         public string? Body { get; set; }
 
+        /// <summary>HMAC-SHA256 secret snapshot — captured at enqueue time so a
+        /// later rotation of the endpoint's ForwardSecret doesn't invalidate
+        /// in-flight retries.</summary>
+        [Column("Secret")]
+        [MaxLength(128)]
+        public string? Secret { get; set; }
+
         [Required]
         [Column("Status")]
         [MaxLength(20)]

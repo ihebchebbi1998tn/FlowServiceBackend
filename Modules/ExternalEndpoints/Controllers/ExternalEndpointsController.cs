@@ -227,6 +227,26 @@ namespace MyApi.Modules.ExternalEndpoints.Controllers
             }
         }
 
+        // Heuristic conversion preview — parses the inbound payload and returns
+        // a structured suggestion (contact + line items + total) the frontend
+        // uses to pre-fill "Create Offer" / "Create Sale" forms. Read-only:
+        // does NOT mutate the log or create any sales records.
+        [HttpGet("{id:int}/logs/{logId:int}/convert-preview")]
+        public async Task<IActionResult> ConvertPreview(int id, int logId)
+        {
+            try
+            {
+                var preview = await _service.PreviewConvertLogAsync(id, logId);
+                if (preview == null) return NotFound(new { success = false, error = new { code = "NOT_FOUND", message = "Log not found or payload not parseable" } });
+                return Ok(new { success = true, data = preview });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error generating convert preview for log {LogId}", logId);
+                return StatusCode(500, new { success = false, error = new { code = "INTERNAL_ERROR", message = "Failed to generate preview" } });
+            }
+        }
+
         [HttpDelete("{id:int}/logs/{logId:int}")]
         public async Task<IActionResult> DeleteLog(int id, int logId)
         {

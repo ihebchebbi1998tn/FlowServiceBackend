@@ -74,7 +74,7 @@ namespace MyApi.Modules.ExternalEndpoints.Services
             return $"{prefix}••••••••••••{suffix}";
         }
 
-        private ExternalEndpointDto MapToDto(ExternalEndpoint e, int totalReceived = 0, int receivedToday = 0, DateTime? lastReceived = null, bool revealKey = false)
+        private ExternalEndpointDto MapToDto(ExternalEndpoint e, int totalReceived = 0, int receivedToday = 0, DateTime? lastReceived = null)
         {
             return new ExternalEndpointDto
             {
@@ -82,13 +82,14 @@ namespace MyApi.Modules.ExternalEndpoints.Services
                 Name = e.Name,
                 Slug = e.Slug,
                 Description = e.Description,
-                ApiKey = revealKey ? e.ApiKey : MaskApiKey(e.ApiKey),
+                ApiKey = MaskApiKey(e.ApiKey),
                 IsActive = e.IsActive,
                 AllowedMethods = e.AllowedMethods,
                 AllowedOrigins = e.AllowedOrigins,
                 ExpectedSchema = e.ExpectedSchema,
                 ResponseTemplate = e.ResponseTemplate,
                 WebhookForwardUrl = e.WebhookForwardUrl,
+                LogRetentionDays = e.LogRetentionDays,
                 CreatedAt = e.CreatedAt,
                 UpdatedAt = e.UpdatedAt,
                 CreatedBy = e.CreatedBy,
@@ -99,7 +100,11 @@ namespace MyApi.Modules.ExternalEndpoints.Services
         }
 
         // SSRF protection: reject webhook forwards to private/loopback/metadata IPs.
-        private static (bool ok, string? error) ValidateWebhookUrl(string? url)
+        // Async DNS so we don't block the threadpool. NOTE: there is still a TOCTOU
+        // window between this check and the worker's actual HTTP request — for
+        // hard-mode SSRF protection, pin the resolved IP via a custom
+        // SocketsHttpHandler.ConnectCallback in the named HttpClient registration.
+        private static async Task<(bool ok, string? error)> ValidateWebhookUrlAsync(string? url)
         {
             if (string.IsNullOrWhiteSpace(url)) return (true, null);
             if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return (false, "Invalid URL");
@@ -109,14 +114,13 @@ namespace MyApi.Modules.ExternalEndpoints.Services
                 return (false, "Loopback / internal hosts are not allowed");
             try
             {
-                var addresses = System.Net.Dns.GetHostAddresses(host);
+                var addresses = await System.Net.Dns.GetHostAddressesAsync(host);
                 foreach (var addr in addresses)
                 {
                     var bytes = addr.GetAddressBytes();
                     if (System.Net.IPAddress.IsLoopback(addr)) return (false, "Loopback IPs are not allowed");
                     if (addr.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
                     {
-                        // 10/8, 172.16/12, 192.168/16, 169.254/16 (link-local incl. AWS metadata)
                         if (bytes[0] == 10) return (false, "Private IPs are not allowed");
                         if (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31) return (false, "Private IPs are not allowed");
                         if (bytes[0] == 192 && bytes[1] == 168) return (false, "Private IPs are not allowed");
@@ -125,9 +129,6 @@ namespace MyApi.Modules.ExternalEndpoints.Services
                     }
                     else if (addr.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6)
                     {
-                        // ::1 loopback already caught by IsLoopback. Block ULA fc00::/7,
-                        // link-local fe80::/10, IPv4-mapped (::ffff:a.b.c.d) re-checked,
-                        // and the IPv6 metadata range (fd00:ec2::254 / Azure fd00::/8).
                         if (addr.IsIPv6LinkLocal || addr.IsIPv6SiteLocal) return (false, "Link-local IPs are not allowed");
                         if ((bytes[0] & 0xFE) == 0xFC) return (false, "Unique-local IPs are not allowed");
                         if (addr.IsIPv4MappedToIPv6)
@@ -149,8 +150,29 @@ namespace MyApi.Modules.ExternalEndpoints.Services
             return (true, null);
         }
 
+        // Clamp user-supplied page size — prevents OOM on `?limit=1000000`.
+        private const int MaxPageSize = 200;
+        private static int ClampLimit(int limit) => limit <= 0 ? 20 : Math.Min(limit, MaxPageSize);
+        private static int ClampPage(int page) => page <= 0 ? 1 : page;
+
+        // Origin enforcement: comma-separated allowlist; "*" or empty = any.
+        private static bool IsOriginAllowed(string? allowedOrigins, string? originHeader)
+        {
+            if (string.IsNullOrWhiteSpace(allowedOrigins) || allowedOrigins.Trim() == "*") return true;
+            if (string.IsNullOrWhiteSpace(originHeader)) return false;
+            var allowed = allowedOrigins.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            return allowed.Any(a => string.Equals(a, originHeader, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static string ComputeHmacHex(string secret, string payload)
+        {
+            using var h = new System.Security.Cryptography.HMACSHA256(Encoding.UTF8.GetBytes(secret));
+            return Convert.ToHexString(h.ComputeHash(Encoding.UTF8.GetBytes(payload ?? string.Empty))).ToLowerInvariant();
+        }
+
         public async Task<PaginatedEndpointResponse> GetEndpointsAsync(string? search = null, string? status = null, int page = 1, int limit = 20)
         {
+            page = ClampPage(page); limit = ClampLimit(limit);
             var query = _context.ExternalEndpoints.AsNoTracking().Where(e => !e.IsDeleted);
 
             if (!string.IsNullOrEmpty(search))
@@ -208,22 +230,21 @@ namespace MyApi.Modules.ExternalEndpoints.Services
         public async Task<ExternalEndpointDto> CreateEndpointAsync(CreateExternalEndpointDto dto, string userId)
         {
             // SSRF guard
-            var (ok, err) = ValidateWebhookUrl(dto.WebhookForwardUrl);
+            var (ok, err) = await ValidateWebhookUrlAsync(dto.WebhookForwardUrl);
             if (!ok) throw new ArgumentException($"Invalid webhook URL: {err}");
 
             var slug = string.IsNullOrEmpty(dto.Slug) ? GenerateSlug(dto.Name) : dto.Slug;
 
             // Slug must be unique GLOBALLY (the receive endpoint is public and
             // resolves a slug across all tenants, then disambiguates by API key).
-            // IgnoreQueryFilters() so the tenant filter doesn't hide collisions
-            // from other tenants — that would let two tenants reserve the same
-            // slug and then trip a DB unique-index violation on insert.
             var exists = await _context.ExternalEndpoints
                 .IgnoreQueryFilters()
                 .AnyAsync(e => e.Slug == slug && !e.IsDeleted);
             if (exists) slug = slug + "-" + Guid.NewGuid().ToString("N")[..4];
 
             var plainKey = GenerateApiKey();
+            // Per-endpoint HMAC secret for signing outbound webhook forwards.
+            var forwardSecret = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
             var entity = new ExternalEndpoint
             {
                 Name = dto.Name,
@@ -236,6 +257,8 @@ namespace MyApi.Modules.ExternalEndpoints.Services
                 ExpectedSchema = dto.ExpectedSchema,
                 ResponseTemplate = dto.ResponseTemplate,
                 WebhookForwardUrl = dto.WebhookForwardUrl,
+                ForwardSecret = forwardSecret,
+                LogRetentionDays = Math.Clamp(dto.LogRetentionDays, 0, 3650),
                 CreatedBy = userId,
                 CreatedAt = DateTime.UtcNow
             };
@@ -255,7 +278,7 @@ namespace MyApi.Modules.ExternalEndpoints.Services
 
             if (dto.WebhookForwardUrl != null)
             {
-                var (ok, err) = ValidateWebhookUrl(dto.WebhookForwardUrl);
+                var (ok, err) = await ValidateWebhookUrlAsync(dto.WebhookForwardUrl);
                 if (!ok) throw new ArgumentException($"Invalid webhook URL: {err}");
             }
 
@@ -267,6 +290,7 @@ namespace MyApi.Modules.ExternalEndpoints.Services
             if (dto.ExpectedSchema != null) entity.ExpectedSchema = dto.ExpectedSchema;
             if (dto.ResponseTemplate != null) entity.ResponseTemplate = dto.ResponseTemplate;
             if (dto.WebhookForwardUrl != null) entity.WebhookForwardUrl = dto.WebhookForwardUrl;
+            if (dto.LogRetentionDays.HasValue) entity.LogRetentionDays = Math.Clamp(dto.LogRetentionDays.Value, 0, 3650);
             entity.UpdatedAt = DateTime.UtcNow;
 
             await _context.SaveChangesAsync();
@@ -354,6 +378,7 @@ namespace MyApi.Modules.ExternalEndpoints.Services
         // Logs
         public async Task<PaginatedLogResponse> GetLogsAsync(int endpointId, int page = 1, int limit = 20)
         {
+            page = ClampPage(page); limit = ClampLimit(limit);
             var query = _context.ExternalEndpointLogs.AsNoTracking().Where(l => l.EndpointId == endpointId);
             var total = await query.CountAsync();
             var logs = await query.OrderByDescending(l => l.ReceivedAt).Skip((page - 1) * limit).Take(limit).ToListAsync();
@@ -394,9 +419,11 @@ namespace MyApi.Modules.ExternalEndpoints.Services
 
         public async Task<bool> ClearLogsAsync(int endpointId)
         {
-            var logs = await _context.ExternalEndpointLogs.Where(l => l.EndpointId == endpointId).ToListAsync();
-            _context.ExternalEndpointLogs.RemoveRange(logs);
-            await _context.SaveChangesAsync();
+            // ExecuteDeleteAsync issues a single DELETE — avoids loading the full
+            // log set into memory (the previous RemoveRange approach OOMs at scale).
+            await _context.ExternalEndpointLogs
+                .Where(l => l.EndpointId == endpointId)
+                .ExecuteDeleteAsync();
             return true;
         }
 
@@ -410,9 +437,7 @@ namespace MyApi.Modules.ExternalEndpoints.Services
         }
 
         // Public receive — bypasses tenant filter by using raw slug lookup.
-        // Slug uniqueness is per-tenant, so multiple tenants can share a slug.
-        // We disambiguate by API key: only the endpoint whose ApiKey matches wins.
-        public async Task<(int statusCode, string responseBody)> ReceiveAsync(string slug, string method, string? headers, string? queryString, string? body, string? sourceIp, string? apiKey)
+        public async Task<(int statusCode, string responseBody)> ReceiveAsync(string slug, string method, string? headers, string? queryString, string? body, string? sourceIp, string? apiKey, string? originHeader = null)
         {
             if (string.IsNullOrEmpty(apiKey))
                 return (401, "{\"error\":\"API key required\"}");
@@ -424,9 +449,6 @@ namespace MyApi.Modules.ExternalEndpoints.Services
 
             if (candidates.Count == 0) return (404, "{\"error\":\"Endpoint not found\"}");
 
-            // Pick the endpoint whose API key matches. Constant-time compare against
-            // the (possibly hashed) stored value to prevent timing oracles. Iterate
-            // over ALL candidates regardless of early hit so total work is uniform.
             ExternalEndpoint? endpoint = null;
             foreach (var c in candidates)
             {
@@ -435,12 +457,14 @@ namespace MyApi.Modules.ExternalEndpoints.Services
             if (endpoint == null) return (401, "{\"error\":\"Invalid API key\"}");
             if (!endpoint.IsActive) return (403, "{\"error\":\"Endpoint is inactive\"}");
 
-            // Validate method
+            // Origin enforcement (CSV allowlist; "*" or empty = any)
+            if (!IsOriginAllowed(endpoint.AllowedOrigins, originHeader))
+                return (403, "{\"error\":\"Origin not allowed\"}");
+
             var allowedMethods = endpoint.AllowedMethods.Split(',').Select(m => m.Trim().ToUpper()).ToList();
             if (!allowedMethods.Contains(method.ToUpper()))
                 return (405, "{\"error\":\"Method not allowed\"}");
 
-            // Store the log
             var log = new ExternalEndpointLog
             {
                 TenantId = endpoint.TenantId,
@@ -461,13 +485,9 @@ namespace MyApi.Modules.ExternalEndpoints.Services
             _context.ExternalEndpointLogs.Add(log);
             await _context.SaveChangesAsync();
 
-            // Optional webhook forwarding — enqueue a durable job and signal the
-            // background worker. The worker handles retries, backoff, and the
-            // dead-letter state. This survives process restarts because the
-            // WebhookForwardJobs table is the source of truth.
             if (!string.IsNullOrEmpty(endpoint.WebhookForwardUrl))
             {
-                var (ok, _) = ValidateWebhookUrl(endpoint.WebhookForwardUrl);
+                var (ok, _) = await ValidateWebhookUrlAsync(endpoint.WebhookForwardUrl);
                 if (ok)
                 {
                     var job = new WebhookForwardJob
@@ -477,6 +497,8 @@ namespace MyApi.Modules.ExternalEndpoints.Services
                         LogId = log.Id,
                         ForwardUrl = endpoint.WebhookForwardUrl!,
                         Body = body,
+                        // Snapshot the secret so secret rotation doesn't break in-flight retries.
+                        Secret = endpoint.ForwardSecret,
                         Status = "pending",
                         NextAttemptAt = DateTime.UtcNow,
                         CreatedAt = DateTime.UtcNow,
@@ -484,8 +506,6 @@ namespace MyApi.Modules.ExternalEndpoints.Services
                     _context.WebhookForwardJobs.Add(job);
                     await _context.SaveChangesAsync();
 
-                    // Best-effort wake-up: missing the signal is harmless because
-                    // the worker also polls for due jobs on a timer.
                     if (_forwardQueue != null)
                     {
                         try { await _forwardQueue.EnqueueAsync(job.Id); }
@@ -499,6 +519,158 @@ namespace MyApi.Modules.ExternalEndpoints.Services
             }
 
             return (200, responseBody);
+        }
+
+        // ----- Conversion: parse a log payload into suggested offer/sale fields.
+        // Heuristic — accepts common shapes (form submissions, e-commerce orders).
+        // The frontend pre-fills the existing CreateOffer/CreateSale form so the
+        // user picks/confirms a Contact and saves via the existing modules.
+        public async Task<ConvertLogPreviewDto?> PreviewConvertLogAsync(int endpointId, int logId)
+        {
+            var log = await _context.ExternalEndpointLogs.AsNoTracking()
+                .FirstOrDefaultAsync(l => l.Id == logId && l.EndpointId == endpointId);
+            if (log == null) return null;
+
+            var preview = new ConvertLogPreviewDto { LogId = log.Id };
+            if (string.IsNullOrWhiteSpace(log.Body)) return preview;
+
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(log.Body);
+                var root = doc.RootElement;
+                preview.RawJson = System.Text.Json.JsonSerializer.Deserialize<object>(log.Body);
+
+                // Try a list of keys, return value + which key matched (null if none).
+                (string? value, string? matchedKey) GetStr(params string[] keys)
+                {
+                    if (root.ValueKind != System.Text.Json.JsonValueKind.Object) return (null, null);
+                    foreach (var k in keys)
+                        if (root.TryGetProperty(k, out var v)
+                            && v.ValueKind == System.Text.Json.JsonValueKind.String)
+                        {
+                            var s = v.GetString();
+                            if (!string.IsNullOrWhiteSpace(s)) return (s.Trim(), k);
+                        }
+                    return (null, null);
+                }
+
+                // Confidence rule: the FIRST key in the list is the canonical name —
+                // a match on it counts as "exact". Any other key is "inferred".
+                void Set(string field, (string? value, string? matchedKey) hit, string canonical)
+                {
+                    if (hit.value == null) { preview.Confidence[field] = "none"; return; }
+                    preview.Confidence[field] = hit.matchedKey == canonical ? "exact" : "inferred";
+                }
+
+                var name = GetStr("contactName", "name", "fullName", "full_name", "customerName", "customer_name");
+                preview.ContactName = name.value;
+                Set("contactName", name, "contactName");
+
+                var email = GetStr("email", "customerEmail", "customer_email", "contactEmail");
+                preview.Email = email.value;
+                Set("email", email, "email");
+
+                var phone = GetStr("phone", "phoneNumber", "phone_number", "tel", "mobile");
+                preview.Phone = phone.value;
+                Set("phone", phone, "phone");
+
+                var address = GetStr("address", "shippingAddress", "shipping_address", "billingAddress", "billing_address", "location");
+                preview.Address = address.value;
+                Set("address", address, "address");
+
+                var currency = GetStr("currency", "currencyCode", "currency_code");
+                preview.Currency = currency.value;
+                Set("currency", currency, "currency");
+
+                var notes = GetStr("notes", "message", "description", "comment", "remarks");
+                preview.Notes = notes.value;
+                Set("notes", notes, "notes");
+
+                // Items: look for "items" / "products" / "line_items" arrays
+                System.Text.Json.JsonElement itemsArr = default;
+                string? matchedItemsKey = null;
+                if (root.ValueKind == System.Text.Json.JsonValueKind.Object)
+                {
+                    foreach (var k in new[] { "items", "products", "line_items", "lineItems" })
+                    {
+                        if (root.TryGetProperty(k, out itemsArr) && itemsArr.ValueKind == System.Text.Json.JsonValueKind.Array)
+                        { matchedItemsKey = k; break; }
+                    }
+                }
+
+                if (matchedItemsKey != null)
+                {
+                    foreach (var it in itemsArr.EnumerateArray())
+                    {
+                        if (it.ValueKind != System.Text.Json.JsonValueKind.Object) continue;
+
+                        string? descKey = null, qtyKey = null, priceKey = null;
+                        string? desc = null;
+                        if (it.TryGetProperty("description", out var d) && d.ValueKind == System.Text.Json.JsonValueKind.String) { desc = d.GetString(); descKey = "description"; }
+                        else if (it.TryGetProperty("name", out var n) && n.ValueKind == System.Text.Json.JsonValueKind.String) { desc = n.GetString(); descKey = "name"; }
+                        else if (it.TryGetProperty("title", out var ti) && ti.ValueKind == System.Text.Json.JsonValueKind.String) { desc = ti.GetString(); descKey = "title"; }
+
+                        decimal? qty = null;
+                        if (it.TryGetProperty("quantity", out var q) && q.TryGetDecimal(out var qv)) { qty = qv; qtyKey = "quantity"; }
+                        else if (it.TryGetProperty("qty", out var q2) && q2.TryGetDecimal(out var qv2)) { qty = qv2; qtyKey = "qty"; }
+
+                        decimal? price = null;
+                        if (it.TryGetProperty("unitPrice", out var up) && up.TryGetDecimal(out var upv)) { price = upv; priceKey = "unitPrice"; }
+                        else if (it.TryGetProperty("price", out var p) && p.TryGetDecimal(out var pv)) { price = pv; priceKey = "price"; }
+                        else if (it.TryGetProperty("amount", out var a) && a.TryGetDecimal(out var av)) { price = av; priceKey = "amount"; }
+
+                        var quantity = qty ?? 1m;
+                        var unitPrice = price ?? 0m;
+                        var allCanonical = descKey == "description" && qtyKey == "quantity" && priceKey == "unitPrice";
+
+                        preview.Items.Add(new ConvertLogItemDto
+                        {
+                            Description = desc,
+                            Quantity = quantity,
+                            UnitPrice = unitPrice,
+                            TotalPrice = quantity * unitPrice,
+                            Confidence = allCanonical ? "exact" : "inferred",
+                        });
+                    }
+                    preview.Confidence["items"] = preview.Items.All(i => i.Confidence == "exact") ? "exact" : "inferred";
+                }
+                else
+                {
+                    preview.Confidence["items"] = "none";
+                }
+
+                // TotalAmount: prefer an explicit key, else compute from items.
+                if (root.ValueKind == System.Text.Json.JsonValueKind.Object)
+                {
+                    string? totalKey = null;
+                    decimal? total = null;
+                    foreach (var k in new[] { "totalAmount", "total", "amount", "grandTotal", "grand_total" })
+                    {
+                        if (root.TryGetProperty(k, out var tv) && tv.TryGetDecimal(out var tvv))
+                        { total = tvv; totalKey = k; break; }
+                    }
+                    if (total.HasValue)
+                    {
+                        preview.TotalAmount = total;
+                        preview.Confidence["totalAmount"] = totalKey == "totalAmount" ? "exact" : "inferred";
+                    }
+                    else if (preview.Items.Count > 0)
+                    {
+                        preview.TotalAmount = preview.Items.Sum(i => (i.Quantity ?? 0) * (i.UnitPrice ?? 0));
+                        preview.Confidence["totalAmount"] = "inferred";
+                    }
+                    else
+                    {
+                        preview.Confidence["totalAmount"] = "none";
+                    }
+                }
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                // Body is not JSON — return the empty preview with RawJson=null so UI can show a "raw text" notice.
+            }
+
+            return preview;
         }
     }
 }

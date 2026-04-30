@@ -19,6 +19,9 @@ namespace MyApi.Modules.ExternalEndpoints.Database
         {
             builder.HasIndex(l => l.EndpointId);
             builder.HasIndex(l => l.ReceivedAt);
+            // Hot path: list logs for an endpoint, newest first.
+            builder.HasIndex(l => new { l.EndpointId, l.ReceivedAt })
+                .HasDatabaseName("ix_ExternalEndpointLogs_EndpointId_ReceivedAt");
         }
     }
 
