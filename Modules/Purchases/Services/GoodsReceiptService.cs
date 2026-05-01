@@ -64,7 +64,7 @@ namespace MyApi.Modules.Purchases.Services
             return MapToDto(receipt, poNumber);
         }
 
-        public async Task<GoodsReceiptDto> CreateReceiptAsync(CreateGoodsReceiptDto dto, string userId)
+        public async Task<GoodsReceiptDto> CreateReceiptAsync(CreateGoodsReceiptDto dto, string userId, string? userName = null)
         {
             // Serializable isolation prevents two concurrent receipts for the same PO
             // from both passing the over-receipt check on stale ReceivedQty values.
@@ -160,6 +160,22 @@ namespace MyApi.Modules.Purchases.Services
                         po.Status = "received";
                         po.ActualDelivery = DateTime.UtcNow;
                         receipt.Status = "complete";
+
+                        // Mark all prior non-deleted receipts for this PO as complete too.
+                        // Without this, earlier "partial" receipts stay partial forever even
+                        // though the PO is now fully satisfied by the cumulative receipts.
+                        var priorReceipts = await _context.GoodsReceipts
+                            .Where(r => r.PurchaseOrderId == po.Id
+                                        && r.Id != receipt.Id
+                                        && !r.IsDeleted
+                                        && r.Status != "complete")
+                            .ToListAsync();
+                        foreach (var pr in priorReceipts)
+                        {
+                            pr.Status = "complete";
+                            pr.ModifiedDate = DateTime.UtcNow;
+                            pr.ModifiedBy = userId;
+                        }
                     }
                     else if (anyReceived)
                     {
@@ -170,7 +186,7 @@ namespace MyApi.Modules.Purchases.Services
                     {
                         EntityType = "goods_receipt", EntityId = receipt.Id, ActivityType = "created",
                         Description = $"Goods receipt {receiptNumber} created for PO {po.OrderNumber}",
-                        PerformedBy = userId, PerformedAt = DateTime.UtcNow
+                        PerformedBy = userId, PerformedByName = userName, PerformedAt = DateTime.UtcNow
                     });
                     await _context.SaveChangesAsync();
 
@@ -201,7 +217,7 @@ namespace MyApi.Modules.Purchases.Services
             return (await GetReceiptByIdAsync(receiptId))!;
         }
 
-        public async Task<bool> DeleteReceiptAsync(int id, string userId)
+        public async Task<bool> DeleteReceiptAsync(int id, string userId, string? userName = null)
         {
             var receipt = await _context.GoodsReceipts.Include(r => r.Items).FirstOrDefaultAsync(r => r.Id == id && !r.IsDeleted);
             if (receipt == null) return false;
@@ -246,6 +262,26 @@ namespace MyApi.Modules.Purchases.Services
                         if (allFullyReceived) po.Status = "received";
                         else if (anyReceived) po.Status = "partially_received";
                         else { po.Status = "ordered"; po.ActualDelivery = null; }
+
+                        // If the PO is no longer fully received after this deletion,
+                        // sibling receipts that were auto-promoted to "complete" must
+                        // revert to "partial" so receipt status stays consistent with
+                        // the cumulative-receipt rule.
+                        if (!allFullyReceived)
+                        {
+                            var siblings = await _context.GoodsReceipts
+                                .Where(r => r.PurchaseOrderId == po.Id
+                                            && r.Id != receipt.Id
+                                            && !r.IsDeleted
+                                            && r.Status == "complete")
+                                .ToListAsync();
+                            foreach (var s in siblings)
+                            {
+                                s.Status = "partial";
+                                s.ModifiedDate = DateTime.UtcNow;
+                                s.ModifiedBy = userId;
+                            }
+                        }
                     }
 
                     // SOFT-DELETE: preserve receipt + items rows for audit. The receipt
@@ -262,7 +298,7 @@ namespace MyApi.Modules.Purchases.Services
                     {
                         EntityType = "goods_receipt", EntityId = id, ActivityType = "deleted",
                         Description = $"Goods receipt {receipt.ReceiptNumber} soft-deleted, received quantities reversed",
-                        PerformedBy = userId, PerformedAt = DateTime.UtcNow
+                        PerformedBy = userId, PerformedByName = userName, PerformedAt = DateTime.UtcNow
                     });
 
                     await _context.SaveChangesAsync();

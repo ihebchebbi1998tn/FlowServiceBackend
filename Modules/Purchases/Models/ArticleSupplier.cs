@@ -65,6 +65,19 @@ namespace MyApi.Modules.Purchases.Models
         [MaxLength(100)]
         public string? ModifiedBy { get; set; }
 
+        // Soft-delete columns. Hard delete used to drop the row (and, via the
+        // previous Cascade FK, its entire price history). Now we tombstone the
+        // row and preserve ArticleSupplierPriceHistory for audit / reporting.
+        [Column("IsDeleted")]
+        public bool IsDeleted { get; set; } = false;
+
+        [Column("DeletedAt")]
+        public DateTime? DeletedAt { get; set; }
+
+        [Column("DeletedBy")]
+        [MaxLength(100)]
+        public string? DeletedBy { get; set; }
+
         // Navigation
         [ForeignKey("ArticleId")]
         public virtual MyApi.Modules.Articles.Models.Article? Article { get; set; }

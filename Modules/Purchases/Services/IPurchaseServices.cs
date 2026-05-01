@@ -9,9 +9,9 @@ namespace MyApi.Modules.Purchases.Services
             DateTime? dateFrom = null, DateTime? dateTo = null, string? search = null,
             int page = 1, int limit = 20, string sortBy = "created_date", string sortOrder = "desc");
         Task<PurchaseOrderDto?> GetOrderByIdAsync(int id);
-        Task<PurchaseOrderDto> CreateOrderAsync(CreatePurchaseOrderDto dto, string userId);
-        Task<PurchaseOrderDto> UpdateOrderAsync(int id, UpdatePurchaseOrderDto dto, string userId);
-        Task<bool> DeleteOrderAsync(int id, string userId);
+        Task<PurchaseOrderDto> CreateOrderAsync(CreatePurchaseOrderDto dto, string userId, string? userName = null);
+        Task<PurchaseOrderDto> UpdateOrderAsync(int id, UpdatePurchaseOrderDto dto, string userId, string? userName = null);
+        Task<bool> DeleteOrderAsync(int id, string userId, string? userName = null);
         Task<PurchaseOrderStatsDto> GetStatsAsync(DateTime? dateFrom = null, DateTime? dateTo = null);
         // Items
         Task<PurchaseOrderItemDto> AddItemAsync(int orderId, CreatePurchaseOrderItemDto dto);
@@ -28,8 +28,8 @@ namespace MyApi.Modules.Purchases.Services
             DateTime? dateFrom = null, DateTime? dateTo = null, string? search = null,
             int page = 1, int limit = 20, string sortBy = "created_date", string sortOrder = "desc");
         Task<GoodsReceiptDto?> GetReceiptByIdAsync(int id);
-        Task<GoodsReceiptDto> CreateReceiptAsync(CreateGoodsReceiptDto dto, string userId);
-        Task<bool> DeleteReceiptAsync(int id, string userId);
+        Task<GoodsReceiptDto> CreateReceiptAsync(CreateGoodsReceiptDto dto, string userId, string? userName = null);
+        Task<bool> DeleteReceiptAsync(int id, string userId, string? userName = null);
     }
 
     public interface ISupplierInvoiceService
@@ -39,9 +39,9 @@ namespace MyApi.Modules.Purchases.Services
             DateTime? dateFrom = null, DateTime? dateTo = null, string? search = null,
             int page = 1, int limit = 20, string sortBy = "created_date", string sortOrder = "desc");
         Task<SupplierInvoiceDto?> GetInvoiceByIdAsync(int id);
-        Task<SupplierInvoiceDto> CreateInvoiceAsync(CreateSupplierInvoiceDto dto, string userId);
-        Task<SupplierInvoiceDto> UpdateInvoiceAsync(int id, UpdateSupplierInvoiceDto dto, string userId);
-        Task<bool> DeleteInvoiceAsync(int id, string userId);
+        Task<SupplierInvoiceDto> CreateInvoiceAsync(CreateSupplierInvoiceDto dto, string userId, string? userName = null);
+        Task<SupplierInvoiceDto> UpdateInvoiceAsync(int id, UpdateSupplierInvoiceDto dto, string userId, string? userName = null);
+        Task<bool> DeleteInvoiceAsync(int id, string userId, string? userName = null);
         // Items
         Task<SupplierInvoiceItemDto> AddItemAsync(int invoiceId, CreateSupplierInvoiceItemDto dto);
         Task<SupplierInvoiceItemDto> UpdateItemAsync(int invoiceId, int itemId, CreateSupplierInvoiceItemDto dto);
@@ -55,7 +55,7 @@ namespace MyApi.Modules.Purchases.Services
         Task<ArticleSupplierDto?> GetByIdAsync(int id);
         Task<ArticleSupplierDto> CreateAsync(CreateArticleSupplierDto dto, string userId);
         Task<ArticleSupplierDto> UpdateAsync(int id, UpdateArticleSupplierDto dto, string userId);
-        Task<bool> DeleteAsync(int id);
+        Task<bool> DeleteAsync(int id, string userId);
         Task<List<ArticleSupplierPriceHistoryDto>> GetPriceHistoryAsync(int articleSupplierId);
     }
 }

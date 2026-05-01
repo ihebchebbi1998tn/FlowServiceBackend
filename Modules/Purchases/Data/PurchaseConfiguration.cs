@@ -88,7 +88,10 @@ namespace MyApi.Modules.Purchases.Data
             {
                 entity.ToTable("ArticleSuppliers");
                 entity.HasKey(e => e.Id);
-                entity.HasMany(e => e.PriceHistory).WithOne(h => h.ArticleSupplier).HasForeignKey(h => h.ArticleSupplierId).OnDelete(DeleteBehavior.Cascade);
+                // Restrict (was Cascade): we now soft-delete ArticleSupplier so price
+                // history must remain intact. Restrict prevents a future hard delete
+                // from silently dropping the historical price audit trail.
+                entity.HasMany(e => e.PriceHistory).WithOne(h => h.ArticleSupplier).HasForeignKey(h => h.ArticleSupplierId).OnDelete(DeleteBehavior.Restrict);
             });
         }
     }

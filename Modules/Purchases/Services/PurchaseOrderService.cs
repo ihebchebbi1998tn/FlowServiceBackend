@@ -65,7 +65,7 @@ namespace MyApi.Modules.Purchases.Services
             return order == null ? null : MapToDto(order);
         }
 
-        public async Task<PurchaseOrderDto> CreateOrderAsync(CreatePurchaseOrderDto dto, string userId)
+        public async Task<PurchaseOrderDto> CreateOrderAsync(CreatePurchaseOrderDto dto, string userId, string? userName = null)
         {
             var supplier = await _context.Contacts.FindAsync(dto.SupplierId)
                 ?? throw new KeyNotFoundException($"Supplier with ID {dto.SupplierId} not found");
@@ -140,7 +140,7 @@ namespace MyApi.Modules.Purchases.Services
                         await _context.SaveChangesAsync();
                     }
 
-                    LogActivity("purchase_order", order.Id, "created", $"Purchase order {orderNumber} created", userId);
+                    LogActivity("purchase_order", order.Id, "created", $"Purchase order {orderNumber} created", userId, userName);
                     await _context.SaveChangesAsync();
                     await tx.CommitAsync();
                 }
@@ -181,7 +181,7 @@ namespace MyApi.Modules.Purchases.Services
             ["closed"] = new(StringComparer.OrdinalIgnoreCase) { },
         };
 
-        public async Task<PurchaseOrderDto> UpdateOrderAsync(int id, UpdatePurchaseOrderDto dto, string userId)
+        public async Task<PurchaseOrderDto> UpdateOrderAsync(int id, UpdatePurchaseOrderDto dto, string userId, string? userName = null)
         {
             var order = await _context.PurchaseOrders.Include(o => o.Items).FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
                 ?? throw new KeyNotFoundException($"PurchaseOrder {id} not found");
@@ -217,13 +217,13 @@ namespace MyApi.Modules.Purchases.Services
             }
 
             if (dto.Status != null && dto.Status != oldStatus)
-                LogActivity("purchase_order", id, "status_changed", $"Status changed from {oldStatus} to {dto.Status}", userId, oldStatus, dto.Status);
+                LogActivity("purchase_order", id, "status_changed", $"Status changed from {oldStatus} to {dto.Status}", userId, userName, oldStatus, dto.Status);
 
             await _context.SaveChangesAsync();
             return (await GetOrderByIdAsync(id))!;
         }
 
-        public async Task<bool> DeleteOrderAsync(int id, string userId)
+        public async Task<bool> DeleteOrderAsync(int id, string userId, string? userName = null)
         {
             var order = await _context.PurchaseOrders.FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted);
             if (order == null) return false;
@@ -246,7 +246,7 @@ namespace MyApi.Modules.Purchases.Services
                 throw new InvalidOperationException($"Cannot delete purchase order {order.OrderNumber}: it has goods receipts. Delete the receipts first.");
 
             order.IsDeleted = true; order.DeletedAt = DateTime.UtcNow; order.DeletedBy = userId;
-            LogActivity("purchase_order", id, "deleted", $"Purchase order {order.OrderNumber} deleted", userId);
+            LogActivity("purchase_order", id, "deleted", $"Purchase order {order.OrderNumber} deleted", userId, userName);
             await _context.SaveChangesAsync();
             return true;
         }
@@ -341,7 +341,7 @@ namespace MyApi.Modules.Purchases.Services
 
         public async Task<List<PurchaseActivityDto>> GetActivitiesAsync(int orderId, int page, int limit)
         {
-            return await _context.PurchaseActivities.AsNoTracking()
+            var rows = await _context.PurchaseActivities.AsNoTracking()
                 .Where(a => a.EntityType == "purchase_order" && a.EntityId == orderId)
                 .OrderByDescending(a => a.PerformedAt)
                 .Skip((page - 1) * limit).Take(limit)
@@ -353,6 +353,34 @@ namespace MyApi.Modules.Purchases.Services
                     PerformedBy = a.PerformedBy, PerformedByName = a.PerformedByName,
                     PerformedAt = a.PerformedAt
                 }).ToListAsync();
+
+            // Backfill display name for legacy rows that pre-date PerformedByName persistence.
+            // Look up the User row once per missing id and fall back to "First Last" / Email.
+            var missingUserIds = rows
+                .Where(r => string.IsNullOrEmpty(r.PerformedByName) && !string.IsNullOrEmpty(r.PerformedBy))
+                .Select(r => r.PerformedBy)
+                .Distinct()
+                .Select(s => int.TryParse(s, out var n) ? (int?)n : null)
+                .Where(n => n.HasValue)
+                .Select(n => n!.Value)
+                .ToList();
+            if (missingUserIds.Count > 0)
+            {
+                var userMap = await _context.Users.AsNoTracking()
+                    .Where(u => missingUserIds.Contains(u.Id))
+                    .Select(u => new { u.Id, u.FirstName, u.LastName, u.Email })
+                    .ToDictionaryAsync(u => u.Id.ToString(), u =>
+                        !string.IsNullOrWhiteSpace((u.FirstName + " " + u.LastName).Trim())
+                            ? (u.FirstName + " " + u.LastName).Trim()
+                            : u.Email);
+                foreach (var r in rows)
+                {
+                    if (!string.IsNullOrEmpty(r.PerformedByName)) continue;
+                    if (!string.IsNullOrEmpty(r.PerformedBy) && userMap.TryGetValue(r.PerformedBy, out var name))
+                        r.PerformedByName = name;
+                }
+            }
+            return rows;
         }
 
         // ── Helpers ──
@@ -371,22 +399,41 @@ namespace MyApi.Modules.Purchases.Services
             order.SubTotal = items.Sum(i => i.Quantity * i.UnitPrice);
             var discAmt = order.DiscountType == "percentage" ? order.SubTotal * order.Discount / 100 : order.Discount;
             var afterDiscount = order.SubTotal - discAmt;
-            order.TaxAmount = items.Sum(i =>
-            {
-                var sub = i.Quantity * i.UnitPrice;
-                var d = i.DiscountType == "percentage" ? sub * i.Discount / 100 : i.Discount;
-                return (sub - d) * i.TaxRate / 100;
-            });
+
+            // Tax must be computed on the DISCOUNTED base (per-line discount + pro-rated
+            // header discount) so PO totals reconcile with the originating SupplierInvoice.
+            // Previously the header discount was ignored when computing tax, causing VAT
+            // to be over-reported whenever a header-level discount was applied.
+            // We pro-rate the header discount by each line's post-line-discount base so
+            // per-line tax rates are preserved.
+            var lineBases = items
+                .Select(i =>
+                {
+                    var sub = i.Quantity * i.UnitPrice;
+                    var d = i.DiscountType == "percentage" ? sub * i.Discount / 100 : i.Discount;
+                    return new { Item = i, AfterLineDiscount = sub - d };
+                })
+                .ToList();
+            var totalAfterLineDiscount = lineBases.Sum(x => x.AfterLineDiscount);
+            order.TaxAmount = totalAfterLineDiscount > 0
+                ? lineBases.Sum(x =>
+                {
+                    var lineShare = x.AfterLineDiscount / totalAfterLineDiscount;
+                    var lineAfterHeaderDisc = x.AfterLineDiscount - (discAmt * lineShare);
+                    return lineAfterHeaderDisc * x.Item.TaxRate / 100;
+                })
+                : 0m;
+
             order.GrandTotal = afterDiscount + order.TaxAmount + order.FiscalStamp;
         }
 
-        private void LogActivity(string entityType, int entityId, string activityType, string desc, string userId, string? oldVal = null, string? newVal = null)
+        private void LogActivity(string entityType, int entityId, string activityType, string desc, string userId, string? userName = null, string? oldVal = null, string? newVal = null)
         {
             _context.PurchaseActivities.Add(new PurchaseActivity
             {
                 EntityType = entityType, EntityId = entityId, ActivityType = activityType,
                 Description = desc, OldValue = oldVal, NewValue = newVal,
-                PerformedBy = userId, PerformedAt = DateTime.UtcNow
+                PerformedBy = userId, PerformedByName = userName, PerformedAt = DateTime.UtcNow
             });
         }
 

@@ -68,7 +68,7 @@ namespace MyApi.Modules.Purchases.Controllers
             try
             {
                 var userId = GetUserId();
-                var receipt = await _service.CreateReceiptAsync(dto, userId);
+                var receipt = await _service.CreateReceiptAsync(dto, userId, GetUserName());
                 await _systemLogService.LogSuccessAsync($"Goods receipt created: {receipt.ReceiptNumber}", "Purchases", "create", userId, GetUserName(), "GoodsReceipt", receipt.Id.ToString());
                 return CreatedAtAction(nameof(GetReceipt), new { id = receipt.Id }, new { success = true, data = receipt });
             }
@@ -97,7 +97,7 @@ namespace MyApi.Modules.Purchases.Controllers
             try
             {
                 var userId = GetUserId();
-                if (!await _service.DeleteReceiptAsync(id, userId))
+                if (!await _service.DeleteReceiptAsync(id, userId, GetUserName()))
                     return NotFound(new { success = false, error = new { code = "NOT_FOUND", message = "Goods receipt not found" } });
                 await _systemLogService.LogSuccessAsync($"Goods receipt deleted: {id}", "Purchases", "delete", userId, GetUserName(), "GoodsReceipt", id.ToString());
                 return Ok(new { success = true, message = "Deleted successfully" });

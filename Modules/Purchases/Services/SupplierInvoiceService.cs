@@ -62,7 +62,7 @@ namespace MyApi.Modules.Purchases.Services
             return MapToDto(inv, poNumber);
         }
 
-        public async Task<SupplierInvoiceDto> CreateInvoiceAsync(CreateSupplierInvoiceDto dto, string userId)
+        public async Task<SupplierInvoiceDto> CreateInvoiceAsync(CreateSupplierInvoiceDto dto, string userId, string? userName = null)
         {
             var supplier = await _context.Contacts.FindAsync(dto.SupplierId)
                 ?? throw new KeyNotFoundException($"Supplier {dto.SupplierId} not found");
@@ -173,7 +173,8 @@ namespace MyApi.Modules.Purchases.Services
                     _context.PurchaseActivities.Add(new PurchaseActivity
                     {
                         EntityType = "supplier_invoice", EntityId = invoice.Id, ActivityType = "created",
-                        Description = $"Supplier invoice {invoiceNumber} created", PerformedBy = userId, PerformedAt = DateTime.UtcNow
+                        Description = $"Supplier invoice {invoiceNumber} created",
+                        PerformedBy = userId, PerformedByName = userName, PerformedAt = DateTime.UtcNow
                     });
                     await _context.SaveChangesAsync();
                     await tx.CommitAsync();
@@ -188,96 +189,131 @@ namespace MyApi.Modules.Purchases.Services
             return (await GetInvoiceByIdAsync(invoice.Id))!;
         }
 
-        public async Task<SupplierInvoiceDto> UpdateInvoiceAsync(int id, UpdateSupplierInvoiceDto dto, string userId)
+        public async Task<SupplierInvoiceDto> UpdateInvoiceAsync(int id, UpdateSupplierInvoiceDto dto, string userId, string? userName = null)
         {
-            var invoice = await _context.SupplierInvoices.FirstOrDefaultAsync(i => i.Id == id && !i.IsDeleted)
-                ?? throw new KeyNotFoundException($"SupplierInvoice {id} not found");
-
-            var oldStatus = invoice.Status;
-            if (dto.SupplierInvoiceRef != null) invoice.SupplierInvoiceRef = dto.SupplierInvoiceRef;
-            if (dto.Status != null)
+            // Wrap the entire mutation in a transaction with a SELECT...FOR UPDATE lock
+            // on the invoice row. Without this, two concurrent PATCHes that both set
+            // AmountPaid (e.g., two payment recordings posted from different tabs)
+            // each read a stale snapshot, compute "paid" status against the same
+            // pre-payment AmountPaid, and the second SaveChangesAsync overwrites the
+            // first — silently losing a payment and producing wrong status.
+            //
+            // Recalc lives inside the same transaction so GrandTotal-driven status
+            // derivation also sees a consistent base.
+            var strategy = _context.Database.CreateExecutionStrategy();
+            await strategy.ExecuteAsync(async () =>
             {
-                // Status state machine: terminal states cannot silently revert.
-                // - "cancelled" is final.
-                // - "paid" can only go to "cancelled" (e.g., refund/correction).
-                // Anything else is a no-op transition allowed.
-                if (oldStatus == "cancelled" && dto.Status != "cancelled")
-                    throw new InvalidOperationException("Cancelled invoices cannot change status");
-                if (oldStatus == "paid" && dto.Status != "paid" && dto.Status != "cancelled")
-                    throw new InvalidOperationException($"Paid invoices cannot transition to '{dto.Status}'");
-                invoice.Status = dto.Status;
-            }
-            if (dto.DueDate.HasValue) invoice.DueDate = dto.DueDate.Value;
-            if (dto.Discount.HasValue) invoice.Discount = dto.Discount.Value;
-            if (dto.DiscountType != null) invoice.DiscountType = dto.DiscountType;
-            if (dto.FiscalStamp.HasValue) invoice.FiscalStamp = dto.FiscalStamp.Value;
-            if (dto.PaymentMethod != null) invoice.PaymentMethod = dto.PaymentMethod;
-            if (dto.AmountPaid.HasValue)
-            {
-                invoice.AmountPaid = dto.AmountPaid.Value;
-                // Only auto-derive status from payment when caller did not pass an explicit Status,
-                // and never override the cancelled terminal state.
-                if (dto.Status == null && oldStatus != "cancelled")
+                using var tx = await _context.Database.BeginTransactionAsync();
+                try
                 {
-                    if (invoice.AmountPaid >= invoice.GrandTotal && invoice.GrandTotal > 0)
+                    // Postgres row-level lock; serializes any concurrent UpdateInvoiceAsync
+                    // for the same invoice id. Other invoices remain unblocked.
+                    var invoice = await _context.SupplierInvoices
+                        .FromSqlInterpolated($"SELECT * FROM \"SupplierInvoices\" WHERE \"Id\" = {id} AND \"IsDeleted\" = false FOR UPDATE")
+                        .FirstOrDefaultAsync()
+                        ?? throw new KeyNotFoundException($"SupplierInvoice {id} not found");
+
+                    var oldStatus = invoice.Status;
+                    if (dto.SupplierInvoiceRef != null) invoice.SupplierInvoiceRef = dto.SupplierInvoiceRef;
+                    if (dto.Status != null)
                     {
-                        invoice.Status = "paid";
-                        invoice.PaymentDate ??= DateTime.UtcNow;
+                        if (oldStatus == "cancelled" && dto.Status != "cancelled")
+                            throw new InvalidOperationException("Cancelled invoices cannot change status");
+                        if (oldStatus == "paid" && dto.Status != "paid" && dto.Status != "cancelled")
+                            throw new InvalidOperationException($"Paid invoices cannot transition to '{dto.Status}'");
+                        invoice.Status = dto.Status;
                     }
-                    else if (invoice.AmountPaid > 0)
+                    if (dto.DueDate.HasValue) invoice.DueDate = dto.DueDate.Value;
+                    if (dto.Discount.HasValue) invoice.Discount = dto.Discount.Value;
+                    if (dto.DiscountType != null) invoice.DiscountType = dto.DiscountType;
+                    if (dto.FiscalStamp.HasValue) invoice.FiscalStamp = dto.FiscalStamp.Value;
+                    if (dto.PaymentMethod != null) invoice.PaymentMethod = dto.PaymentMethod;
+                    if (dto.AmountPaid.HasValue)
                     {
-                        invoice.Status = "partially_paid";
+                        if (dto.AmountPaid.Value < 0)
+                            throw new InvalidOperationException("AmountPaid cannot be negative");
+                        // Guard: prevent overpayment when a concurrent payment already
+                        // settled the invoice. The locked read above guarantees we see
+                        // the latest persisted AmountPaid here.
+                        if (invoice.GrandTotal > 0 && dto.AmountPaid.Value > invoice.GrandTotal)
+                            throw new InvalidOperationException(
+                                $"AmountPaid ({dto.AmountPaid.Value}) exceeds GrandTotal ({invoice.GrandTotal}); a concurrent payment may have settled this invoice");
+
+                        invoice.AmountPaid = dto.AmountPaid.Value;
+                        if (dto.Status == null && oldStatus != "cancelled")
+                        {
+                            if (invoice.AmountPaid >= invoice.GrandTotal && invoice.GrandTotal > 0)
+                            {
+                                invoice.Status = "paid";
+                                invoice.PaymentDate ??= DateTime.UtcNow;
+                            }
+                            else if (invoice.AmountPaid > 0)
+                            {
+                                invoice.Status = "partially_paid";
+                            }
+                            else
+                            {
+                                invoice.Status = "pending";
+                                invoice.PaymentDate = null;
+                            }
+                        }
                     }
-                    else
+                    if (dto.PaymentDate.HasValue) invoice.PaymentDate = dto.PaymentDate;
+                    if (dto.Notes != null) invoice.Notes = dto.Notes;
+                    if (dto.RsApplicable.HasValue) invoice.RsApplicable = dto.RsApplicable.Value;
+                    if (dto.RsTypeCode != null) invoice.RsTypeCode = dto.RsTypeCode;
+                    if (dto.TejSynced.HasValue) invoice.TejSynced = dto.TejSynced.Value;
+                    if (dto.TejSyncDate.HasValue) invoice.TejSyncDate = dto.TejSyncDate;
+                    if (dto.TejSyncStatus != null) invoice.TejSyncStatus = dto.TejSyncStatus;
+                    if (dto.TejErrorMessage != null) invoice.TejErrorMessage = dto.TejErrorMessage;
+                    if (dto.FactureEnLigneId != null) invoice.FactureEnLigneId = dto.FactureEnLigneId;
+                    if (dto.FactureEnLigneStatus != null) invoice.FactureEnLigneStatus = dto.FactureEnLigneStatus;
+                    if (dto.FactureEnLigneSentAt.HasValue) invoice.FactureEnLigneSentAt = dto.FactureEnLigneSentAt;
+                    invoice.ModifiedDate = DateTime.UtcNow;
+                    invoice.ModifiedBy = userId;
+
+                    if (dto.Status != null && dto.Status != oldStatus)
                     {
-                        // Payment cleared (e.g. refund / correction) — fall back to pending
-                        // and clear PaymentDate so the invoice doesn't look settled.
-                        invoice.Status = "pending";
-                        invoice.PaymentDate = null;
+                        _context.PurchaseActivities.Add(new PurchaseActivity
+                        {
+                            EntityType = "supplier_invoice", EntityId = id, ActivityType = "status_changed",
+                            Description = $"Status changed from {oldStatus} to {dto.Status}",
+                            OldValue = oldStatus, NewValue = dto.Status,
+                            PerformedBy = userId, PerformedByName = userName, PerformedAt = DateTime.UtcNow
+                        });
                     }
+                    await _context.SaveChangesAsync();
+
+                    // Recalc inside the same transaction/lock so totals + status remain consistent.
+                    if (dto.Discount.HasValue || dto.DiscountType != null || dto.FiscalStamp.HasValue
+                        || dto.RsApplicable.HasValue || dto.RsTypeCode != null)
+                    {
+                        await RecalculateInvoiceTotalsAsync(id);
+                    }
+
+                    await tx.CommitAsync();
                 }
-            }
-            if (dto.PaymentDate.HasValue) invoice.PaymentDate = dto.PaymentDate;
-            if (dto.Notes != null) invoice.Notes = dto.Notes;
-            if (dto.RsApplicable.HasValue) invoice.RsApplicable = dto.RsApplicable.Value;
-            if (dto.RsTypeCode != null) invoice.RsTypeCode = dto.RsTypeCode;
-            // TEJ sync fields
-            if (dto.TejSynced.HasValue) invoice.TejSynced = dto.TejSynced.Value;
-            if (dto.TejSyncDate.HasValue) invoice.TejSyncDate = dto.TejSyncDate;
-            if (dto.TejSyncStatus != null) invoice.TejSyncStatus = dto.TejSyncStatus;
-            if (dto.TejErrorMessage != null) invoice.TejErrorMessage = dto.TejErrorMessage;
-            // Facture en ligne fields
-            if (dto.FactureEnLigneId != null) invoice.FactureEnLigneId = dto.FactureEnLigneId;
-            if (dto.FactureEnLigneStatus != null) invoice.FactureEnLigneStatus = dto.FactureEnLigneStatus;
-            if (dto.FactureEnLigneSentAt.HasValue) invoice.FactureEnLigneSentAt = dto.FactureEnLigneSentAt;
-            invoice.ModifiedDate = DateTime.UtcNow;
-            invoice.ModifiedBy = userId;
-
-            if (dto.Status != null && dto.Status != oldStatus)
-            {
-                _context.PurchaseActivities.Add(new PurchaseActivity
+                catch
                 {
-                    EntityType = "supplier_invoice", EntityId = id, ActivityType = "status_changed",
-                    Description = $"Status changed from {oldStatus} to {dto.Status}",
-                    OldValue = oldStatus, NewValue = dto.Status, PerformedBy = userId, PerformedAt = DateTime.UtcNow
-                });
-            }
-            await _context.SaveChangesAsync();
+                    await tx.RollbackAsync();
+                    throw;
+                }
+            });
 
-            // If discount/fiscal-stamp/RS settings changed, totals must be recomputed.
-            if (dto.Discount.HasValue || dto.DiscountType != null || dto.FiscalStamp.HasValue
-                || dto.RsApplicable.HasValue || dto.RsTypeCode != null)
-            {
-                await RecalculateInvoiceTotalsAsync(id);
-            }
             return (await GetInvoiceByIdAsync(id))!;
         }
 
-        public async Task<bool> DeleteInvoiceAsync(int id, string userId)
+        public async Task<bool> DeleteInvoiceAsync(int id, string userId, string? userName = null)
         {
             var invoice = await _context.SupplierInvoices.FirstOrDefaultAsync(i => i.Id == id && !i.IsDeleted);
             if (invoice == null) return false;
             invoice.IsDeleted = true; invoice.DeletedAt = DateTime.UtcNow; invoice.DeletedBy = userId;
+            _context.PurchaseActivities.Add(new PurchaseActivity
+            {
+                EntityType = "supplier_invoice", EntityId = id, ActivityType = "deleted",
+                Description = $"Supplier invoice {invoice.InvoiceNumber} deleted",
+                PerformedBy = userId, PerformedByName = userName, PerformedAt = DateTime.UtcNow
+            });
             await _context.SaveChangesAsync();
             return true;
         }

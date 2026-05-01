@@ -112,7 +112,7 @@ namespace MyApi.Modules.Purchases.Controllers
         {
             try
             {
-                if (!await _service.DeleteAsync(id))
+                if (!await _service.DeleteAsync(id, GetUserId()))
                     return NotFound(new { success = false, error = new { code = "NOT_FOUND", message = "Not found" } });
                 await _systemLogService.LogSuccessAsync($"Article-supplier deleted: {id}", "Purchases", "delete", GetUserId(), GetUserName(), "ArticleSupplier", id.ToString());
                 return Ok(new { success = true, message = "Deleted successfully" });

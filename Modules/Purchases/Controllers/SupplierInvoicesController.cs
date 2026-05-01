@@ -68,7 +68,7 @@ namespace MyApi.Modules.Purchases.Controllers
             try
             {
                 var userId = GetUserId();
-                var invoice = await _service.CreateInvoiceAsync(dto, userId);
+                var invoice = await _service.CreateInvoiceAsync(dto, userId, GetUserName());
                 await _systemLogService.LogSuccessAsync($"Supplier invoice created: {invoice.InvoiceNumber}", "Purchases", "create", userId, GetUserName(), "SupplierInvoice", invoice.Id.ToString());
                 return CreatedAtAction(nameof(GetInvoice), new { id = invoice.Id }, new { success = true, data = invoice });
             }
@@ -97,7 +97,7 @@ namespace MyApi.Modules.Purchases.Controllers
             try
             {
                 var userId = GetUserId();
-                var invoice = await _service.UpdateInvoiceAsync(id, dto, userId);
+                var invoice = await _service.UpdateInvoiceAsync(id, dto, userId, GetUserName());
                 await _systemLogService.LogSuccessAsync($"Supplier invoice updated: {invoice.InvoiceNumber}", "Purchases", "update", userId, GetUserName(), "SupplierInvoice", id.ToString());
                 return Ok(new { success = true, data = invoice });
             }
@@ -116,7 +116,7 @@ namespace MyApi.Modules.Purchases.Controllers
             try
             {
                 var userId = GetUserId();
-                if (!await _service.DeleteInvoiceAsync(id, userId))
+                if (!await _service.DeleteInvoiceAsync(id, userId, GetUserName()))
                     return NotFound(new { success = false, error = new { code = "NOT_FOUND", message = "Invoice not found" } });
                 await _systemLogService.LogSuccessAsync($"Supplier invoice deleted: {id}", "Purchases", "delete", userId, GetUserName(), "SupplierInvoice", id.ToString());
                 return Ok(new { success = true, message = "Deleted successfully" });
@@ -142,7 +142,7 @@ namespace MyApi.Modules.Purchases.Controllers
                     TejSyncDate = DateTime.UtcNow,
                     TejSyncStatus = "synced",
                 };
-                var invoice = await _service.UpdateInvoiceAsync(id, dto, userId);
+                var invoice = await _service.UpdateInvoiceAsync(id, dto, userId, GetUserName());
                 await _systemLogService.LogSuccessAsync($"Supplier invoice TEJ-synced: {invoice.InvoiceNumber}", "Purchases", "update", userId, GetUserName(), "SupplierInvoice", id.ToString());
                 return Ok(new { success = true, data = invoice });
             }
@@ -166,7 +166,7 @@ namespace MyApi.Modules.Purchases.Controllers
                     FactureEnLigneStatus = "sent",
                     FactureEnLigneSentAt = DateTime.UtcNow,
                 };
-                var invoice = await _service.UpdateInvoiceAsync(id, dto, userId);
+                var invoice = await _service.UpdateInvoiceAsync(id, dto, userId, GetUserName());
                 await _systemLogService.LogSuccessAsync($"Facture en ligne sent: {invoice.InvoiceNumber}", "Purchases", "update", userId, GetUserName(), "SupplierInvoice", id.ToString());
                 return Ok(new { success = true, data = invoice });
             }

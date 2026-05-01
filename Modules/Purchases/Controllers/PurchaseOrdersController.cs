@@ -83,7 +83,7 @@ namespace MyApi.Modules.Purchases.Controllers
             try
             {
                 var userId = GetUserId();
-                var order = await _service.CreateOrderAsync(dto, userId);
+                var order = await _service.CreateOrderAsync(dto, userId, GetUserName());
                 await _systemLogService.LogSuccessAsync($"Purchase order created: {order.OrderNumber}", "Purchases", "create", userId, GetUserName(), "PurchaseOrder", order.Id.ToString());
                 return CreatedAtAction(nameof(GetOrder), new { id = order.Id }, new { success = true, data = order });
             }
@@ -105,7 +105,7 @@ namespace MyApi.Modules.Purchases.Controllers
             try
             {
                 var userId = GetUserId();
-                var order = await _service.UpdateOrderAsync(id, dto, userId);
+                var order = await _service.UpdateOrderAsync(id, dto, userId, GetUserName());
                 await _systemLogService.LogSuccessAsync($"Purchase order updated: {order.OrderNumber}", "Purchases", "update", userId, GetUserName(), "PurchaseOrder", id.ToString());
                 return Ok(new { success = true, data = order });
             }
@@ -126,7 +126,7 @@ namespace MyApi.Modules.Purchases.Controllers
             try
             {
                 var userId = GetUserId();
-                if (!await _service.DeleteOrderAsync(id, userId))
+                if (!await _service.DeleteOrderAsync(id, userId, GetUserName()))
                     return NotFound(new { success = false, error = new { code = "NOT_FOUND", message = "Purchase order not found" } });
                 await _systemLogService.LogSuccessAsync($"Purchase order deleted: {id}", "Purchases", "delete", userId, GetUserName(), "PurchaseOrder", id.ToString());
                 return Ok(new { success = true, message = "Deleted successfully" });

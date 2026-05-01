@@ -17,7 +17,7 @@ namespace MyApi.Modules.Purchases.Services
         public async Task<List<ArticleSupplierDto>> GetByArticleAsync(int articleId)
         {
             return await _context.ArticleSuppliers.AsNoTracking()
-                .Where(a => a.ArticleId == articleId && a.IsActive)
+                .Where(a => a.ArticleId == articleId && a.IsActive && !a.IsDeleted)
                 .Include(a => a.Supplier).Include(a => a.Article).Include(a => a.PriceHistory)
                 .Select(a => MapToDto(a)).ToListAsync();
         }
@@ -25,7 +25,7 @@ namespace MyApi.Modules.Purchases.Services
         public async Task<List<ArticleSupplierDto>> GetBySupplierAsync(int supplierId)
         {
             return await _context.ArticleSuppliers.AsNoTracking()
-                .Where(a => a.SupplierId == supplierId && a.IsActive)
+                .Where(a => a.SupplierId == supplierId && a.IsActive && !a.IsDeleted)
                 .Include(a => a.Article).Include(a => a.PriceHistory)
                 .Select(a => MapToDto(a)).ToListAsync();
         }
@@ -34,7 +34,7 @@ namespace MyApi.Modules.Purchases.Services
         {
             var entity = await _context.ArticleSuppliers.AsNoTracking()
                 .Include(a => a.Article).Include(a => a.Supplier).Include(a => a.PriceHistory)
-                .FirstOrDefaultAsync(a => a.Id == id);
+                .FirstOrDefaultAsync(a => a.Id == id && !a.IsDeleted);
             return entity == null ? null : MapToDto(entity);
         }
 
@@ -55,7 +55,7 @@ namespace MyApi.Modules.Purchases.Services
 
         public async Task<ArticleSupplierDto> UpdateAsync(int id, UpdateArticleSupplierDto dto, string userId)
         {
-            var entity = await _context.ArticleSuppliers.FindAsync(id)
+            var entity = await _context.ArticleSuppliers.FirstOrDefaultAsync(a => a.Id == id && !a.IsDeleted)
                 ?? throw new KeyNotFoundException($"ArticleSupplier {id} not found");
 
             // Track price change
@@ -84,11 +84,20 @@ namespace MyApi.Modules.Purchases.Services
             return (await GetByIdAsync(id))!;
         }
 
-        public async Task<bool> DeleteAsync(int id)
+        public async Task<bool> DeleteAsync(int id, string userId)
         {
-            var entity = await _context.ArticleSuppliers.FindAsync(id);
+            // Soft-delete only. Hard-deleting an ArticleSupplier would either drop
+            // the row outright or fall foul of the (now Restrict) FK on
+            // ArticleSupplierPriceHistory. Tombstoning the row preserves the full
+            // price-change audit trail referenced by ArticleSupplierId.
+            var entity = await _context.ArticleSuppliers.FirstOrDefaultAsync(a => a.Id == id && !a.IsDeleted);
             if (entity == null) return false;
-            _context.ArticleSuppliers.Remove(entity);
+            entity.IsDeleted = true;
+            entity.IsActive = false; // hide from "active" lookups for any callers that still filter only on IsActive
+            entity.DeletedAt = DateTime.UtcNow;
+            entity.DeletedBy = userId;
+            entity.ModifiedDate = DateTime.UtcNow;
+            entity.ModifiedBy = userId;
             await _context.SaveChangesAsync();
             return true;
         }
