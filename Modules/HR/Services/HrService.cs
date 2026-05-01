@@ -791,7 +791,7 @@ namespace MyApi.Modules.HR.Services
 
         public async Task<HrPublicHolidayDto> CreatePublicHolidayAsync(UpsertPublicHolidayDto dto)
         {
-            var row = new HrPublicHoliday { Date = dto.Date.Date, Name = dto.Name, Category = dto.Category, IsRecurring = dto.IsRecurring };
+            var row = new HrPublicHoliday { Date = DateTime.SpecifyKind(dto.Date.Date, DateTimeKind.Utc), Name = dto.Name, Category = dto.Category, IsRecurring = dto.IsRecurring };
             _db.Set<HrPublicHoliday>().Add(row);
             await _db.SaveChangesAsync();
             return MapHolidayDto(row);
@@ -801,7 +801,7 @@ namespace MyApi.Modules.HR.Services
         {
             var row = await _db.Set<HrPublicHoliday>().FirstOrDefaultAsync(x => x.Id == id);
             if (row == null) throw new KeyNotFoundException("Holiday not found");
-            row.Date = dto.Date.Date; row.Name = dto.Name; row.Category = dto.Category; row.IsRecurring = dto.IsRecurring;
+            row.Date = DateTime.SpecifyKind(dto.Date.Date, DateTimeKind.Utc); row.Name = dto.Name; row.Category = dto.Category; row.IsRecurring = dto.IsRecurring;
             await _db.SaveChangesAsync();
             return MapHolidayDto(row);
         }

@@ -88,7 +88,7 @@ namespace MyApi.Modules.HR.Services
                 TargetValue = dto.TargetValue,
                 Progress = Math.Max(0, Math.Min(100, dto.Progress ?? 0)),
                 Status = dto.Status ?? "not_started",
-                DueDate = dto.DueDate,
+                DueDate = dto.DueDate.HasValue ? DateTime.SpecifyKind(dto.DueDate.Value, DateTimeKind.Utc) : (DateTime?)null,
                 Score = dto.Score,
                 CreatedBy = actorUserId == 0 ? null : actorUserId,
             };
@@ -109,7 +109,7 @@ namespace MyApi.Modules.HR.Services
             if (dto.TargetValue != null) entity.TargetValue = dto.TargetValue;
             if (dto.Progress.HasValue) entity.Progress = Math.Max(0, Math.Min(100, dto.Progress.Value));
             if (dto.Status != null) entity.Status = dto.Status;
-            if (dto.DueDate.HasValue) entity.DueDate = dto.DueDate;
+            if (dto.DueDate.HasValue) entity.DueDate = DateTime.SpecifyKind(dto.DueDate.Value, DateTimeKind.Utc);
             if (dto.Score.HasValue) entity.Score = dto.Score;
             if (dto.CycleId.HasValue) entity.CycleId = dto.CycleId;
             entity.UpdatedAt = DateTime.UtcNow;
