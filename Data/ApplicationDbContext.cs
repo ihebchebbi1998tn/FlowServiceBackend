@@ -360,9 +360,14 @@ namespace MyApi.Data
             // so writes are properly scoped. -1 means "all tenants" with no target specified.
             if (_currentTenantId == -1)
             {
-                var hasChanges = ChangeTracker.Entries<ITenantEntity>()
-                    .Any(e => e.State is EntityState.Added or EntityState.Modified or EntityState.Deleted);
-                if (hasChanges)
+                // Allow audit/log entities to be persisted even in view-all mode — they are
+                // system-scoped (TenantId = 0) and must never break the request just because
+                // no target tenant was provided. Without this, login + other admin actions
+                // emit a noisy "primary persist failed" warning on every call.
+                var hasBlockingChanges = ChangeTracker.Entries<ITenantEntity>()
+                    .Where(e => e.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
+                    .Any(e => e.Entity is not MyApi.Modules.Shared.Models.SystemLog);
+                if (hasBlockingChanges)
                 {
                     throw new InvalidOperationException(
                         "Cannot create, update or delete tenant-scoped entities in view-all mode without specifying a target tenant. Include the X-Target-Tenant header with the target company ID.");
@@ -373,7 +378,16 @@ namespace MyApi.Data
             {
                 if (entry.State == EntityState.Added)
                 {
-                    entry.Entity.TenantId = _currentTenantId;
+                    // In view-all mode, default audit logs to system tenant (0) instead of -1.
+                    if (_currentTenantId == -1 && entry.Entity is MyApi.Modules.Shared.Models.SystemLog)
+                    {
+                        if (entry.Entity.TenantId == 0 || entry.Entity.TenantId == -1)
+                            entry.Entity.TenantId = 0;
+                    }
+                    else
+                    {
+                        entry.Entity.TenantId = _currentTenantId;
+                    }
                 }
             }
         }

@@ -235,8 +235,9 @@ namespace MyApi.Modules.HR.Services
         // ===========================================================================
         public async Task<List<HrAttendanceDto>> GetAttendanceAsync(int year, int month, int? userId = null)
         {
-            // Treat attendance dates as calendar days (Unspecified kind) — never UTC-convert.
-            var start = DateTime.SpecifyKind(new DateTime(year, month, 1), DateTimeKind.Unspecified);
+            // PG column is `timestamp with time zone` — Npgsql requires DateTimeKind.Utc for query parameters.
+            // We treat the (year, month) as a calendar boundary at midnight UTC for filtering purposes.
+            var start = DateTime.SpecifyKind(new DateTime(year, month, 1), DateTimeKind.Utc);
             var end = start.AddMonths(1);
 
             var q = _db.Set<HrAttendance>()
@@ -254,9 +255,9 @@ namespace MyApi.Modules.HR.Services
         public async Task<HrAttendanceDto> UpsertAttendanceAsync(UpsertHrAttendanceDto dto, int actorUserId)
         {
             var settings = await GetAttendanceSettingsEntityAsync();
-            // Calendar-day semantics: strip time + kind so server TZ cannot shift the day.
-            var date = DateTime.SpecifyKind(dto.Date.Date, DateTimeKind.Unspecified);
-            // Anchor check-in/out to the same calendar day (wall-clock, no TZ conversion).
+            // PG columns are `timestamp with time zone` — Npgsql requires DateTimeKind.Utc.
+            // Treat the supplied calendar day as midnight UTC; check-in/out are anchored to the same UTC day.
+            var date = DateTime.SpecifyKind(dto.Date.Date, DateTimeKind.Utc);
             var checkIn = NormalizeWallClock(dto.CheckIn, date);
             var checkOut = NormalizeWallClock(dto.CheckOut, date);
 
@@ -375,7 +376,7 @@ namespace MyApi.Modules.HR.Services
 
             foreach (var dto in validRows)
             {
-                var date = DateTime.SpecifyKind(dto.Date.Date, DateTimeKind.Unspecified);
+                var date = DateTime.SpecifyKind(dto.Date.Date, DateTimeKind.Utc);
                 var checkIn = NormalizeWallClock(dto.CheckIn, date);
                 var checkOut = NormalizeWallClock(dto.CheckOut, date);
                 var row = existing.FirstOrDefault(x => x.UserId == dto.UserId && x.Date == date);
@@ -1213,9 +1214,11 @@ namespace MyApi.Modules.HR.Services
         {
             if (!value.HasValue) return null;
             var v = value.Value.Kind == DateTimeKind.Utc ? value.Value.ToLocalTime() : value.Value;
+            // Anchor wall-clock H:M:S onto target calendar day. Stamp as UTC so Npgsql can write
+            // it to `timestamp with time zone` columns without throwing.
             return DateTime.SpecifyKind(
                 new DateTime(targetDate.Year, targetDate.Month, targetDate.Day, v.Hour, v.Minute, v.Second),
-                DateTimeKind.Unspecified);
+                DateTimeKind.Utc);
         }
 
         private static object MapSafeUser(MyApi.Modules.Users.Models.User user) => new
