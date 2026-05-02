@@ -45,7 +45,7 @@ namespace MyApi.Modules.HR.Models
         public decimal AbattementPerChild { get; set; } = 100m;
 
         // IRPP brackets stored as JSON array: [{from,to,rate}]
-        [Column("irpp_brackets", TypeName = "text")]
+        [Column("irpp_brackets_json", TypeName = "text")]
         public string? IrppBracketsJson { get; set; }
 
         [Column("is_active")]
