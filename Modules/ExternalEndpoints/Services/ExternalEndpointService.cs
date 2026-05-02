@@ -156,18 +156,132 @@ namespace MyApi.Modules.ExternalEndpoints.Services
         private static int ClampPage(int page) => page <= 0 ? 1 : page;
 
         // Origin enforcement: comma-separated allowlist; "*" or empty = any.
+        // Normalize both stored and request origins so trailing slashes,
+        // case differences, and missing schemes don't silently 403 valid clients.
+        private static string NormalizeOrigin(string raw)
+        {
+            var s = raw.Trim().TrimEnd('/').ToLowerInvariant();
+            if (s.Length == 0) return s;
+            if (!s.StartsWith("http://") && !s.StartsWith("https://"))
+                s = "https://" + s;
+            return s;
+        }
+
         private static bool IsOriginAllowed(string? allowedOrigins, string? originHeader)
         {
             if (string.IsNullOrWhiteSpace(allowedOrigins) || allowedOrigins.Trim() == "*") return true;
             if (string.IsNullOrWhiteSpace(originHeader)) return false;
-            var allowed = allowedOrigins.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            return allowed.Any(a => string.Equals(a, originHeader, StringComparison.OrdinalIgnoreCase));
+            var requestOrigin = NormalizeOrigin(originHeader);
+            var allowed = allowedOrigins
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(NormalizeOrigin);
+            return allowed.Any(a => a == "*" || a == requestOrigin);
+        }
+
+        // Resolve the single CORS origin to echo on the response. Returns "*"
+        // when the endpoint allows any origin, the request origin (verbatim)
+        // when it's in the allowlist, or null when it's not allowed.
+        public static string? ResolveCorsOrigin(string? allowedOrigins, string? originHeader)
+        {
+            if (string.IsNullOrWhiteSpace(allowedOrigins) || allowedOrigins.Trim() == "*") return "*";
+            if (string.IsNullOrWhiteSpace(originHeader)) return null;
+            return IsOriginAllowed(allowedOrigins, originHeader) ? originHeader.Trim().TrimEnd('/') : null;
         }
 
         private static string ComputeHmacHex(string secret, string payload)
         {
             using var h = new System.Security.Cryptography.HMACSHA256(Encoding.UTF8.GetBytes(secret));
             return Convert.ToHexString(h.ComputeHash(Encoding.UTF8.GetBytes(payload ?? string.Empty))).ToLowerInvariant();
+        }
+
+        // ── Ownership guard ─────────────────────────────────────────────────
+        // Defense-in-depth. Every log-scoped operation queries
+        // ExternalEndpoints through the global tenant filter — if it returns
+        // false, the calling tenant has no business reading/mutating this
+        // endpoint's logs even if the EndpointId guesses right.
+        private async Task<bool> CurrentTenantOwnsEndpointAsync(int endpointId)
+        {
+            return await _context.ExternalEndpoints
+                .AsNoTracking()
+                .AnyAsync(e => e.Id == endpointId && !e.IsDeleted);
+        }
+
+        // ── ExpectedSchema validation ───────────────────────────────────────
+        // Lightweight required-keys check. Stored as JSON, e.g.:
+        //   { "required": ["fullName", "email", "phone"] }
+        // Returns (true, null) when valid or when no schema is set.
+        private static (bool ok, string? error) ValidateAgainstSchema(string? expectedSchema, string? body)
+        {
+            if (string.IsNullOrWhiteSpace(expectedSchema)) return (true, null);
+            List<string>? required = null;
+            try
+            {
+                using var schemaDoc = System.Text.Json.JsonDocument.Parse(expectedSchema);
+                if (schemaDoc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object &&
+                    schemaDoc.RootElement.TryGetProperty("required", out var req) &&
+                    req.ValueKind == System.Text.Json.JsonValueKind.Array)
+                {
+                    required = req.EnumerateArray()
+                        .Where(e => e.ValueKind == System.Text.Json.JsonValueKind.String)
+                        .Select(e => e.GetString()!)
+                        .Where(s => !string.IsNullOrWhiteSpace(s))
+                        .ToList();
+                }
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                // Invalid stored schema → don't block ingest; treat as "no schema".
+                return (true, null);
+            }
+            if (required == null || required.Count == 0) return (true, null);
+            if (string.IsNullOrWhiteSpace(body)) return (false, "Body is required");
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(body);
+                if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object)
+                    return (false, "Body must be a JSON object");
+                var missing = new List<string>();
+                foreach (var key in required)
+                {
+                    if (!doc.RootElement.TryGetProperty(key, out var v) ||
+                        v.ValueKind == System.Text.Json.JsonValueKind.Null ||
+                        (v.ValueKind == System.Text.Json.JsonValueKind.String && string.IsNullOrWhiteSpace(v.GetString())))
+                    {
+                        missing.Add(key);
+                    }
+                }
+                if (missing.Count > 0)
+                    return (false, "Missing required field(s): " + string.Join(", ", missing));
+                return (true, null);
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                return (false, "Body is not valid JSON");
+            }
+        }
+
+        // ── Rate limiting (in-memory, per-slug + per-IP, sliding 1 min) ─────
+        // Single-instance defense against probing/brute-force. Swap for Redis
+        // if you scale horizontally.
+        private const int RateLimitPerMinute = 60;
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (int count, DateTime windowStart)> _rateBuckets = new();
+        private static bool RateLimitAllow(string slug, string? ip)
+        {
+            var key = $"{slug}|{ip ?? "anon"}";
+            var now = DateTime.UtcNow;
+            var bucket = _rateBuckets.AddOrUpdate(key,
+                _ => (1, now),
+                (_, cur) => now - cur.windowStart > TimeSpan.FromMinutes(1)
+                    ? (1, now)
+                    : (cur.count + 1, cur.windowStart));
+            // Opportunistic prune so the dictionary doesn't grow unbounded.
+            if (_rateBuckets.Count > 10_000)
+            {
+                foreach (var kv in _rateBuckets)
+                    if (now - kv.Value.windowStart > TimeSpan.FromMinutes(5))
+                        _rateBuckets.TryRemove(kv.Key, out _);
+            }
+            return bucket.count <= RateLimitPerMinute;
         }
 
         public async Task<PaginatedEndpointResponse> GetEndpointsAsync(string? search = null, string? status = null, int page = 1, int limit = 20)
@@ -379,6 +493,15 @@ namespace MyApi.Modules.ExternalEndpoints.Services
         public async Task<PaginatedLogResponse> GetLogsAsync(int endpointId, int page = 1, int limit = 20)
         {
             page = ClampPage(page); limit = ClampLimit(limit);
+            // Ownership guard — endpoint must exist for the calling tenant.
+            if (!await CurrentTenantOwnsEndpointAsync(endpointId))
+            {
+                return new PaginatedLogResponse
+                {
+                    Logs = new(),
+                    Pagination = new PaginationInfo { Page = page, Limit = limit, Total = 0, TotalPages = 0 }
+                };
+            }
             var query = _context.ExternalEndpointLogs.AsNoTracking().Where(l => l.EndpointId == endpointId);
             var total = await query.CountAsync();
             var logs = await query.OrderByDescending(l => l.ReceivedAt).Skip((page - 1) * limit).Take(limit).ToListAsync();
@@ -397,6 +520,7 @@ namespace MyApi.Modules.ExternalEndpoints.Services
 
         public async Task<ExternalEndpointLogDto?> GetLogByIdAsync(int endpointId, int logId)
         {
+            if (!await CurrentTenantOwnsEndpointAsync(endpointId)) return null;
             var l = await _context.ExternalEndpointLogs.AsNoTracking().FirstOrDefaultAsync(x => x.Id == logId && x.EndpointId == endpointId);
             if (l == null) return null;
             return new ExternalEndpointLogDto
@@ -410,6 +534,7 @@ namespace MyApi.Modules.ExternalEndpoints.Services
 
         public async Task<bool> DeleteLogAsync(int endpointId, int logId)
         {
+            if (!await CurrentTenantOwnsEndpointAsync(endpointId)) return false;
             var log = await _context.ExternalEndpointLogs.FirstOrDefaultAsync(l => l.Id == logId && l.EndpointId == endpointId);
             if (log == null) return false;
             _context.ExternalEndpointLogs.Remove(log);
@@ -419,6 +544,7 @@ namespace MyApi.Modules.ExternalEndpoints.Services
 
         public async Task<bool> ClearLogsAsync(int endpointId)
         {
+            if (!await CurrentTenantOwnsEndpointAsync(endpointId)) return false;
             // ExecuteDeleteAsync issues a single DELETE — avoids loading the full
             // log set into memory (the previous RemoveRange approach OOMs at scale).
             await _context.ExternalEndpointLogs
@@ -429,6 +555,7 @@ namespace MyApi.Modules.ExternalEndpoints.Services
 
         public async Task<bool> MarkLogAsReadAsync(int endpointId, int logId)
         {
+            if (!await CurrentTenantOwnsEndpointAsync(endpointId)) return false;
             var log = await _context.ExternalEndpointLogs.FirstOrDefaultAsync(l => l.Id == logId && l.EndpointId == endpointId);
             if (log == null) return false;
             log.IsRead = true;
@@ -436,9 +563,16 @@ namespace MyApi.Modules.ExternalEndpoints.Services
             return true;
         }
 
-        // Public receive — bypasses tenant filter by using raw slug lookup.
+        // Public receive — anonymous; resolves slug across all tenants and
+        // disambiguates by API key. Stamps the OWNING endpoint's TenantId on
+        // the persisted log/job (the StampTenantIdOnNewEntities hook honors
+        // explicit non-zero TenantIds for these two entity types).
         public async Task<(int statusCode, string responseBody)> ReceiveAsync(string slug, string method, string? headers, string? queryString, string? body, string? sourceIp, string? apiKey, string? originHeader = null)
         {
+            // Rate-limit before doing any DB work.
+            if (!RateLimitAllow(slug, sourceIp))
+                return (429, "{\"error\":\"Too many requests\"}");
+
             if (string.IsNullOrEmpty(apiKey))
                 return (401, "{\"error\":\"API key required\"}");
 
@@ -457,13 +591,44 @@ namespace MyApi.Modules.ExternalEndpoints.Services
             if (endpoint == null) return (401, "{\"error\":\"Invalid API key\"}");
             if (!endpoint.IsActive) return (403, "{\"error\":\"Endpoint is inactive\"}");
 
-            // Origin enforcement (CSV allowlist; "*" or empty = any)
+            // Origin enforcement (CSV allowlist; "*" or empty = any). Normalized
+            // both sides so trailing slashes / case differences don't 403 valid clients.
             if (!IsOriginAllowed(endpoint.AllowedOrigins, originHeader))
                 return (403, "{\"error\":\"Origin not allowed\"}");
 
             var allowedMethods = endpoint.AllowedMethods.Split(',').Select(m => m.Trim().ToUpper()).ToList();
             if (!allowedMethods.Contains(method.ToUpper()))
                 return (405, "{\"error\":\"Method not allowed\"}");
+
+            // ExpectedSchema validation (lightweight required-keys check). Only
+            // enforced for body-bearing methods; GET ingest is treated as a
+            // "ping" with no payload contract.
+            if (method.ToUpper() != "GET")
+            {
+                var (schemaOk, schemaErr) = ValidateAgainstSchema(endpoint.ExpectedSchema, body);
+                if (!schemaOk)
+                {
+                    // Persist a 400 log so the tenant sees rejected attempts in their UI.
+                    var rejected = new ExternalEndpointLog
+                    {
+                        TenantId = endpoint.TenantId,
+                        EndpointId = endpoint.Id,
+                        Method = method.ToUpper(),
+                        Headers = headers,
+                        QueryString = queryString,
+                        Body = body,
+                        SourceIp = sourceIp,
+                        StatusCode = 400,
+                        ResponseBody = "{\"success\":false,\"error\":\"" + schemaErr?.Replace("\"", "'") + "\"}",
+                        ReceivedAt = DateTime.UtcNow,
+                        ProcessedAt = DateTime.UtcNow
+                    };
+                    _context.ExternalEndpointLogs.Add(rejected);
+                    try { await _context.SaveChangesAsync(); }
+                    catch (Exception ex) { _logger.LogWarning(ex, "Failed to persist schema-rejection log for {Slug}", slug); }
+                    return (400, rejected.ResponseBody);
+                }
+            }
 
             var log = new ExternalEndpointLog
             {
@@ -527,6 +692,7 @@ namespace MyApi.Modules.ExternalEndpoints.Services
         // user picks/confirms a Contact and saves via the existing modules.
         public async Task<ConvertLogPreviewDto?> PreviewConvertLogAsync(int endpointId, int logId)
         {
+            if (!await CurrentTenantOwnsEndpointAsync(endpointId)) return null;
             var log = await _context.ExternalEndpointLogs.AsNoTracking()
                 .FirstOrDefaultAsync(l => l.Id == logId && l.EndpointId == endpointId);
             if (log == null) return null;

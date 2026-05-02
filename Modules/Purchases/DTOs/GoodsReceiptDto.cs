@@ -56,6 +56,28 @@ namespace MyApi.Modules.Purchases.DTOs
         public string? Notes { get; set; }
     }
 
+    // Update payload. Items with Id → UPDATE (qty delta re-reconciles PO.ReceivedQty
+    // and stock). Items with no Id → APPEND. Existing items absent from the list →
+    // REMOVED (their previously received qty is reversed against PO + stock).
+    public class UpdateGoodsReceiptDto
+    {
+        public DateTime? ReceiptDate { get; set; }
+        public string? DeliveryNoteRef { get; set; }
+        public string? Notes { get; set; }
+        public List<UpdateGoodsReceiptItemDto>? Items { get; set; }
+    }
+
+    public class UpdateGoodsReceiptItemDto
+    {
+        public int? Id { get; set; }                       // null/0 → new item
+        public int PurchaseOrderItemId { get; set; }
+        public decimal QuantityReceived { get; set; }
+        public decimal QuantityRejected { get; set; }
+        public string? RejectionReason { get; set; }
+        public int? LocationId { get; set; }
+        public string? Notes { get; set; }
+    }
+
     public class PaginatedGoodsReceiptResponse
     {
         public List<GoodsReceiptDto> Receipts { get; set; } = new();

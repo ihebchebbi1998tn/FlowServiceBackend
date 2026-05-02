@@ -384,6 +384,17 @@ namespace MyApi.Data
                         if (entry.Entity.TenantId == 0 || entry.Entity.TenantId == -1)
                             entry.Entity.TenantId = 0;
                     }
+                    // Public/anonymous ingest path (e.g. /api/external-receive) runs without an
+                    // X-Tenant header → _currentTenantId == 0. The caller (ExternalEndpointService)
+                    // explicitly stamps the owning endpoint's TenantId on the log/job entity before
+                    // SaveChanges. Honor that explicit non-zero value instead of overwriting it
+                    // with 0 — otherwise per-tenant log lists, stats, and retention sweeps break.
+                    else if (_currentTenantId == 0 && entry.Entity.TenantId > 0 &&
+                             (entry.Entity is MyApi.Modules.ExternalEndpoints.Models.ExternalEndpointLog
+                              || entry.Entity is MyApi.Modules.ExternalEndpoints.Models.WebhookForwardJob))
+                    {
+                        // Keep the explicit TenantId set by the service.
+                    }
                     else
                     {
                         entry.Entity.TenantId = _currentTenantId;

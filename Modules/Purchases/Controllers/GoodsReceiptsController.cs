@@ -91,6 +91,33 @@ namespace MyApi.Modules.Purchases.Controllers
             }
         }
 
+        [HttpPut("{id:int}")]
+        public async Task<IActionResult> UpdateReceipt(int id, [FromBody] UpdateGoodsReceiptDto dto)
+        {
+            try
+            {
+                var userId = GetUserId();
+                var receipt = await _service.UpdateReceiptAsync(id, dto, userId, GetUserName());
+                await _systemLogService.LogSuccessAsync($"Goods receipt updated: {receipt.ReceiptNumber}", "Purchases", "update", userId, GetUserName(), "GoodsReceipt", receipt.Id.ToString());
+                return Ok(new { success = true, data = receipt });
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { success = false, error = new { code = "NOT_FOUND", message = ex.Message } });
+            }
+            // Service throws InvalidOperationException for: linked-invoice block,
+            // over-receipt, negative qty, orphan PO item, PO-item relink attempt.
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { success = false, error = new { code = "BAD_REQUEST", message = ex.Message } });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error updating goods receipt {Id}", id);
+                return StatusCode(500, new { success = false, error = new { code = "INTERNAL_ERROR", message = "An error occurred" } });
+            }
+        }
+
         [HttpDelete("{id:int}")]
         public async Task<IActionResult> DeleteReceipt(int id)
         {

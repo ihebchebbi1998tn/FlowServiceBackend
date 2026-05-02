@@ -183,71 +183,115 @@ namespace MyApi.Modules.Purchases.Services
 
         public async Task<PurchaseOrderDto> UpdateOrderAsync(int id, UpdatePurchaseOrderDto dto, string userId, string? userName = null)
         {
-            var order = await _context.PurchaseOrders.Include(o => o.Items).FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
-                ?? throw new KeyNotFoundException($"PurchaseOrder {id} not found");
-
-            var oldStatus = order.Status;
-            // Validate status transition BEFORE applying any other changes.
-            if (dto.Status != null && !string.Equals(dto.Status, oldStatus, StringComparison.OrdinalIgnoreCase))
+            // Wrap mutation in a transaction with execution strategy. Without this,
+            // a concurrent UpdateItemAsync (which mutates Quantity/UnitPrice and
+            // recomputes totals) can interleave with this update — the second
+            // SaveChangesAsync overwrites the first's recomputed totals with stale
+            // values. EnableRetryOnFailure also requires user-initiated transactions
+            // to go through the configured execution strategy.
+            var strategy = _context.Database.CreateExecutionStrategy();
+            await strategy.ExecuteAsync(async () =>
             {
-                if (!AllowedStatusTransitions.TryGetValue(oldStatus, out var allowed) || !allowed.Contains(dto.Status))
-                    throw new InvalidOperationException($"Status transition not allowed: '{oldStatus}' → '{dto.Status}'");
-            }
+                using var tx = await _context.Database.BeginTransactionAsync();
+                try
+                {
+                    var order = await _context.PurchaseOrders.Include(o => o.Items).FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+                        ?? throw new KeyNotFoundException($"PurchaseOrder {id} not found");
 
-            if (dto.Title != null) order.Title = dto.Title;
-            if (dto.Description != null) order.Description = dto.Description;
-            if (dto.Status != null) order.Status = dto.Status;
-            if (dto.ExpectedDelivery.HasValue) order.ExpectedDelivery = dto.ExpectedDelivery;
-            if (dto.Discount.HasValue) order.Discount = dto.Discount.Value;
-            if (dto.DiscountType != null) order.DiscountType = dto.DiscountType;
-            if (dto.FiscalStamp.HasValue) order.FiscalStamp = dto.FiscalStamp.Value;
-            if (dto.PaymentTerms != null) order.PaymentTerms = dto.PaymentTerms;
-            if (dto.PaymentStatus != null) order.PaymentStatus = dto.PaymentStatus;
-            if (dto.Notes != null) order.Notes = dto.Notes;
-            if (dto.Tags != null) order.Tags = dto.Tags;
-            if (dto.BillingAddress != null) order.BillingAddress = dto.BillingAddress;
-            if (dto.DeliveryAddress != null) order.DeliveryAddress = dto.DeliveryAddress;
-            order.ModifiedDate = DateTime.UtcNow;
-            order.ModifiedBy = userId;
+                    var oldStatus = order.Status;
+                    if (dto.Status != null && !string.Equals(dto.Status, oldStatus, StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (!AllowedStatusTransitions.TryGetValue(oldStatus, out var allowed) || !allowed.Contains(dto.Status))
+                            throw new InvalidOperationException($"Status transition not allowed: '{oldStatus}' → '{dto.Status}'");
+                    }
 
-            // Only recompute totals when something that affects them changed.
-            if (dto.Discount.HasValue || dto.DiscountType != null || dto.FiscalStamp.HasValue)
-            {
-                if (order.Items != null) RecalculateTotals(order, order.Items.ToList());
-            }
+                    if (dto.Title != null) order.Title = dto.Title;
+                    if (dto.Description != null) order.Description = dto.Description;
+                    if (dto.Status != null) order.Status = dto.Status;
+                    if (dto.ExpectedDelivery.HasValue) order.ExpectedDelivery = dto.ExpectedDelivery;
+                    if (dto.Discount.HasValue) order.Discount = dto.Discount.Value;
+                    if (dto.DiscountType != null) order.DiscountType = dto.DiscountType;
+                    if (dto.FiscalStamp.HasValue) order.FiscalStamp = dto.FiscalStamp.Value;
+                    if (dto.PaymentTerms != null) order.PaymentTerms = dto.PaymentTerms;
+                    // PaymentStatus is AUTO-DERIVED from linked SupplierInvoices (see
+                    // SupplierInvoiceService.SyncPurchaseOrderPaymentStatusAsync). Manual
+                    // writes are ignored to keep the invoice ledger as the source of truth.
+                    if (dto.Notes != null) order.Notes = dto.Notes;
+                    if (dto.Tags != null) order.Tags = dto.Tags;
+                    if (dto.BillingAddress != null) order.BillingAddress = dto.BillingAddress;
+                    if (dto.DeliveryAddress != null) order.DeliveryAddress = dto.DeliveryAddress;
+                    order.ModifiedDate = DateTime.UtcNow;
+                    order.ModifiedBy = userId;
 
-            if (dto.Status != null && dto.Status != oldStatus)
-                LogActivity("purchase_order", id, "status_changed", $"Status changed from {oldStatus} to {dto.Status}", userId, userName, oldStatus, dto.Status);
+                    if (dto.Discount.HasValue || dto.DiscountType != null || dto.FiscalStamp.HasValue)
+                    {
+                        if (order.Items != null) RecalculateTotals(order, order.Items.ToList());
+                    }
 
-            await _context.SaveChangesAsync();
+                    if (dto.Status != null && dto.Status != oldStatus)
+                        LogActivity("purchase_order", id, "status_changed", $"Status changed from {oldStatus} to {dto.Status}", userId, userName, oldStatus, dto.Status);
+
+                    await _context.SaveChangesAsync();
+                    await tx.CommitAsync();
+                }
+                catch
+                {
+                    await tx.RollbackAsync();
+                    throw;
+                }
+            });
             return (await GetOrderByIdAsync(id))!;
         }
 
         public async Task<bool> DeleteOrderAsync(int id, string userId, string? userName = null)
         {
-            var order = await _context.PurchaseOrders.FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted);
+            var order = await _context.PurchaseOrders.AsNoTracking()
+                .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted);
             if (order == null) return false;
 
-            // Block deletion when any non-deleted SupplierInvoice references this PO.
-            // Soft-deleting an order that's still invoiced would orphan accounting
-            // records (SupplierInvoice.PurchaseOrderId would point at a hidden row),
-            // break supplier statements, and let users escape audit on paid POs.
+            // Cheap pre-checks (fail fast). Re-asserted under serializable isolation
+            // below to close the TOCTOU window — without that, a concurrently-created
+            // invoice or goods receipt could land between the check and the soft-delete
+            // and end up orphaned against a hidden PO.
             var linkedInvoiceExists = await _context.SupplierInvoices
                 .AnyAsync(i => i.PurchaseOrderId == id && !i.IsDeleted);
             if (linkedInvoiceExists)
                 throw new InvalidOperationException($"Cannot delete purchase order {order.OrderNumber}: it is referenced by one or more supplier invoices");
 
-            // Block deletion when there are still non-deleted goods receipts. The
-            // receipts reversed stock when deleted; deleting the PO under live
-            // receipts would lose the link between received stock and its source.
             var linkedReceiptExists = await _context.GoodsReceipts
                 .AnyAsync(r => r.PurchaseOrderId == id && !r.IsDeleted);
             if (linkedReceiptExists)
                 throw new InvalidOperationException($"Cannot delete purchase order {order.OrderNumber}: it has goods receipts. Delete the receipts first.");
 
-            order.IsDeleted = true; order.DeletedAt = DateTime.UtcNow; order.DeletedBy = userId;
-            LogActivity("purchase_order", id, "deleted", $"Purchase order {order.OrderNumber} deleted", userId, userName);
-            await _context.SaveChangesAsync();
+            var strategy = _context.Database.CreateExecutionStrategy();
+            await strategy.ExecuteAsync(async () =>
+            {
+                using var tx = await _context.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+                try
+                {
+                    var tracked = await _context.PurchaseOrders
+                        .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted);
+                    if (tracked == null) return;
+
+                    // Re-assert blocks under lock.
+                    if (await _context.SupplierInvoices.AnyAsync(i => i.PurchaseOrderId == id && !i.IsDeleted))
+                        throw new InvalidOperationException($"Cannot delete purchase order {tracked.OrderNumber}: it is referenced by one or more supplier invoices");
+                    if (await _context.GoodsReceipts.AnyAsync(r => r.PurchaseOrderId == id && !r.IsDeleted))
+                        throw new InvalidOperationException($"Cannot delete purchase order {tracked.OrderNumber}: it has goods receipts. Delete the receipts first.");
+
+                    tracked.IsDeleted = true;
+                    tracked.DeletedAt = DateTime.UtcNow;
+                    tracked.DeletedBy = userId;
+                    LogActivity("purchase_order", id, "deleted", $"Purchase order {tracked.OrderNumber} deleted", userId, userName);
+                    await _context.SaveChangesAsync();
+                    await tx.CommitAsync();
+                }
+                catch
+                {
+                    await tx.RollbackAsync();
+                    throw;
+                }
+            });
             return true;
         }
 
@@ -278,65 +322,109 @@ namespace MyApi.Modules.Purchases.Services
 
         public async Task<PurchaseOrderItemDto> AddItemAsync(int orderId, CreatePurchaseOrderItemDto dto)
         {
-            var order = await _context.PurchaseOrders.Include(o => o.Items).FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted)
-                ?? throw new KeyNotFoundException($"PurchaseOrder {orderId} not found");
-            EnsureItemsMutable(order);
-
-            var item = new PurchaseOrderItem
+            // Wrap in a transaction with execution strategy. Without it, a concurrent
+            // header update (which also recomputes totals) can clobber this item's
+            // recomputed totals — Postgres + EnableRetryOnFailure also requires the
+            // execution-strategy wrapper for any explicit BeginTransactionAsync.
+            PurchaseOrderItem? created = null;
+            var strategy = _context.Database.CreateExecutionStrategy();
+            await strategy.ExecuteAsync(async () =>
             {
-                PurchaseOrderId = orderId, ArticleId = dto.ArticleId, ArticleName = dto.ArticleName,
-                ArticleNumber = dto.ArticleNumber, SupplierRef = dto.SupplierRef, Description = dto.Description,
-                Quantity = dto.Quantity, UnitPrice = dto.UnitPrice, TaxRate = dto.TaxRate,
-                Discount = dto.Discount, DiscountType = dto.DiscountType, Unit = dto.Unit,
-                DisplayOrder = (order.Items?.Count ?? 0),
-                LineTotal = CalculateLineTotal(dto.Quantity, dto.UnitPrice, dto.Discount, dto.DiscountType, dto.TaxRate)
-            };
-            _context.PurchaseOrderItems.Add(item);
-            await _context.SaveChangesAsync();
-            RecalculateTotals(order, order.Items!.ToList());
-            await _context.SaveChangesAsync();
-            return MapItemToDto(item);
+                using var tx = await _context.Database.BeginTransactionAsync();
+                try
+                {
+                    var order = await _context.PurchaseOrders.Include(o => o.Items).FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted)
+                        ?? throw new KeyNotFoundException($"PurchaseOrder {orderId} not found");
+                    EnsureItemsMutable(order);
+
+                    var item = new PurchaseOrderItem
+                    {
+                        PurchaseOrderId = orderId, ArticleId = dto.ArticleId, ArticleName = dto.ArticleName,
+                        ArticleNumber = dto.ArticleNumber, SupplierRef = dto.SupplierRef, Description = dto.Description,
+                        Quantity = dto.Quantity, UnitPrice = dto.UnitPrice, TaxRate = dto.TaxRate,
+                        Discount = dto.Discount, DiscountType = dto.DiscountType, Unit = dto.Unit,
+                        DisplayOrder = (order.Items?.Count ?? 0),
+                        LineTotal = CalculateLineTotal(dto.Quantity, dto.UnitPrice, dto.Discount, dto.DiscountType, dto.TaxRate)
+                    };
+                    _context.PurchaseOrderItems.Add(item);
+                    await _context.SaveChangesAsync();
+                    RecalculateTotals(order, order.Items!.ToList());
+                    await _context.SaveChangesAsync();
+                    await tx.CommitAsync();
+                    created = item;
+                }
+                catch { await tx.RollbackAsync(); throw; }
+            });
+            return MapItemToDto(created!);
         }
 
         public async Task<PurchaseOrderItemDto> UpdateItemAsync(int orderId, int itemId, CreatePurchaseOrderItemDto dto)
         {
-            var order = await _context.PurchaseOrders.Include(o => o.Items).FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted)
-                ?? throw new KeyNotFoundException($"PurchaseOrder {orderId} not found");
-            EnsureItemsMutable(order);
+            PurchaseOrderItem? updated = null;
+            var strategy = _context.Database.CreateExecutionStrategy();
+            await strategy.ExecuteAsync(async () =>
+            {
+                // Serializable: a concurrent goods receipt could increment ReceivedQty
+                // between our `dto.Quantity < item.ReceivedQty` check and the SaveChanges,
+                // letting the new Quantity slip below the now-larger ReceivedQty.
+                using var tx = await _context.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+                try
+                {
+                    var order = await _context.PurchaseOrders.Include(o => o.Items).FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted)
+                        ?? throw new KeyNotFoundException($"PurchaseOrder {orderId} not found");
+                    EnsureItemsMutable(order);
 
-            var item = order.Items?.FirstOrDefault(i => i.Id == itemId)
-                ?? throw new KeyNotFoundException($"Item {itemId} not found");
+                    var item = order.Items?.FirstOrDefault(i => i.Id == itemId)
+                        ?? throw new KeyNotFoundException($"Item {itemId} not found");
 
-            // Defensive: never let an edit reduce Quantity below what's already been received.
-            if (dto.Quantity < item.ReceivedQty)
-                throw new InvalidOperationException($"Quantity ({dto.Quantity}) cannot be less than already-received qty ({item.ReceivedQty})");
+                    if (dto.Quantity < item.ReceivedQty)
+                        throw new InvalidOperationException($"Quantity ({dto.Quantity}) cannot be less than already-received qty ({item.ReceivedQty})");
 
-            item.ArticleId = dto.ArticleId; item.ArticleName = dto.ArticleName; item.ArticleNumber = dto.ArticleNumber;
-            item.SupplierRef = dto.SupplierRef; item.Description = dto.Description; item.Quantity = dto.Quantity;
-            item.UnitPrice = dto.UnitPrice; item.TaxRate = dto.TaxRate; item.Discount = dto.Discount;
-            item.DiscountType = dto.DiscountType; item.Unit = dto.Unit;
-            item.LineTotal = CalculateLineTotal(dto.Quantity, dto.UnitPrice, dto.Discount, dto.DiscountType, dto.TaxRate);
-            RecalculateTotals(order, order.Items!.ToList());
-            await _context.SaveChangesAsync();
-            return MapItemToDto(item);
+                    item.ArticleId = dto.ArticleId; item.ArticleName = dto.ArticleName; item.ArticleNumber = dto.ArticleNumber;
+                    item.SupplierRef = dto.SupplierRef; item.Description = dto.Description; item.Quantity = dto.Quantity;
+                    item.UnitPrice = dto.UnitPrice; item.TaxRate = dto.TaxRate; item.Discount = dto.Discount;
+                    item.DiscountType = dto.DiscountType; item.Unit = dto.Unit;
+                    item.LineTotal = CalculateLineTotal(dto.Quantity, dto.UnitPrice, dto.Discount, dto.DiscountType, dto.TaxRate);
+                    RecalculateTotals(order, order.Items!.ToList());
+                    await _context.SaveChangesAsync();
+                    await tx.CommitAsync();
+                    updated = item;
+                }
+                catch { await tx.RollbackAsync(); throw; }
+            });
+            return MapItemToDto(updated!);
         }
 
         public async Task<bool> DeleteItemAsync(int orderId, int itemId)
         {
-            var order = await _context.PurchaseOrders.Include(o => o.Items).FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted);
-            if (order == null) return false;
-            EnsureItemsMutable(order);
+            bool result = false;
+            var strategy = _context.Database.CreateExecutionStrategy();
+            await strategy.ExecuteAsync(async () =>
+            {
+                // Serializable: prevents a concurrent receipt from incrementing
+                // ReceivedQty between the `> 0` check and the delete.
+                using var tx = await _context.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+                try
+                {
+                    var order = await _context.PurchaseOrders.Include(o => o.Items).FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted);
+                    if (order == null) { result = false; await tx.CommitAsync(); return; }
+                    EnsureItemsMutable(order);
 
-            var item = order.Items?.FirstOrDefault(i => i.Id == itemId);
-            if (item == null) return false;
-            if (item.ReceivedQty > 0)
-                throw new InvalidOperationException("Cannot delete an item that already has received quantity");
+                    var item = order.Items?.FirstOrDefault(i => i.Id == itemId);
+                    if (item == null) { result = false; await tx.CommitAsync(); return; }
+                    if (item.ReceivedQty > 0)
+                        throw new InvalidOperationException("Cannot delete an item that already has received quantity");
 
-            _context.PurchaseOrderItems.Remove(item);
-            await _context.SaveChangesAsync();
-            RecalculateTotals(order, order.Items!.ToList());
-            await _context.SaveChangesAsync();
-            return true;
+                    _context.PurchaseOrderItems.Remove(item);
+                    await _context.SaveChangesAsync();
+                    RecalculateTotals(order, order.Items!.ToList());
+                    await _context.SaveChangesAsync();
+                    await tx.CommitAsync();
+                    result = true;
+                }
+                catch { await tx.RollbackAsync(); throw; }
+            });
+            return result;
         }
 
         public async Task<List<PurchaseActivityDto>> GetActivitiesAsync(int orderId, int page, int limit)
@@ -424,7 +512,10 @@ namespace MyApi.Modules.Purchases.Services
                 })
                 : 0m;
 
-            order.GrandTotal = afterDiscount + order.TaxAmount + order.FiscalStamp;
+            // Floor non-negative: a header discount larger than SubTotal would otherwise
+            // produce a negative GrandTotal, which is meaningless for a PO and breaks the
+            // PaymentStatus sync (totalDue<=0 → "paid" forever even though no payment exists).
+            order.GrandTotal = Math.Max(0, afterDiscount + order.TaxAmount + order.FiscalStamp);
         }
 
         private void LogActivity(string entityType, int entityId, string activityType, string desc, string userId, string? userName = null, string? oldVal = null, string? newVal = null)

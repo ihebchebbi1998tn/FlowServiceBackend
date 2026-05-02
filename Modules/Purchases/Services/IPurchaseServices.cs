@@ -29,6 +29,7 @@ namespace MyApi.Modules.Purchases.Services
             int page = 1, int limit = 20, string sortBy = "created_date", string sortOrder = "desc");
         Task<GoodsReceiptDto?> GetReceiptByIdAsync(int id);
         Task<GoodsReceiptDto> CreateReceiptAsync(CreateGoodsReceiptDto dto, string userId, string? userName = null);
+        Task<GoodsReceiptDto> UpdateReceiptAsync(int id, UpdateGoodsReceiptDto dto, string userId, string? userName = null);
         Task<bool> DeleteReceiptAsync(int id, string userId, string? userName = null);
     }
 

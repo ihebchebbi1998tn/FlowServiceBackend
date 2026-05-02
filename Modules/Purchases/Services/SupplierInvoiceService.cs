@@ -177,6 +177,12 @@ namespace MyApi.Modules.Purchases.Services
                         PerformedBy = userId, PerformedByName = userName, PerformedAt = DateTime.UtcNow
                     });
                     await _context.SaveChangesAsync();
+
+                    // Keep PO.PaymentStatus derived from the sum of its non-deleted,
+                    // non-cancelled invoices (totalPaid vs totalDue).
+                    if (invoice.PurchaseOrderId.HasValue)
+                        await SyncPurchaseOrderPaymentStatusAsync(invoice.PurchaseOrderId.Value);
+
                     await tx.CommitAsync();
                 }
                 catch
@@ -228,6 +234,28 @@ namespace MyApi.Modules.Purchases.Services
                     if (dto.DiscountType != null) invoice.DiscountType = dto.DiscountType;
                     if (dto.FiscalStamp.HasValue) invoice.FiscalStamp = dto.FiscalStamp.Value;
                     if (dto.PaymentMethod != null) invoice.PaymentMethod = dto.PaymentMethod;
+
+                    // Recalc totals BEFORE validating AmountPaid / deriving payment-status.
+                    // Otherwise a single PATCH that changes Discount AND AmountPaid would:
+                    //   1. validate AmountPaid against the OLD GrandTotal
+                    //   2. derive "paid"/"partially_paid" from the OLD GrandTotal
+                    //   3. recalc totals at the end → status/overpayment guard now stale
+                    // Persist the field changes first so RecalculateInvoiceTotalsAsync sees them.
+                    var totalsAffected = dto.Discount.HasValue || dto.DiscountType != null
+                        || dto.FiscalStamp.HasValue
+                        || dto.RsApplicable.HasValue || dto.RsTypeCode != null;
+                    if (totalsAffected)
+                    {
+                        // Apply RS fields here too so recalc has the right inputs.
+                        if (dto.RsApplicable.HasValue) invoice.RsApplicable = dto.RsApplicable.Value;
+                        if (dto.RsTypeCode != null) invoice.RsTypeCode = dto.RsTypeCode;
+                        await _context.SaveChangesAsync();
+                        await RecalculateInvoiceTotalsAsync(id);
+                        // Refresh in-memory aggregate from the DB so the AmountPaid block below
+                        // and the status-derivation see the fresh GrandTotal.
+                        await _context.Entry(invoice).ReloadAsync();
+                    }
+
                     if (dto.AmountPaid.HasValue)
                     {
                         if (dto.AmountPaid.Value < 0)
@@ -260,8 +288,15 @@ namespace MyApi.Modules.Purchases.Services
                     }
                     if (dto.PaymentDate.HasValue) invoice.PaymentDate = dto.PaymentDate;
                     if (dto.Notes != null) invoice.Notes = dto.Notes;
-                    if (dto.RsApplicable.HasValue) invoice.RsApplicable = dto.RsApplicable.Value;
-                    if (dto.RsTypeCode != null) invoice.RsTypeCode = dto.RsTypeCode;
+                    // RsApplicable/RsTypeCode already applied above when totalsAffected;
+                    // apply here for the case where they weren't passed alongside other
+                    // total-affecting fields (defensive — same branch wouldn't fire twice
+                    // because totalsAffected is true iff one of these is set).
+                    if (!totalsAffected)
+                    {
+                        if (dto.RsApplicable.HasValue) invoice.RsApplicable = dto.RsApplicable.Value;
+                        if (dto.RsTypeCode != null) invoice.RsTypeCode = dto.RsTypeCode;
+                    }
                     if (dto.TejSynced.HasValue) invoice.TejSynced = dto.TejSynced.Value;
                     if (dto.TejSyncDate.HasValue) invoice.TejSyncDate = dto.TejSyncDate;
                     if (dto.TejSyncStatus != null) invoice.TejSyncStatus = dto.TejSyncStatus;
@@ -284,11 +319,16 @@ namespace MyApi.Modules.Purchases.Services
                     }
                     await _context.SaveChangesAsync();
 
-                    // Recalc inside the same transaction/lock so totals + status remain consistent.
-                    if (dto.Discount.HasValue || dto.DiscountType != null || dto.FiscalStamp.HasValue
-                        || dto.RsApplicable.HasValue || dto.RsTypeCode != null)
+                    // Re-derive PO.PaymentStatus whenever AmountPaid, Status, or
+                    // GrandTotal-driving fields change. Skipping this would let the PO
+                    // claim "pending" while invoices for it are fully paid.
+                    if (invoice.PurchaseOrderId.HasValue &&
+                        (dto.AmountPaid.HasValue || dto.Status != null
+                         || dto.Discount.HasValue || dto.DiscountType != null
+                         || dto.FiscalStamp.HasValue
+                         || dto.RsApplicable.HasValue || dto.RsTypeCode != null))
                     {
-                        await RecalculateInvoiceTotalsAsync(id);
+                        await SyncPurchaseOrderPaymentStatusAsync(invoice.PurchaseOrderId.Value);
                     }
 
                     await tx.CommitAsync();
@@ -305,17 +345,81 @@ namespace MyApi.Modules.Purchases.Services
 
         public async Task<bool> DeleteInvoiceAsync(int id, string userId, string? userName = null)
         {
-            var invoice = await _context.SupplierInvoices.FirstOrDefaultAsync(i => i.Id == id && !i.IsDeleted);
+            var invoice = await _context.SupplierInvoices.AsNoTracking()
+                .FirstOrDefaultAsync(i => i.Id == id && !i.IsDeleted);
             if (invoice == null) return false;
-            invoice.IsDeleted = true; invoice.DeletedAt = DateTime.UtcNow; invoice.DeletedBy = userId;
-            _context.PurchaseActivities.Add(new PurchaseActivity
+
+            // Wrap soft-delete + activity-log + PO sync in a single transaction so a
+            // failure in the cascading PO.PaymentStatus sync rolls back the soft-delete.
+            // Without this, the invoice could disappear from the ledger while the PO
+            // still claims "paid" against the now-missing invoice.
+            // EnableRetryOnFailure on Npgsql requires the execution-strategy wrapper.
+            var strategy = _context.Database.CreateExecutionStrategy();
+            await strategy.ExecuteAsync(async () =>
             {
-                EntityType = "supplier_invoice", EntityId = id, ActivityType = "deleted",
-                Description = $"Supplier invoice {invoice.InvoiceNumber} deleted",
-                PerformedBy = userId, PerformedByName = userName, PerformedAt = DateTime.UtcNow
+                using var tx = await _context.Database.BeginTransactionAsync();
+                try
+                {
+                    var tracked = await _context.SupplierInvoices
+                        .FirstOrDefaultAsync(i => i.Id == id && !i.IsDeleted);
+                    if (tracked == null) return; // raced with another delete
+
+                    tracked.IsDeleted = true;
+                    tracked.DeletedAt = DateTime.UtcNow;
+                    tracked.DeletedBy = userId;
+                    _context.PurchaseActivities.Add(new PurchaseActivity
+                    {
+                        EntityType = "supplier_invoice", EntityId = id, ActivityType = "deleted",
+                        Description = $"Supplier invoice {tracked.InvoiceNumber} deleted",
+                        PerformedBy = userId, PerformedByName = userName, PerformedAt = DateTime.UtcNow
+                    });
+                    await _context.SaveChangesAsync();
+
+                    if (tracked.PurchaseOrderId.HasValue)
+                        await SyncPurchaseOrderPaymentStatusAsync(tracked.PurchaseOrderId.Value);
+
+                    await tx.CommitAsync();
+                }
+                catch
+                {
+                    await tx.RollbackAsync();
+                    throw;
+                }
             });
-            await _context.SaveChangesAsync();
+
             return true;
+        }
+
+        // Recompute PurchaseOrder.PaymentStatus from all live, non-cancelled supplier
+        // invoices linked to the PO. Single source of truth: the cumulative invoice
+        // ledger drives the PO's payment state, not manual updates.
+        //   paid     → totalDue > 0 AND totalPaid >= totalDue
+        //   partial  → totalPaid > 0 (but not enough to settle)
+        //   pending  → no paid amount recorded (or no live invoices)
+        private async Task SyncPurchaseOrderPaymentStatusAsync(int purchaseOrderId)
+        {
+            var po = await _context.PurchaseOrders.FirstOrDefaultAsync(p => p.Id == purchaseOrderId && !p.IsDeleted);
+            if (po == null) return;
+
+            var liveInvoices = await _context.SupplierInvoices.AsNoTracking()
+                .Where(i => i.PurchaseOrderId == purchaseOrderId && !i.IsDeleted && i.Status != "cancelled")
+                .Select(i => new { i.GrandTotal, i.AmountPaid })
+                .ToListAsync();
+
+            var totalDue = liveInvoices.Sum(i => i.GrandTotal);
+            var totalPaid = liveInvoices.Sum(i => i.AmountPaid);
+
+            string newStatus;
+            if (totalDue > 0 && totalPaid >= totalDue) newStatus = "paid";
+            else if (totalPaid > 0) newStatus = "partial";
+            else newStatus = "pending";
+
+            if (po.PaymentStatus != newStatus)
+            {
+                po.PaymentStatus = newStatus;
+                po.ModifiedDate = DateTime.UtcNow;
+                await _context.SaveChangesAsync();
+            }
         }
 
         // ── Items ──
@@ -431,7 +535,11 @@ namespace MyApi.Modules.Purchases.Services
                 };
                 invoice.RsAmount = afterDiscount * rsRate / 100;
             }
-            invoice.GrandTotal = afterDiscount + invoice.TaxAmount + invoice.FiscalStamp - invoice.RsAmount;
+            // Floor non-negative: a header discount larger than SubTotal (or an RS that
+            // exceeds the discounted base) would otherwise produce a negative GrandTotal,
+            // breaking the AmountPaid > GrandTotal overpayment guard and the
+            // PO.PaymentStatus sync (totalDue<=0 → "paid" without any cash recorded).
+            invoice.GrandTotal = Math.Max(0, afterDiscount + invoice.TaxAmount + invoice.FiscalStamp - invoice.RsAmount);
             await _context.SaveChangesAsync();
         }
 

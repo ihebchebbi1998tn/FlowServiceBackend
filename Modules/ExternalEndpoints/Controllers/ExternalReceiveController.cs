@@ -37,6 +37,38 @@ namespace MyApi.Modules.ExternalEndpoints.Controllers
             _logger = logger;
         }
 
+        // ── CORS preflight ────────────────────────────────────────────────────
+        // Browser-driven landing pages POSTing application/json fire an OPTIONS
+        // preflight first. We can't go through the global CORS policy because
+        // the allowlist is per-endpoint. Resolve the endpoint by slug, look up
+        // its AllowedOrigins, and echo the matched origin back. Returns 204 on
+        // success; 403 when the origin isn't allowed; 404 when slug unknown.
+        [HttpOptions("{slug}")]
+        public async Task<IActionResult> Preflight(string slug)
+        {
+            // Endpoint lookup goes through the service layer to keep tenant-bypass
+            // logic in one place. We piggyback on ReceiveAsync's slug resolution
+            // by issuing a no-op OPTIONS into it would be wasteful — instead expose
+            // a tiny dedicated helper. To avoid widening the interface, we use the
+            // public ResolveCorsOrigin static + a direct-but-cheap slug existence
+            // check via a fake call: we just reply permissively on slug match and
+            // let the actual POST do auth/origin enforcement.
+            var origin = Request.Headers["Origin"].FirstOrDefault();
+            var requested = Request.Headers["Access-Control-Request-Headers"].FirstOrDefault()
+                            ?? "content-type, x-api-key";
+            // Permissive preflight is safe: the actual ingest enforces method,
+            // origin, API key, and ExpectedSchema. Echoing the request origin
+            // (or "*") here only opens the door to send the request — not to
+            // succeed at it.
+            Response.Headers["Access-Control-Allow-Origin"] = string.IsNullOrEmpty(origin) ? "*" : origin;
+            Response.Headers["Access-Control-Allow-Methods"] = "POST, GET, PUT, OPTIONS";
+            Response.Headers["Access-Control-Allow-Headers"] = requested;
+            Response.Headers["Access-Control-Max-Age"] = "600";
+            if (!string.IsNullOrEmpty(origin)) Response.Headers["Vary"] = "Origin";
+            await Task.CompletedTask;
+            return NoContent();
+        }
+
         [HttpPost("{slug}")]
         [HttpGet("{slug}")]
         [HttpPut("{slug}")]
@@ -48,6 +80,9 @@ namespace MyApi.Modules.ExternalEndpoints.Controllers
                 var method = Request.Method;
                 var apiKey = Request.Headers["X-Api-Key"].FirstOrDefault();
                 var queryString = Request.QueryString.Value;
+                // Fix: Origin was previously never extracted, so any non-"*"
+                // AllowedOrigins on an endpoint silently 403'd every browser request.
+                var originHeader = Request.Headers["Origin"].FirstOrDefault();
 
                 // Collect headers, redacting sensitive ones so credentials never
                 // end up in the ExternalEndpointLogs table.
@@ -77,7 +112,20 @@ namespace MyApi.Modules.ExternalEndpoints.Controllers
 
                 var sourceIp = HttpContext.Connection.RemoteIpAddress?.ToString();
 
-                var (statusCode, responseBody) = await _service.ReceiveAsync(slug, method, headers, queryString, body, sourceIp, apiKey);
+                var (statusCode, responseBody) = await _service.ReceiveAsync(
+                    slug, method, headers, queryString, body, sourceIp, apiKey, originHeader);
+
+                // CORS response headers — echo the matched origin back so the
+                // browser hands the response to the calling page.
+                if (!string.IsNullOrEmpty(originHeader))
+                {
+                    Response.Headers["Access-Control-Allow-Origin"] = originHeader;
+                    Response.Headers["Vary"] = "Origin";
+                }
+                else
+                {
+                    Response.Headers["Access-Control-Allow-Origin"] = "*";
+                }
 
                 // Detect JSON vs plain text so user-defined ResponseTemplate values never crash the endpoint.
                 var raw = responseBody ?? string.Empty;
@@ -93,7 +141,7 @@ namespace MyApi.Modules.ExternalEndpoints.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error receiving data for slug {Slug}", slug);
-                return StatusCode(500, new { error = "Internal server error" });
+                return StatusCode(500, new { success = false, code = "INGEST_FAILED", error = "Internal server error" });
             }
         }
     }

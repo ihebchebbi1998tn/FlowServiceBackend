@@ -217,6 +217,230 @@ namespace MyApi.Modules.Purchases.Services
             return (await GetReceiptByIdAsync(receiptId))!;
         }
 
+        // Editable receipts. Each item line is reconciled by DELTA against the
+        // PO's ReceivedQty and the article stock so the cumulative invariant
+        //   Σ receipt.QuantityReceived (live) == poItem.ReceivedQty
+        // is preserved across create / update / delete. The whole flow runs under
+        // Serializable isolation + the EF execution strategy, mirroring create,
+        // because two concurrent edits on the same receipt would otherwise both
+        // base their delta on a stale snapshot and double-apply stock movements.
+        public async Task<GoodsReceiptDto> UpdateReceiptAsync(int id, UpdateGoodsReceiptDto dto, string userId, string? userName = null)
+        {
+            // Linked-invoice check is also re-asserted INSIDE the transaction below
+            // (TOCTOU): an invoice could be created against this receipt between the
+            // pre-check and the lock acquisition. We keep the cheap pre-check to fail
+            // fast on the common case without paying for a serializable transaction.
+            var linkedInvoiceExists = await _context.SupplierInvoices
+                .AnyAsync(i => i.GoodsReceiptId == id && !i.IsDeleted);
+            if (linkedInvoiceExists)
+                throw new InvalidOperationException($"Cannot edit goods receipt: it is referenced by one or more supplier invoices");
+
+            var strategy = _context.Database.CreateExecutionStrategy();
+            await strategy.ExecuteAsync(async () =>
+            {
+                using var tx = await _context.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+                try
+                {
+                    var receipt = await _context.GoodsReceipts.Include(r => r.Items)
+                        .FirstOrDefaultAsync(r => r.Id == id && !r.IsDeleted)
+                        ?? throw new KeyNotFoundException($"GoodsReceipt {id} not found");
+
+                    // Re-assert linked-invoice block under serializable isolation so a
+                    // concurrent invoice creation can't slip in between the pre-check
+                    // and our stock/qty mutations.
+                    var linkedInvoiceUnderLock = await _context.SupplierInvoices
+                        .AnyAsync(i => i.GoodsReceiptId == id && !i.IsDeleted);
+                    if (linkedInvoiceUnderLock)
+                        throw new InvalidOperationException($"Cannot edit goods receipt: it is referenced by one or more supplier invoices");
+
+                    var po = await _context.PurchaseOrders.Include(p => p.Items)
+                        .FirstOrDefaultAsync(p => p.Id == receipt.PurchaseOrderId && !p.IsDeleted)
+                        ?? throw new KeyNotFoundException($"PurchaseOrder {receipt.PurchaseOrderId} not found");
+
+                    // Header fields (no PO/Supplier mutation — those are receipt identity).
+                    if (dto.ReceiptDate.HasValue) receipt.ReceiptDate = dto.ReceiptDate.Value;
+                    if (dto.DeliveryNoteRef != null) receipt.DeliveryNoteRef = dto.DeliveryNoteRef;
+                    if (dto.Notes != null) receipt.Notes = dto.Notes;
+
+                    // ── Item reconciliation ──
+                    // Net stock delta per article: positive = add to stock, negative = remove.
+                    var stockDeltas = new Dictionary<int, decimal>();
+                    void AddDelta(int articleId, decimal qty)
+                    {
+                        if (qty == 0) return;
+                        stockDeltas[articleId] = stockDeltas.GetValueOrDefault(articleId) + qty;
+                    }
+
+                    if (dto.Items != null)
+                    {
+                        var existingById = receipt.Items?.ToDictionary(i => i.Id) ?? new Dictionary<int, GoodsReceiptItem>();
+                        var keptIds = new HashSet<int>();
+
+                        foreach (var line in dto.Items)
+                        {
+                            if (line.QuantityReceived < 0)
+                                throw new InvalidOperationException("QuantityReceived cannot be negative");
+
+                            var poItem = po.Items?.FirstOrDefault(i => i.Id == line.PurchaseOrderItemId)
+                                ?? throw new InvalidOperationException($"PurchaseOrderItem {line.PurchaseOrderItemId} does not belong to PO {po.Id}");
+
+                            if (line.Id.HasValue && line.Id.Value > 0 && existingById.TryGetValue(line.Id.Value, out var existing))
+                            {
+                                // UPDATE existing line — apply delta to PO.ReceivedQty + stock.
+                                if (existing.PurchaseOrderItemId != line.PurchaseOrderItemId)
+                                    throw new InvalidOperationException($"Cannot change PurchaseOrderItemId on existing receipt item {existing.Id}");
+
+                                var oldQty = existing.QuantityReceived;
+                                var newQty = line.QuantityReceived;
+                                var delta = newQty - oldQty;
+
+                                // Over-receipt guard against the PO line: remaining capacity
+                                // is poItem.Quantity - (poItem.ReceivedQty - oldQty + newQty)
+                                // ⇒ remainingAfter = poItem.Quantity - poItem.ReceivedQty - delta
+                                if (poItem.Quantity - poItem.ReceivedQty - delta < 0)
+                                    throw new InvalidOperationException(
+                                        $"Over-receipt for PO item {poItem.Id}: new qty {newQty} would exceed remaining capacity");
+
+                                poItem.ReceivedQty += delta;
+                                existing.QuantityReceived = newQty;
+                                existing.QuantityRejected = line.QuantityRejected;
+                                existing.RejectionReason = line.RejectionReason;
+                                existing.LocationId = line.LocationId;
+                                existing.Notes = line.Notes;
+                                keptIds.Add(existing.Id);
+
+                                if (poItem.ArticleId.HasValue && delta != 0)
+                                    AddDelta(poItem.ArticleId.Value, delta);
+                            }
+                            else
+                            {
+                                // NEW line — full over-receipt check, full stock add.
+                                var remaining = poItem.Quantity - poItem.ReceivedQty;
+                                if (line.QuantityReceived > remaining)
+                                    throw new InvalidOperationException(
+                                        $"Over-receipt for PO item {poItem.Id}: requested {line.QuantityReceived}, remaining {remaining}");
+
+                                var grItem = new GoodsReceiptItem
+                                {
+                                    GoodsReceiptId = receipt.Id,
+                                    PurchaseOrderItemId = line.PurchaseOrderItemId,
+                                    ArticleId = poItem.ArticleId,
+                                    ArticleName = poItem.ArticleName,
+                                    ArticleNumber = poItem.ArticleNumber,
+                                    OrderedQty = poItem.Quantity,
+                                    QuantityReceived = line.QuantityReceived,
+                                    QuantityRejected = line.QuantityRejected,
+                                    RejectionReason = line.RejectionReason,
+                                    LocationId = line.LocationId,
+                                    Notes = line.Notes
+                                };
+                                _context.GoodsReceiptItems.Add(grItem);
+                                poItem.ReceivedQty += line.QuantityReceived;
+
+                                if (poItem.ArticleId.HasValue && line.QuantityReceived > 0)
+                                    AddDelta(poItem.ArticleId.Value, line.QuantityReceived);
+                            }
+                        }
+
+                        // REMOVED items: anything in the original receipt not present in the
+                        // payload is treated as deleted — reverse PO.ReceivedQty and stock.
+                        if (receipt.Items != null)
+                        {
+                            var toRemove = receipt.Items.Where(i => !keptIds.Contains(i.Id)).ToList();
+                            foreach (var rm in toRemove)
+                            {
+                                var poItem = po.Items?.FirstOrDefault(i => i.Id == rm.PurchaseOrderItemId);
+                                if (poItem != null)
+                                    poItem.ReceivedQty = Math.Max(0, poItem.ReceivedQty - rm.QuantityReceived);
+                                if (rm.ArticleId.HasValue && rm.QuantityReceived > 0)
+                                    AddDelta(rm.ArticleId.Value, -rm.QuantityReceived);
+                                _context.GoodsReceiptItems.Remove(rm);
+                            }
+                        }
+                    }
+
+                    // Re-derive PO + sibling receipt statuses from the fresh ReceivedQty totals.
+                    var allFullyReceived = po.Items?.All(i => i.ReceivedQty >= i.Quantity) ?? false;
+                    var anyReceived = po.Items?.Any(i => i.ReceivedQty > 0) ?? false;
+                    if (allFullyReceived)
+                    {
+                        po.Status = "received";
+                        po.ActualDelivery ??= DateTime.UtcNow;
+                        receipt.Status = "complete";
+
+                        var siblings = await _context.GoodsReceipts
+                            .Where(r => r.PurchaseOrderId == po.Id && r.Id != receipt.Id
+                                        && !r.IsDeleted && r.Status != "complete")
+                            .ToListAsync();
+                        foreach (var s in siblings)
+                        {
+                            s.Status = "complete";
+                            s.ModifiedDate = DateTime.UtcNow;
+                            s.ModifiedBy = userId;
+                        }
+                    }
+                    else
+                    {
+                        po.Status = anyReceived ? "partially_received" : "ordered";
+                        if (!anyReceived) po.ActualDelivery = null;
+                        // Demote sibling receipts that were promoted to "complete" while the
+                        // PO was fully received but no longer is, keeping receipt status
+                        // consistent with the cumulative-receipt rule.
+                        var siblings = await _context.GoodsReceipts
+                            .Where(r => r.PurchaseOrderId == po.Id && r.Id != receipt.Id
+                                        && !r.IsDeleted && r.Status == "complete")
+                            .ToListAsync();
+                        foreach (var s in siblings)
+                        {
+                            s.Status = "partial";
+                            s.ModifiedDate = DateTime.UtcNow;
+                            s.ModifiedBy = userId;
+                        }
+                        if (receipt.Status == "complete") receipt.Status = "partial";
+                    }
+
+                    receipt.ModifiedDate = DateTime.UtcNow;
+                    receipt.ModifiedBy = userId;
+
+                    _context.PurchaseActivities.Add(new PurchaseActivity
+                    {
+                        EntityType = "goods_receipt", EntityId = receipt.Id, ActivityType = "updated",
+                        Description = $"Goods receipt {receipt.ReceiptNumber} updated (items reconciled)",
+                        PerformedBy = userId, PerformedByName = userName, PerformedAt = DateTime.UtcNow
+                    });
+
+                    await _context.SaveChangesAsync();
+
+                    // Apply net stock movements last so a failure rolls back receipt + PO.
+                    if (_stockService != null)
+                    {
+                        foreach (var (articleId, delta) in stockDeltas)
+                        {
+                            if (delta > 0)
+                                await _stockService.AddStockAsync(articleId, delta,
+                                    reason: "goods_receipt_update",
+                                    userId: userId,
+                                    notes: $"Receipt {receipt.ReceiptNumber} edited (+{delta})");
+                            else if (delta < 0)
+                                await _stockService.RemoveStockAsync(articleId, -delta,
+                                    reason: "goods_receipt_update",
+                                    userId: userId,
+                                    notes: $"Receipt {receipt.ReceiptNumber} edited ({delta})");
+                        }
+                    }
+
+                    await tx.CommitAsync();
+                }
+                catch
+                {
+                    await tx.RollbackAsync();
+                    throw;
+                }
+            });
+
+            return (await GetReceiptByIdAsync(id))!;
+        }
+
         public async Task<bool> DeleteReceiptAsync(int id, string userId, string? userName = null)
         {
             var receipt = await _context.GoodsReceipts.Include(r => r.Items).FirstOrDefaultAsync(r => r.Id == id && !r.IsDeleted);
@@ -233,12 +457,20 @@ namespace MyApi.Modules.Purchases.Services
 
             // Wrap the user-initiated transaction in the configured execution strategy
             // — required because EnableRetryOnFailure is on for the Npgsql provider.
+            // Serializable isolation + a re-check of the linked-invoice block inside
+            // the tx prevents a TOCTOU where an invoice gets created against this
+            // receipt between the pre-check and the stock reversal below.
             var strategy = _context.Database.CreateExecutionStrategy();
             await strategy.ExecuteAsync(async () =>
             {
-                using var tx = await _context.Database.BeginTransactionAsync();
+                using var tx = await _context.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
                 try
                 {
+                    var linkedInvoiceUnderLock = await _context.SupplierInvoices
+                        .AnyAsync(i => i.GoodsReceiptId == id && !i.IsDeleted);
+                    if (linkedInvoiceUnderLock)
+                        throw new InvalidOperationException($"Cannot delete goods receipt {receipt.ReceiptNumber}: it is referenced by one or more supplier invoices");
+
                     var po = await _context.PurchaseOrders.Include(p => p.Items)
                         .FirstOrDefaultAsync(p => p.Id == receipt.PurchaseOrderId && !p.IsDeleted);
 

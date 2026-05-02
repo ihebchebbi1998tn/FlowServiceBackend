@@ -294,43 +294,9 @@ namespace MyApi.Modules.ExternalEndpoints.Controllers
             }
         }
 
-        [HttpPost("{id:int}/test")]
-        public async Task<IActionResult> TestEndpoint(int id, [FromBody] object testBody)
-        {
-            try
-            {
-                // GetEndpointByIdAsync returns the API key MASKED for security.
-                // For the in-app Test button we need the plain key so ReceiveAsync's
-                // auth check passes — fetch it via the dedicated reveal path.
-                var endpoint = await _service.GetEndpointByIdAsync(id);
-                if (endpoint == null) return NotFound(new { success = false, error = new { code = "NOT_FOUND", message = "Endpoint not found" } });
-
-                string plainApiKey;
-                try
-                {
-                    plainApiKey = await _service.RevealKeyAsync(id);
-                }
-                catch (InvalidOperationException ex)
-                {
-                    // RevealKeyAsync throws when the stored key is hashed (the normal,
-                    // post-migration state). The Test button can't replay a hashed key,
-                    // so surface a clear 409 instead of a generic 500.
-                    return Conflict(new { success = false, error = new { code = "KEY_HASHED", message = ex.Message } });
-                }
-
-                var (statusCode, responseBody) = await _service.ReceiveAsync(
-                    endpoint.Slug, "POST", null, null,
-                    System.Text.Json.JsonSerializer.Serialize(testBody),
-                    "127.0.0.1", plainApiKey
-                );
-
-                return Ok(new { success = true, data = new { statusCode, responseBody } });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error testing endpoint {Id}", id);
-                return StatusCode(500, new { success = false, error = new { code = "INTERNAL_ERROR", message = "Failed to test endpoint" } });
-            }
-        }
+        // NOTE: The legacy POST {id}/test action was removed. Stored API keys
+        // are SHA-256 hashed at rest, so the server cannot replay a key it
+        // never sees in plaintext. The frontend TestEndpointModal now POSTs
+        // directly to the public URL using the cached/pasted plain key.
     }
 }
