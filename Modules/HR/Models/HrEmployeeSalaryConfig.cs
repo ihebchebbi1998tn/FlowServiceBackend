@@ -71,11 +71,11 @@ namespace MyApi.Modules.HR.Models
         [MaxLength(20)]
         public string? MaritalStatus { get; set; }
 
-        [Column("address_line_1")]
+        [Column("address_line1")]
         [MaxLength(200)]
         public string? AddressLine1 { get; set; }
 
-        [Column("address_line_2")]
+        [Column("address_line2")]
         [MaxLength(200)]
         public string? AddressLine2 { get; set; }
 
